@@ -1,0 +1,124 @@
+
+/* Visible Scenario Flowchart uses readable HTML cards, not a shrunken Mermaid SVG. */
+.ci-flow-window {
+    width: 100%;
+    max-width: 100%;
+    max-height: 600px;
+    overflow: auto;
+    box-sizing: border-box;
+    padding: 18px;
+    border: 1px solid #dbe3ef;
+    border-radius: 12px;
+    background: #fff;
+}
+
+.ci-readable-flow,
+.ci-flow-root,
+.ci-flow-tree-node {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    min-width: 0;
+}
+
+.ci-readable-flow {
+    width: 100%;
+    gap: 18px;
+}
+
+.ci-flow-card {
+    width: 235px;
+    max-width: 235px;
+    min-height: 66px;
+    padding: 10px 12px;
+    box-sizing: border-box;
+    border: 1px solid #cbd5e1;
+    border-radius: 9px;
+    background: white;
+    text-align: center;
+}
+
+.ci-flow-card span {
+    display: block;
+    margin-bottom: 4px;
+    color: #64748b;
+    font-size: 10px;
+    font-weight: 800;
+    text-transform: uppercase;
+}
+
+.ci-flow-card strong {
+    display: block;
+    font-family: Consolas, Monaco, monospace;
+    font-size: 12px;
+    line-height: 1.35;
+    overflow-wrap: anywhere;
+}
+
+.ci-flow-controller { background: #f0fdf4; border-color: #86efac; }
+.ci-flow-service { background: #eff6ff; border-color: #93c5fd; }
+.ci-flow-mapper { background: #faf5ff; border-color: #c4b5fd; }
+.ci-flow-repository { background: #fff7ed; border-color: #fdba74; }
+
+.ci-flow-arrow {
+    height: 28px;
+    display: grid;
+    place-items: center;
+    color: #64748b;
+    font-size: 21px;
+    font-weight: 800;
+}
+
+.ci-flow-children {
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 14px;
+}
+
+.ci-flow-children.ci-flow-branches {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(255px, 1fr));
+    align-items: start;
+    gap: 18px;
+}
+
+.ci-flow-branch {
+    display: flex;
+    justify-content: center;
+    min-width: 0;
+}
+
+.ci-flow-window-large {
+    max-height: calc(100vh - 180px);
+    min-height: 520px;
+}
+
+.ci-readable-flow-large {
+    min-width: 900px;
+    padding: 12px 24px 32px;
+}
+
+.ci-readable-flow-large .ci-flow-card {
+    width: 290px;
+    max-width: 290px;
+    min-height: 82px;
+    padding: 14px 16px;
+}
+
+.ci-readable-flow-large .ci-flow-card strong {
+    font-size: 14px;
+}
+
+/* Ensure old Mermaid preview cannot visually take over this section. */
+#flowchartResult .flowchart-preview,
+#flowchartResult .mermaid {
+    display: none !important;
+}
+
+@media (max-width: 850px) {
+    .ci-flow-children.ci-flow-branches {
+        grid-template-columns: 1fr;
+    }
+}

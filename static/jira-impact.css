@@ -1,0 +1,28 @@
+.jira-impact-form { display: grid; gap: 12px; }
+.jira-impact-id { max-width: 320px; }
+.jira-impact-textarea { width: 100%; min-height: 120px; resize: vertical; box-sizing: border-box; }
+.jira-impact-actions { display: flex; justify-content: flex-end; }
+.jira-impact-summary { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; margin-bottom: 14px; }
+.jira-impact-kicker { font-weight: 700; font-size: 1rem; }
+.jira-impact-project { opacity: .72; font-size: .82rem; word-break: break-all; margin-top: 4px; }
+.jira-confidence { border: 1px solid currentColor; border-radius: 999px; padding: 5px 10px; font-size: .78rem; font-weight: 700; white-space: nowrap; }
+.jira-impact-block { border: 1px solid rgba(127,127,127,.22); border-radius: 10px; padding: 14px; min-width: 0; }
+.jira-impact-block h3 { margin: 0 0 10px; font-size: .95rem; }
+.jira-impact-grid { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 12px; margin-top: 12px; }
+.jira-impact-item { padding: 9px 0; border-bottom: 1px solid rgba(127,127,127,.16); }
+.jira-impact-item:last-child { border-bottom: 0; }
+.jira-impact-item-title { font-weight: 650; overflow-wrap: anywhere; }
+.jira-impact-item-meta { font-size: .78rem; opacity: .72; margin-top: 2px; }
+.jira-impact-reason { font-size: .8rem; opacity: .9; margin-top: 4px; }
+.jira-chip-row { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 7px; }
+.jira-chip { border: 1px solid rgba(127,127,127,.35); border-radius: 999px; padding: 4px 8px; font-size: .77rem; }
+.jira-chip-muted { opacity: .75; }
+.jira-impact-note,.jira-impact-empty { font-size: .82rem; opacity: .68; }
+.jira-path-row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; padding: 8px 0; border-bottom: 1px solid rgba(127,127,127,.16); }
+.jira-path-row:last-child { border-bottom: 0; }
+.jira-path-node { border: 1px solid rgba(127,127,127,.28); border-radius: 7px; padding: 5px 7px; font-size: .78rem; overflow-wrap: anywhere; }
+.jira-path-arrow { opacity: .55; }
+.jira-method { font-size: .72rem; border: 1px solid rgba(127,127,127,.3); border-radius: 5px; padding: 2px 5px; margin-right: 4px; }
+.jira-impact-error { padding: 10px; border: 1px solid rgba(190,70,70,.45); border-radius: 8px; }
+.jira-impact-loading { opacity: .72; }
+@media (max-width: 900px) { .jira-impact-grid { grid-template-columns: 1fr; } .jira-impact-summary { flex-direction: column; } }

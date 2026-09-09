@@ -1,0 +1,22 @@
+.attribute-impact-form { display:flex; gap:10px; align-items:center; }
+.attribute-impact-form input { flex:1; min-width:220px; }
+.attribute-impact-summary { display:grid; grid-template-columns:repeat(5,minmax(0,1fr)); gap:10px; margin-bottom:18px; }
+.attribute-impact-summary > div { border:1px solid #e2e8f0; border-radius:9px; padding:10px; background:#f8fafc; }
+.attribute-impact-summary span,.attribute-impact-summary strong { display:block; }
+.attribute-impact-summary span { color:#64748b; font-size:11px; text-transform:uppercase; font-weight:700; }
+.attribute-impact-summary strong { margin-top:4px; overflow-wrap:anywhere; }
+.attribute-impact-section { margin-top:16px; }
+.attribute-impact-section h3 { margin:0 0 10px; }
+.attribute-layer-grid { display:flex; flex-wrap:wrap; gap:8px; align-items:stretch; }
+.attribute-layer-card { border:1px solid #cbd5e1; border-radius:9px; padding:10px 12px; background:#fff; min-width:150px; max-width:300px; }
+.attribute-layer-role { color:#475569; font-size:10px; text-transform:uppercase; font-weight:800; margin-bottom:5px; }
+.attribute-class-name { font-weight:700; margin:2px 0; }
+.attribute-methods { margin-top:5px; overflow-wrap:anywhere; font-family:Consolas,monospace; font-size:11px; }
+.attribute-impact-two-column { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+.attribute-impact-row { border:1px solid #e2e8f0; border-radius:9px; padding:11px; margin:8px 0; background:#fff; }
+.attribute-evidence { margin-top:5px; color:#475569; font-size:12px; }
+.dependency-path-inline { display:flex; gap:6px; align-items:center; flex-wrap:wrap; margin-top:8px; }
+.dependency-path-inline span { border:1px solid #cbd5e1; border-radius:999px; padding:4px 7px; background:#f8fafc; font-size:11px; overflow-wrap:anywhere; }
+.dependency-path-inline b { color:#64748b; }
+.attribute-local-note { margin-top:16px; }
+@media(max-width:900px){ .attribute-impact-summary{grid-template-columns:repeat(2,minmax(0,1fr));}.attribute-impact-two-column{grid-template-columns:1fr}.attribute-impact-form{align-items:stretch;flex-direction:column;} }

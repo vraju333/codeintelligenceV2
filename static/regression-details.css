@@ -1,0 +1,168 @@
+
+.regression-change-section {
+    margin: 22px 0 26px;
+    padding: 16px;
+    border: 1px solid #dbe3ef;
+    border-radius: 12px;
+    background: #fff;
+}
+
+.regression-change-heading,
+.regression-file-header,
+.source-change-title {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+}
+
+.regression-change-heading h3 {
+    margin: 0 0 4px;
+}
+
+.regression-change-heading p {
+    margin: 0;
+}
+
+.regression-file-list {
+    display: grid;
+    gap: 14px;
+    margin-top: 14px;
+}
+
+.regression-file-card {
+    border: 1px solid #e2e8f0;
+    border-radius: 10px;
+    padding: 14px;
+    background: #f8fafc;
+}
+
+.regression-file-header {
+    margin-bottom: 10px;
+}
+
+.regression-file-header > div {
+    min-width: 0;
+}
+
+.regression-file-header strong,
+.regression-file-header span {
+    display: block;
+}
+
+.regression-file-header .muted-text {
+    margin-top: 3px;
+    overflow-wrap: anywhere;
+}
+
+.source-change-row {
+    display: grid;
+    grid-template-columns: 32px minmax(0, 1fr);
+    gap: 10px;
+    padding: 10px;
+    margin: 8px 0;
+    border-radius: 8px;
+    border: 1px solid #e2e8f0;
+    background: #fff;
+}
+
+.source-change-row.added {
+    border-left: 4px solid #22c55e;
+}
+
+.source-change-row.removed {
+    border-left: 4px solid #ef4444;
+}
+
+.source-change-row.modified {
+    border-left: 4px solid #f59e0b;
+}
+
+.source-change-icon {
+    width: 28px;
+    height: 28px;
+    display: grid;
+    place-items: center;
+    border-radius: 50%;
+    background: #e2e8f0;
+    font-weight: 900;
+}
+
+.source-change-row.added .source-change-icon {
+    background: #dcfce7;
+    color: #15803d;
+}
+
+.source-change-row.removed .source-change-icon {
+    background: #fee2e2;
+    color: #b91c1c;
+}
+
+.source-change-row.modified .source-change-icon {
+    background: #fef3c7;
+    color: #b45309;
+}
+
+.source-change-title strong {
+    font-size: 13px;
+}
+
+.source-change-title span {
+    color: #64748b;
+    font-size: 11px;
+}
+
+.source-change-symbol {
+    margin: 3px 0 7px;
+    font-family: Consolas, Monaco, monospace;
+    font-weight: 700;
+    overflow-wrap: anywhere;
+}
+
+.compact-code-lines {
+    display: grid;
+    gap: 4px;
+    margin-top: 5px;
+}
+
+.diff-line {
+    display: block;
+    width: 100%;
+    padding: 5px 7px;
+    border-radius: 5px;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    box-sizing: border-box;
+    font-size: 11px;
+}
+
+.diff-add {
+    background: #f0fdf4;
+}
+
+.diff-remove {
+    background: #fef2f2;
+}
+
+.regression-source-diff pre {
+    max-height: 360px;
+    overflow: auto;
+    white-space: pre;
+}
+
+@media (max-width: 800px) {
+    .regression-change-heading,
+    .regression-file-header,
+    .source-change-title {
+        align-items: flex-start;
+        flex-direction: column;
+    }
+}
+
+.regression-impact-reason { margin-top:10px; font-size:12px; color:#475569; }
+.regression-why-block { margin-top:12px; padding-top:10px; border-top:1px solid #e2e8f0; }
+.regression-why-block > strong { display:block; margin-bottom:7px; }
+.regression-dependency-path { display:flex; flex-wrap:wrap; align-items:center; gap:5px; margin:6px 0; }
+.regression-dependency-path span { border:1px solid #cbd5e1; border-radius:999px; background:#f8fafc; padding:4px 7px; font-size:11px; overflow-wrap:anywhere; }
+.regression-dependency-path b { color:#64748b; }
+.regression-why-empty { margin-top:10px; }

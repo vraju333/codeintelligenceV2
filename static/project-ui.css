@@ -1,0 +1,22 @@
+.project-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 14px 16px;
+    margin-bottom: 20px;
+    background: #ffffff;
+    border: 1px solid #e2e8f0;
+    border-radius: 12px;
+}
+.project-toolbar-label { font-weight: 700; white-space: nowrap; }
+.project-toolbar select { min-width: 260px; }
+.project-path { color: #64748b; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+.scenario-pager { display: flex; justify-content: space-between; align-items: center; margin-top: 12px; gap: 12px; }
+.scenario-page-actions { display: flex; gap: 8px; }
+.scenario-page-info { color: #64748b; font-size: 13px; }
+.empty-project-state { padding: 20px; text-align: center; color: #64748b; }
+@media (max-width: 800px) {
+    .project-toolbar { flex-wrap: wrap; }
+    .project-toolbar select { width: 100%; min-width: 0; }
+    .project-path { width: 100%; flex-basis: 100%; }
+}

@@ -1,0 +1,431 @@
+<!DOCTYPE html>
+
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>CodeIntelligence</title>
+<link href="/static/style.css?v=8" rel="stylesheet"/>
+<script type="module">
+        import mermaid
+            from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+
+        mermaid.initialize({
+            startOnLoad: false
+        });
+
+        window.mermaid = mermaid;
+    </script>
+<link href="/static/project-ui.css?v=2" rel="stylesheet"/>
+<link href="/static/flowchart-ui.css?v=3" rel="stylesheet"/>
+<link href="/static/jira-impact.css?v=2" rel="stylesheet"/>
+<link href="/static/attribute-impact.css?v=1" rel="stylesheet"/>
+<link href="/static/regression-details.css?v=2" rel="stylesheet"/>
+<link href="/static/version-source-history.css?v=2" rel="stylesheet"/>
+<link href="/static/accordion-ui.css?v=2" rel="stylesheet"/></head>
+<body>
+<div class="page">
+<header class="header">
+<div>
+<h1>CodeIntelligence</h1>
+<p>
+                Java Flow, Defect and Regression Analysis
+            </p>
+</div>
+<div class="status-badge" id="healthStatus">
+            Checking...
+        </div>
+</header>
+<main class="content">
+<section class="project-toolbar">
+<span class="project-toolbar-label">Project</span>
+<select id="projectSelect"></select>
+<button id="projectSwitchButton" onclick="switchProject()" type="button">Use Project</button>
+<button onclick="addProject()" type="button">Add Project</button>
+<span class="project-path" id="activeProjectPath"></span>
+</section>
+<!-- ====================================================== -->
+<!-- JIRA IMPACT ANALYSIS -->
+<!-- ====================================================== -->
+<section class="card accordion-card" id="jiraImpactCard">
+<div aria-expanded="true" class="card-header accordion-header" data-accordion-title="JIRA Impact Analysis" role="button" tabindex="0">
+<div>
+<h2>JIRA Impact Analysis</h2>
+<p>Paste a requirement and find likely code, endpoint and scenario impact in the selected Java project.</p>
+</div>
+<button aria-label="Toggle JIRA Impact Analysis" class="accordion-toggle" tabindex="-1" type="button">⌄</button></div><div class="accordion-body">
+<div class="jira-impact-form">
+<input class="jira-impact-id" id="jiraImpactId" placeholder="JIRA ID (optional) — e.g. EMP-123" type="text"/>
+<textarea class="jira-impact-textarea" id="jiraImpactRequirement" placeholder="Requirement / Description
+Example: Add employmentType attribute to Employee. Store it while creating an employee and return it in the response."></textarea>
+<div class="jira-impact-actions">
+<button onclick="analyseJiraImpact()" type="button">Analyze Impact</button>
+</div>
+</div>
+<div class="result-area" id="jiraImpactResult">
+                Paste a requirement to analyze the active Java project.
+            </div>
+</div></section>
+<!-- ====================================================== -->
+<!-- ATTRIBUTE IMPACT ANALYSIS -->
+<!-- ====================================================== -->
+<section class="card accordion-card is-collapsed" id="attributeImpactCard">
+<div aria-expanded="false" class="card-header accordion-header" data-accordion-title="Attribute Impact Analysis" role="button" tabindex="0">
+<div>
+<h2>Attribute Impact Analysis</h2>
+<p>Trace one Java attribute across models, mappers, services, endpoints and registered scenarios.</p>
+</div>
+<button aria-label="Toggle Attribute Impact Analysis" class="accordion-toggle" tabindex="-1" type="button">›</button></div><div class="accordion-body">
+<div class="attribute-impact-form">
+<input id="attributeImpactInput" placeholder="Attribute — e.g. primaryContact, employmentType, gpa" type="text"/>
+<button onclick="analyseAttributeImpact()" type="button">Analyze Attribute</button>
+</div>
+<div class="result-area" id="attributeImpactResult">
+                Enter an attribute to see its project-wide blast radius.
+            </div>
+</div></section>
+<!-- ====================================================== -->
+<!-- SCENARIO REGISTRY -->
+<!-- ====================================================== -->
+<section class="card accordion-card is-collapsed">
+<div aria-expanded="false" class="card-header accordion-header" data-accordion-title="Scenario Registry" role="button" tabindex="0">
+<div>
+<h2>
+                        Scenario Registry
+                    </h2>
+<p>
+                        Registered application scenarios
+                    </p>
+</div>
+<div class="header-actions">
+<button type="button" onclick="openNewScenarioModal()">+ New Scenario</button>
+<button type="button" class="secondary-button" onclick="loadScenarios(1)">Refresh</button>
+</div>
+<button aria-label="Toggle Scenario Registry" class="accordion-toggle" tabindex="-1" type="button">›</button></div><div class="accordion-body">
+<div class="result-area" id="scenarioList">
+                Loading scenarios...
+            </div>
+<div class="scenario-pager" id="scenarioPager"></div>
+</div></section>
+<!-- ====================================================== -->
+<!-- ENDPOINT FLOW -->
+<!-- ====================================================== -->
+<section class="card accordion-card is-collapsed">
+<div aria-expanded="false" class="card-header accordion-header" data-accordion-title="Endpoint Flow" role="button" tabindex="0">
+<div>
+<h2>
+                        Endpoint Flow
+                    </h2>
+<p>
+                        Understand how an API travels through Java code
+                    </p>
+</div>
+<button aria-label="Toggle Endpoint Flow" class="accordion-toggle" tabindex="-1" type="button">›</button></div><div class="accordion-body">
+<div class="form-row">
+<select id="flowMethod">
+<option value="GET">
+                        GET
+                    </option>
+<option selected="" value="POST">
+                        POST
+                    </option>
+<option value="PUT">
+                        PUT
+                    </option>
+<option value="PATCH">
+                        PATCH
+                    </option>
+<option value="DELETE">
+                        DELETE
+                    </option>
+</select>
+<select id="flowEndpoint">
+<option value="">
+                        Loading endpoints...
+                    </option>
+</select>
+<button onclick="analyseEndpointFlow()">
+                    Analyse Flow
+                </button>
+</div>
+<div class="result-area" id="flowResult">
+                Select an endpoint and click Analyse Flow.
+            </div>
+</div></section>
+<!-- ====================================================== -->
+<!-- SCENARIO FLOWCHART -->
+<!-- ====================================================== -->
+<section class="card accordion-card is-collapsed">
+<div aria-expanded="false" class="card-header accordion-header" data-accordion-title="Scenario Flowchart" role="button" tabindex="0">
+<div>
+<h2>
+                        Scenario Flowchart
+                    </h2>
+<p>
+                        Visualize the Java execution path
+                    </p>
+</div>
+<button aria-label="Toggle Scenario Flowchart" class="accordion-toggle" tabindex="-1" type="button">›</button></div><div class="accordion-body">
+<div class="form-row">
+<select id="chartMethod">
+<option value="GET">
+                        GET
+                    </option>
+<option selected="" value="POST">
+                        POST
+                    </option>
+<option value="PUT">
+                        PUT
+                    </option>
+<option value="PATCH">
+                        PATCH
+                    </option>
+<option value="DELETE">
+                        DELETE
+                    </option>
+</select>
+<select id="chartEndpoint">
+<option value="">
+                        Loading endpoints...
+                    </option>
+</select>
+<button onclick="generateFlowchart()">
+                    Generate Flowchart
+                </button>
+</div>
+<div class="result-area" id="flowchartResult">
+                Generate a scenario flowchart.
+            </div>
+</div></section>
+<!-- ====================================================== -->
+<!-- DEFECT INVESTIGATION -->
+<!-- ====================================================== -->
+<section class="card accordion-card is-collapsed">
+<div aria-expanded="false" class="card-header accordion-header" data-accordion-title="Defect Investigation" role="button" tabindex="0">
+<div>
+<h2>
+                        Defect Investigation
+                    </h2>
+<p>
+                        Compare expected vs actual response
+                        and trace affected attributes
+                    </p>
+</div>
+<button aria-label="Toggle Defect Investigation" class="accordion-toggle" tabindex="-1" type="button">›</button></div><div class="accordion-body">
+<div class="form-row">
+<select id="investigationMethod">
+<option value="GET">
+                        GET
+                    </option>
+<option selected="" value="POST">
+                        POST
+                    </option>
+<option value="PUT">
+                        PUT
+                    </option>
+<option value="PATCH">
+                        PATCH
+                    </option>
+<option value="DELETE">
+                        DELETE
+                    </option>
+</select>
+<select id="investigationEndpoint">
+<option value="">
+                        Loading endpoints...
+                    </option>
+</select>
+</div>
+<div class="json-grid defect-json-grid">
+<div>
+<label>Input JSON</label>
+<textarea id="inputJson">{
+  "type": "EMPLOYEE",
+  "employeeCode": "EMP100",
+  "emailDetails": {
+    "primaryEmail": "raju@test.com"
+  },
+  "phoneContactDetails": {
+    "primaryContact": "9999999999"
+  }
+}</textarea>
+</div>
+<div>
+<label>Expected JSON</label>
+<textarea id="expectedJson">{
+  "employeeCode": "EMP100",
+  "emailDetails": {
+    "primaryEmail": "raju@test.com"
+  },
+  "phoneContactDetails": {
+    "primaryContact": "9999999999"
+  }
+}</textarea>
+</div>
+<div>
+<label>Actual JSON</label>
+<textarea id="actualJson">{
+  "employeeCode": "EMP100",
+  "emailDetails": {
+    "primaryEmail": null
+  },
+  "phoneContactDetails": {
+    "primaryContact": null
+  }
+}</textarea>
+</div>
+</div>
+<button onclick="runInvestigation()">
+                Investigate Defect
+            </button>
+<div class="result-area" id="investigationResult">
+                Investigation result will appear here.
+            </div>
+</div></section>
+<!-- ====================================================== -->
+<!-- REGRESSION IMPACT -->
+<!-- ====================================================== -->
+<section class="card accordion-card is-collapsed">
+<div aria-expanded="false" class="card-header accordion-header" data-accordion-title="Regression Impact" role="button" tabindex="0">
+<div>
+<h2>
+                        Regression Impact
+                    </h2>
+<p>
+                        Analyse current Git changes
+                        against scenario baselines
+                    </p>
+</div>
+<div class="header-actions">
+<button onclick="analyseRegression()">Analyse Changes</button>
+<button class="secondary-button" onclick="downloadScenarioExcel()">Export Excel</button>
+</div>
+<button aria-label="Toggle Regression Impact" class="accordion-toggle" tabindex="-1" type="button">›</button></div><div class="accordion-body">
+<div class="result-area" id="regressionResult">
+                No regression analysis run yet.
+            </div>
+</div></section>
+<!-- ====================================================== -->
+<!-- BASELINE OVERVIEW / HISTORY -->
+<!-- ====================================================== -->
+<section class="card accordion-card is-collapsed">
+<div aria-expanded="false" class="card-header accordion-header" data-accordion-title="Scenario Baselines" role="button" tabindex="0">
+<div>
+<h2>Scenario Baselines</h2>
+<p>See every registered scenario and its active baseline. Select one only when you need version history.</p>
+</div>
+<div class="header-actions">
+<button class="secondary-button" onclick="loadBaselineOverview()">Refresh</button>
+<button onclick="captureMissingBaselines()">Capture Missing Baselines</button>
+</div>
+<button aria-label="Toggle Scenario Baselines" class="accordion-toggle" tabindex="-1" type="button">›</button></div><div class="accordion-body">
+<div class="baseline-overview" id="baselineOverview">
+                Loading scenario baselines...
+            </div>
+<div class="baseline-history-toolbar">
+<label for="baselineScenarioSelect">Version history</label>
+<div class="form-row compact-row">
+<select id="baselineScenarioSelect">
+<option value="">Select a scenario...</option>
+</select>
+<button onclick="loadBaselineHistory()">View History</button>
+</div>
+</div>
+<div class="result-area compact-result" id="baselineResult">
+                Select a scenario above to view older baseline versions.
+            </div>
+
+</div></section>
+</main>
+</div>
+<!-- ====================================================== -->
+<!-- NEW SCENARIO MODAL -->
+<!-- ====================================================== -->
+<div aria-hidden="true" class="flowchart-modal" id="newScenarioModal">
+<div class="flowchart-modal-panel scenario-modal-panel">
+<div class="flowchart-modal-header">
+<div>
+<h2>Register New Scenario</h2>
+<p>Create a scenario from an endpoint discovered in the selected Java project.</p>
+</div>
+<div class="flowchart-modal-actions">
+<button class="secondary-button" onclick="closeNewScenarioModal()" type="button">Close</button>
+</div>
+</div>
+<div class="scenario-create-form">
+<label>Scenario Code
+<input id="newScenarioCode" placeholder="e.g. EMPLOYEE_BACKUP_CONTACT_UPDATE" type="text"/>
+</label>
+<label>Scenario Name
+<input id="newScenarioName" placeholder="e.g. Employee Backup Contact Update" type="text"/>
+</label>
+<label>Description <span class="muted-text">(optional)</span>
+<textarea id="newScenarioDescription" placeholder="What business/test scenario does this represent?"></textarea>
+</label>
+<div class="scenario-create-grid">
+<label>HTTP Method
+<select id="newScenarioMethod" onchange="refreshNewScenarioEndpoints()">
+<option value="GET">GET</option><option value="POST">POST</option><option value="PUT">PUT</option><option value="PATCH" selected>PATCH</option><option value="DELETE">DELETE</option>
+</select>
+</label>
+<label>Endpoint
+<select id="newScenarioEndpoint"><option value="">Select a discovered endpoint...</option></select>
+</label>
+</div>
+<div class="scenario-create-help">After registration, this scenario will appear in <strong>Scenario Baselines</strong> as <strong>No baseline yet</strong>. Test/verify it, then capture its first V1 baseline.</div>
+<div class="scenario-create-error" id="newScenarioError"></div>
+<div class="scenario-create-actions">
+<button class="secondary-button" onclick="closeNewScenarioModal()" type="button">Cancel</button>
+<button id="registerScenarioButton" onclick="registerNewScenario()" type="button">Register Scenario</button>
+</div>
+</div>
+</div>
+</div>
+<!-- ====================================================== -->
+<!-- DEFECT ATTRIBUTE TRACE LARGE VIEW MODAL -->
+<!-- ====================================================== -->
+<div aria-hidden="true" class="flowchart-modal" id="defectTraceModal">
+<div class="flowchart-modal-panel defect-trace-modal-panel">
+<div class="flowchart-modal-header">
+<div>
+<h2>Attribute Defect Flow</h2>
+<p id="defectTraceModalTitle">Attribute trace</p>
+</div>
+<div class="flowchart-modal-actions">
+<button onclick="closeDefectTraceModal()" type="button">Close</button>
+</div>
+</div>
+<div class="defect-trace-modal-body" id="defectTraceModalBody"></div>
+</div>
+</div>
+<!-- ====================================================== -->
+<!-- FLOWCHART LARGE VIEW MODAL -->
+<!-- ====================================================== -->
+<div aria-hidden="true" class="flowchart-modal" id="flowchartModal">
+<div class="flowchart-modal-panel">
+<div class="flowchart-modal-header">
+<div>
+<h2>Scenario Flowchart</h2>
+<p id="flowchartModalTitle">Large execution-flow view</p>
+</div>
+<div class="flowchart-modal-actions">
+<button onclick="downloadCurrentFlowchartSvg()" type="button">Download SVG</button>
+<button onclick="closeFlowchartModal()" type="button">Close</button>
+</div>
+</div>
+<div class="flowchart-modal-body" id="flowchartModalBody"></div>
+<details class="flowchart-debug" id="flowchartDebugDetails">
+<summary>Developer / Debug: Mermaid source</summary>
+<pre id="flowchartMermaidSource"></pre>
+</details>
+</div>
+</div>
+<script src="/static/app.js?v=10"></script>
+<script src="/static/project-ui.js?v=3"></script>
+<script src="/static/flowchart-ui.js?v=3"></script>
+<script src="/static/jira-impact.js?v=2"></script>
+<script src="/static/attribute-impact.js?v=1"></script>
+<script src="/static/regression-details.js?v=2"></script>
+<script src="/static/version-source-history.js?v=4"></script>
+<script src="/static/accordion-ui.js?v=2"></script></body>
+</html>
