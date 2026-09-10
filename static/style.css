@@ -1123,3 +1123,283 @@ body {
     border-top: 1px solid #dbe4ef;
     box-shadow: 0 -6px 16px rgba(15, 23, 42, 0.06);
 }
+
+
+/* === Scenario Registry: JIRA + test-data modal === */
+#newScenarioModal .scenario-modal-panel {
+    width: min(780px, calc(100vw - 32px));
+    max-height: calc(100vh - 32px);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+#newScenarioModal .flowchart-modal-header { flex: 0 0 auto; }
+#newScenarioModal .scenario-create-form {
+    flex: 1 1 auto;
+    min-height: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+#newScenarioModal .scenario-create-scroll {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    padding: 22px 24px;
+    display: grid;
+    gap: 16px;
+}
+#newScenarioModal .scenario-create-actions {
+    flex: 0 0 auto;
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+    padding: 14px 24px;
+    border-top: 1px solid #dfe6ef;
+    background: #fff;
+}
+.scenario-create-section-title {
+    margin-top: 4px;
+    padding-top: 14px;
+    border-top: 1px solid #e5eaf0;
+    font-size: 16px;
+    font-weight: 800;
+}
+.scenario-json-input {
+    min-height: 112px !important;
+    font-family: Consolas, "Courier New", monospace;
+}
+
+
+/* === Scenario Registry sample test-data viewer === */
+.scenario-registry-item {
+    border-bottom: 1px solid #dfe6ef;
+}
+.scenario-registry-item:last-child {
+    border-bottom: 0;
+}
+.scenario-registry-item .scenario {
+    border-bottom: 0;
+}
+.scenario-row-actions {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 10px;
+    min-width: 190px;
+}
+.scenario-test-data-button {
+    border: 1px solid #cbd5e1;
+    background: #fff;
+    border-radius: 8px;
+    padding: 7px 12px;
+    font-weight: 700;
+    cursor: pointer;
+    white-space: nowrap;
+}
+.scenario-test-data-button:hover,
+.scenario-test-data-button.active {
+    background: #f1f5f9;
+}
+.scenario-test-data-panel {
+    margin: 0 20px 18px 140px;
+    padding: 16px;
+    border: 1px solid #dbe4ef;
+    border-radius: 10px;
+    background: #f8fafc;
+}
+.scenario-test-data-header {
+    margin-bottom: 12px;
+}
+.scenario-test-data-header strong {
+    display: block;
+    font-size: 14px;
+}
+.scenario-test-data-header span {
+    display: block;
+    margin-top: 2px;
+    font-size: 12px;
+    color: #64748b;
+}
+.scenario-test-data-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 12px;
+}
+.scenario-test-data-card {
+    min-width: 0;
+}
+.scenario-test-data-label {
+    margin-bottom: 6px;
+    font-size: 12px;
+    font-weight: 800;
+    letter-spacing: .04em;
+    color: #475569;
+}
+.scenario-test-data-card pre {
+    margin: 0;
+    min-height: 130px;
+    max-height: 280px;
+    overflow: auto;
+    padding: 12px;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    background: #fff;
+    font-family: Consolas, "Courier New", monospace;
+    font-size: 12px;
+    line-height: 1.45;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+@media (max-width: 980px) {
+    .scenario-test-data-panel {
+        margin-left: 20px;
+    }
+    .scenario-test-data-grid {
+        grid-template-columns: 1fr;
+    }
+    .scenario-row-actions {
+        min-width: 0;
+        justify-content: flex-start;
+    }
+}
+
+
+/* === Scenario Registry: compact Test Data action + no horizontal overflow === */
+.scenario-registry-item {
+    width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
+    overflow: hidden;
+}
+.scenario-registry-item .scenario {
+    width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
+    grid-template-columns: 78px minmax(210px, 1.1fr) minmax(220px, 1fr) auto;
+    gap: 16px;
+    overflow: hidden;
+}
+.scenario-registry-item .scenario > * { min-width: 0; }
+.scenario-registry-item .endpoint {
+    min-width: 0;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+    white-space: normal;
+}
+.scenario-row-actions { min-width: 0; width: auto; justify-content: flex-end; }
+.scenario-test-data-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 7px;
+    min-width: 112px;
+    max-width: 124px;
+    box-sizing: border-box;
+    border: 1px solid #1e293b;
+    background: #1e293b;
+    color: #fff;
+    padding: 8px 11px;
+}
+.scenario-test-data-button:hover, .scenario-test-data-button.active {
+    background: #334155;
+    color: #fff;
+}
+.scenario-test-data-icon {
+    display: inline-block;
+    flex: 0 0 auto;
+    font-family: Consolas, "Courier New", monospace;
+    font-size: 12px;
+    font-weight: 800;
+    line-height: 1;
+}
+.scenario-test-data-text { white-space: nowrap; }
+.scenario-test-data-panel { max-width: calc(100% - 110px); box-sizing: border-box; }
+@media (max-width: 1100px) {
+    .scenario-registry-item .scenario {
+        grid-template-columns: 68px minmax(180px, 1fr) minmax(180px, 1fr) auto;
+        gap: 12px;
+    }
+    .scenario-test-data-panel { margin-left: 92px; max-width: calc(100% - 112px); }
+}
+@media (max-width: 760px) {
+    .scenario-registry-item .scenario { grid-template-columns: 64px minmax(0, 1fr) auto; }
+    .scenario-registry-item .endpoint { grid-column: 2 / 4; }
+    .scenario-row-actions { grid-column: 3; grid-row: 1; }
+    .scenario-test-data-panel { margin: 0 12px 14px 12px; max-width: none; }
+    .scenario-test-data-grid { grid-template-columns: 1fr; }
+}
+
+
+/* === Phase 3: Scenario -> Defect Investigation integration === */
+.defect-scenario-picker {
+    display: grid;
+    gap: 7px;
+    margin-bottom: 14px;
+    padding: 14px 16px;
+    border: 1px solid #dbe4ef;
+    border-radius: 10px;
+    background: #f8fafc;
+}
+
+.defect-scenario-picker label {
+    font-weight: 800;
+}
+
+.defect-scenario-picker select {
+    width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
+}
+
+.defect-scenario-context {
+    color: #64748b;
+    font-size: 13px;
+    line-height: 1.4;
+}
+
+.defect-db-effect {
+    margin: 12px 0 16px;
+    padding: 12px 14px;
+    border: 1px solid #dbe4ef;
+    border-radius: 9px;
+    background: #f8fafc;
+}
+
+.defect-db-effect strong {
+    display: block;
+    margin-bottom: 5px;
+}
+
+#defectExpectedDbEffectValue {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    font-family: Consolas, "Courier New", monospace;
+    font-size: 13px;
+}
+
+/* Keep productization screens inside the content width. */
+.accordion-card,
+.scenario-registry-item,
+.scenario-test-data-panel,
+.defect-json-grid,
+.result-area {
+    max-width: 100%;
+    box-sizing: border-box;
+}
+
+@media (max-width: 980px) {
+    .defect-json-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+
+/* === Phase 3: simplified Defect Investigation flow selector === */
+.defect-flow-context {display:flex;align-items:center;gap:10px;margin:10px 0 8px;padding:10px 12px;border:1px solid #dbe4ef;border-radius:9px;background:#f8fafc;}
+.defect-selected-flow-label {flex:0 0 auto;font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:.04em;color:#64748b;}
+.defect-selected-flow-value {min-width:0;font-family:Consolas,"Courier New",monospace;font-size:14px;font-weight:700;overflow-wrap:anywhere;}
+.defect-manual-toggle {display:inline-flex;align-items:center;gap:8px;margin:4px 0 12px;cursor:pointer;font-weight:700;}
+.defect-manual-toggle input {width:auto;margin:0;}
+.defect-manual-endpoint-row[hidden] {display:none !important;}

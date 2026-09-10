@@ -1,8 +1,10 @@
+from sqlalchemy import inspect, text
+
 from fastapi import FastAPI
 import logging
 
 from config import settings
-from database import Base, engine
+from database import engine, initialize_storage, storage_status
 # Import ORM models before create_all so a fresh CodeIntelligence database
 # creates both scenario and baseline tables correctly.
 import db_models  # noqa: F401
@@ -14,9 +16,51 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 
-Base.metadata.create_all(
-    bind=engine
-)
+
+def _ensure_scenario_registry_columns():
+    """
+    Keep existing PostgreSQL/SQLite databases compatible with the current
+    Scenario Registry model. This is intentionally additive and never deletes
+    scenario or baseline data.
+    """
+    required_columns = {
+        "jira_id": "VARCHAR(100)",
+        "request_json": "TEXT",
+        "expected_response_json": "TEXT",
+        "expected_db_effect": "TEXT",
+        "involved_classes": "TEXT",
+    }
+
+    try:
+        inspector = inspect(engine)
+        table_names = set(inspector.get_table_names())
+        if "scenarios" not in table_names:
+            return
+
+        existing = {column["name"] for column in inspector.get_columns("scenarios")}
+        missing = {
+            name: sql_type
+            for name, sql_type in required_columns.items()
+            if name not in existing
+        }
+
+        if not missing:
+            return
+
+        with engine.begin() as connection:
+            for name, sql_type in missing.items():
+                connection.execute(
+                    text(f"ALTER TABLE scenarios ADD COLUMN {name} {sql_type}")
+                )
+    except Exception as exc:
+        # Startup should give a useful failure rather than silently corrupt data.
+        raise RuntimeError(
+            f"Unable to upgrade Scenario Registry database schema: {exc}"
+        ) from exc
+
+
+initialize_storage()
+_ensure_scenario_registry_columns()
 
 
 from routers.project_router import router as project_router
@@ -82,6 +126,7 @@ from routers.excel_report_router import (
     router as excel_report_router
 )
 from routers.jira_impact_router import router as jira_impact_router
+from routers.jira_knowledge_router import router as jira_knowledge_router
 logger = logging.getLogger(__name__)
 
 app = FastAPI(
@@ -106,11 +151,18 @@ def dashboard():
         / "templates"
         / "index.html"
     )
+
+
+@app.get("/api/storage/status")
+def get_storage_status():
+    """Shows which persistence mode is active without exposing DB credentials."""
+    return storage_status()
 app.include_router(project_router)
 
 app.include_router(
     jira_impact_router
 )
+app.include_router(jira_knowledge_router)
 
 app.include_router(
     scenario_router

@@ -223,6 +223,17 @@ class ScenarioBaselineService:
             old_baseline=old,
             new_baseline=new
         )
+
+        # A scenario baseline is meant to explain changes relevant to that
+        # scenario, not every edit in a broad parent entity that happens to
+        # appear in its stored execution flow. Example: adding Student.eligibility
+        # must not make STUDENT_CONTACT_UPDATE look changed.
+        source_comparison = self._filter_source_comparison_for_scenario(
+            scenario_code=scenario.scenario_code,
+            endpoint=new.endpoint,
+            source_comparison=source_comparison,
+        )
+
         endpoint_changed = old.endpoint != new.endpoint or old.http_method != new.http_method
         db_effect_changed = old.expected_db_effect != new.expected_db_effect
 
@@ -611,6 +622,104 @@ class ScenarioBaselineService:
                 new_line += 1
 
         return results
+
+
+    @staticmethod
+    def _scenario_resource_focus(
+        scenario_code: str | None,
+        endpoint: str | None,
+    ) -> str | None:
+        """
+        Return a narrow child-resource focus only when the scenario itself is
+        explicitly attribute/resource-specific. Broad ADD/UPDATE/DELETE
+        scenarios intentionally stay unfiltered.
+        """
+        code = (scenario_code or "").upper()
+        path = (endpoint or "").lower()
+
+        candidates = {
+            "CONTACT": ("contact", "phone"),
+            "EMAIL": ("email",),
+            "ADDRESS": ("address",),
+        }
+
+        for focus, tokens in candidates.items():
+            if f"_{focus}_" in code or code.endswith(f"_{focus}_UPDATE"):
+                return focus.lower()
+            if any(f"/{token}" in path for token in tokens):
+                return focus.lower()
+
+        return None
+
+    def _filter_source_comparison_for_scenario(
+        self,
+        scenario_code: str | None,
+        endpoint: str | None,
+        source_comparison: dict,
+    ) -> dict:
+        """
+        Keep source-level evidence scenario-specific for focused child updates.
+
+        For STUDENT_CONTACT_UPDATE, for example, Student.java remains a broad
+        execution dependency but an unrelated field such as `eligibility`
+        should not be shown as a contact-scenario change.
+
+        We deliberately apply this only to focused contact/email/address
+        scenarios. Full ADD/UPDATE scenarios still show their complete source
+        comparison.
+        """
+        focus = self._scenario_resource_focus(scenario_code, endpoint)
+        if not focus or not source_comparison:
+            return source_comparison
+
+        result = dict(source_comparison)
+        changes = list(result.get("changes") or [])
+
+        aliases = {
+            "contact": ("contact", "phone"),
+            "email": ("email",),
+            "address": ("address",),
+        }.get(focus, (focus,))
+
+        def is_relevant_change(change: dict) -> bool:
+            file_path = str(change.get("file_path") or "").lower()
+            symbol = str(change.get("symbol") or "").lower()
+            code = str(change.get("code") or "").lower()
+
+            # A dedicated resource class/file is always directly relevant:
+            # ContactDetails.java, ContactDetailsMapper.java, EmailDetails..., etc.
+            if any(token in file_path for token in aliases):
+                return True
+
+            # In broader files (StudentMapper/EmployeeMapper/etc.), require the
+            # changed symbol or classified line itself to refer to the focused
+            # resource. This prevents Student.eligibility from leaking into a
+            # contact comparison.
+            return any(
+                token in symbol or token in code
+                for token in aliases
+            )
+
+        filtered_changes = [
+            change for change in changes
+            if is_relevant_change(change)
+        ]
+
+        result["changes"] = filtered_changes
+        result["changed_files"] = self._files_from_git_changes(filtered_changes)
+
+        if changes and not filtered_changes:
+            result["message"] = (
+                f"Source changes were detected between these versions, but none "
+                f"were directly related to this {focus} scenario."
+            )
+        elif len(filtered_changes) != len(changes):
+            result["message"] = (
+                f"Showing only source changes directly relevant to this {focus} "
+                f"scenario; unrelated edits in broad parent dependencies were hidden."
+            )
+
+        return result
 
 
     def _compare_source_snapshots(

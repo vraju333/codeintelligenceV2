@@ -28,6 +28,18 @@ function resetProjectDrivenUi(message = "Loading selected project...") {
     const baselineSelect = document.getElementById("baselineScenarioSelect");
     if (baselineSelect) baselineSelect.innerHTML = '<option value="">Select a scenario...</option>';
 
+    activeProjectScenarios = [];
+    const defectScenarioSelect = document.getElementById("defectScenarioSelect");
+    if (defectScenarioSelect) {
+        defectScenarioSelect.innerHTML = '<option value="">Loading scenarios for selected project...</option>';
+    }
+    const defectScenarioContext = document.getElementById("defectScenarioContext");
+    if (defectScenarioContext) {
+        defectScenarioContext.textContent = "Loading scenarios for selected project...";
+    }
+    const dbEffectBox = document.getElementById("defectExpectedDbEffect");
+    if (dbEffectBox) dbEffectBox.hidden = true;
+
     // Defect JSON from the previous Java project is misleading after a project switch.
     ["inputJson", "expectedJson", "actualJson"].forEach(id => {
         const field = document.getElementById(id);
@@ -40,10 +52,12 @@ function resetProjectDrivenUi(message = "Loading selected project...") {
 
 let scenarioPage = 1;
 const scenarioPageSize = 5;
+let activeProjectScenarios = [];
 
 window.addEventListener("DOMContentLoaded", async () => {
     await loadProjects();
     await loadScenarios(1);
+    await loadDefectScenarioOptions();
 });
 
 async function loadProjects() {
@@ -100,6 +114,7 @@ async function switchProject() {
         scenarioPage = 1;
         await loadProjectEndpoints();
         await loadScenarios(1);
+        await loadDefectScenarioOptions();
         if (typeof loadBaselineOverview === "function") await loadBaselineOverview();
 
         // Regression Impact is project-specific. Re-run it after the project
@@ -156,6 +171,7 @@ async function addProject() {
         scenarioPage = 1;
         await loadProjectEndpoints();
         await loadScenarios(1);
+        await loadDefectScenarioOptions();
         if (typeof loadBaselineOverview === "function") await loadBaselineOverview();
 
         // Regression Impact is project-specific. Re-run it after the project
@@ -170,6 +186,147 @@ async function addProject() {
             button.disabled = false;
             button.textContent = "Add Project";
         }
+    }
+}
+
+
+function toggleDefectManualMode() {
+    const toggle = document.getElementById("defectManualMode");
+    const row = document.getElementById("defectManualEndpointRow");
+    const selectedFlow = document.getElementById("defectSelectedFlow");
+    const scenarioSelect = document.getElementById("defectScenarioSelect");
+    const enabled = !!toggle?.checked;
+    if (row) row.hidden = !enabled;
+    if (enabled) {
+        if (scenarioSelect) scenarioSelect.value = "";
+        if (selectedFlow) selectedFlow.textContent = "Manual endpoint selection enabled.";
+        if (typeof refreshEndpointDropdown === "function") refreshEndpointDropdown("investigationMethod", "investigationEndpoint");
+    } else {
+        if (selectedFlow) selectedFlow.textContent = "Select a scenario or enable manual endpoint selection.";
+    }
+}
+
+async function loadDefectScenarioOptions() {
+    const select = document.getElementById("defectScenarioSelect");
+    const context = document.getElementById("defectScenarioContext");
+    if (!select) return;
+
+    try {
+        const response = await fetch("/api/scenarios/active-project");
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.detail || JSON.stringify(data));
+
+        activeProjectScenarios = Array.isArray(data) ? data : [];
+        select.innerHTML =
+            '<option value="">Select a registered scenario to prefill test data...</option>' +
+            activeProjectScenarios.map(scenario => {
+                const jira = scenario.jira_id ? ` · ${scenario.jira_id}` : "";
+                return `<option value="${scenario.id}">${escapeHtml(scenario.scenario_code)}${escapeHtml(jira)} · ${escapeHtml(scenario.http_method)} ${escapeHtml(scenario.endpoint)}</option>`;
+            }).join("");
+
+        if (context) {
+            context.textContent = activeProjectScenarios.length
+                ? `${activeProjectScenarios.length} scenario(s) available for the selected project.`
+                : "No registered scenarios are available for the selected project.";
+        }
+    } catch (error) {
+        activeProjectScenarios = [];
+        select.innerHTML = '<option value="">Unable to load registered scenarios</option>';
+        if (context) context.textContent = `Scenario load failed: ${error.message}`;
+    }
+}
+
+function parseScenarioJsonOrFallback(rawValue, fallbackValue) {
+    if (rawValue && String(rawValue).trim()) {
+        try {
+            return JSON.parse(rawValue);
+        } catch (_) {
+            return fallbackValue;
+        }
+    }
+    return fallbackValue;
+}
+
+function applyDefectScenario() {
+    const select = document.getElementById("defectScenarioSelect");
+    if (!select?.value) {
+        const context = document.getElementById("defectScenarioContext");
+        if (context) {
+            context.textContent = "Select a scenario to reuse its endpoint and test data, or continue manually below.";
+        }
+        const dbEffectBox = document.getElementById("defectExpectedDbEffect");
+        if (dbEffectBox) dbEffectBox.hidden = true;
+        return;
+    }
+
+    const scenario = activeProjectScenarios.find(item => String(item.id) === String(select.value));
+    if (!scenario) return;
+
+    const methodSelect = document.getElementById("investigationMethod");
+    const endpointSelect = document.getElementById("investigationEndpoint");
+    const manualToggle = document.getElementById("defectManualMode");
+    const manualRow = document.getElementById("defectManualEndpointRow");
+    const selectedFlow = document.getElementById("defectSelectedFlow");
+    if (manualToggle) manualToggle.checked = false;
+    if (manualRow) manualRow.hidden = true;
+    if (selectedFlow) selectedFlow.textContent = `${String(scenario.http_method || "").toUpperCase()} ${scenario.endpoint || ""}`;
+
+    if (methodSelect) {
+        methodSelect.value = String(scenario.http_method || "POST").toUpperCase();
+        if (typeof refreshEndpointDropdown === "function") {
+            refreshEndpointDropdown("investigationMethod", "investigationEndpoint");
+        }
+    }
+
+    if (endpointSelect) {
+        const targetEndpoint = String(scenario.endpoint || "");
+        const matchingOption = Array.from(endpointSelect.options)
+            .find(option => option.value === targetEndpoint);
+        if (matchingOption) endpointSelect.value = targetEndpoint;
+    }
+
+    const sample = typeof scenarioSampleTestData === "function"
+        ? scenarioSampleTestData(scenario.scenario_code)
+        : {input: {}, expected: {}, output: {}};
+
+    const input = parseScenarioJsonOrFallback(scenario.request_json, sample.input || {});
+    const expected = parseScenarioJsonOrFallback(scenario.expected_response_json, sample.expected || {});
+    const actual = sample.output || {};
+
+    const inputField = document.getElementById("inputJson");
+    const expectedField = document.getElementById("expectedJson");
+    const actualField = document.getElementById("actualJson");
+
+    if (inputField) inputField.value = JSON.stringify(input, null, 2);
+    if (expectedField) expectedField.value = JSON.stringify(expected, null, 2);
+    if (actualField) actualField.value = JSON.stringify(actual, null, 2);
+
+    const context = document.getElementById("defectScenarioContext");
+    if (context) {
+        const jira = scenario.jira_id ? ` · JIRA ${scenario.jira_id}` : "";
+        context.innerHTML =
+            `<strong>${escapeHtml(scenario.scenario_code)}</strong>${escapeHtml(jira)} · ` +
+            `${escapeHtml(scenario.http_method)} ${escapeHtml(scenario.endpoint)}`;
+    }
+
+    const dbEffectBox = document.getElementById("defectExpectedDbEffect");
+    const dbEffectValue = document.getElementById("defectExpectedDbEffectValue");
+    if (dbEffectBox && dbEffectValue) {
+        const effect = String(scenario.expected_db_effect || "").trim();
+        if (effect) {
+            dbEffectValue.textContent = effect;
+            dbEffectBox.hidden = false;
+        } else {
+            dbEffectBox.hidden = true;
+            dbEffectValue.textContent = "";
+        }
+    }
+}
+
+async function refreshScenarioRegistryAndDefect() {
+    await loadScenarios(1);
+    if (typeof loadDefectScenarioOptions === "function") {
+        await loadDefectScenarioOptions();
     }
 }
 
@@ -191,11 +348,23 @@ async function loadScenarios(page = scenarioPage) {
             container.innerHTML = `<div class="empty-project-state">No registered scenarios match the selected project.</div>`;
         } else {
             container.innerHTML = scenarios.map(scenario => `
-                <div class="scenario">
-                    <div class="method">${escapeHtml(scenario.http_method)}</div>
-                    <div><strong>${escapeHtml(scenario.scenario_code)}</strong><div>${escapeHtml(scenario.scenario_name || "")}</div></div>
-                    <div class="endpoint">${escapeHtml(scenario.endpoint)}</div>
-                    <div><span class="tag">${escapeHtml(scenario.status || "ACTIVE")}</span></div>
+                <div class="scenario-registry-item">
+                    <div class="scenario">
+                        <div class="method">${escapeHtml(scenario.http_method)}</div>
+                        <div><strong>${escapeHtml(scenario.scenario_code)}</strong><div>${escapeHtml(scenario.scenario_name || "")}</div></div>
+                        <div class="endpoint">${escapeHtml(scenario.endpoint)}</div>
+                        <div class="scenario-row-actions">
+                            <button class="scenario-test-data-button"
+                                    type="button"
+                                    onclick="toggleScenarioTestData('${escapeJsString(scenario.scenario_code || "")}', this)">
+                                <span class="scenario-test-data-icon" aria-hidden="true">&lt;/&gt;</span>
+                                <span class="scenario-test-data-text">Test Data</span>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="scenario-test-data-panel"
+                         data-scenario-code="${escapeHtml(scenario.scenario_code || "")}"
+                         hidden></div>
                 </div>
             `).join("");
         }
@@ -205,6 +374,268 @@ async function loadScenarios(page = scenarioPage) {
         container.innerHTML = typeof renderError === "function" ? renderError(error.message) : escapeHtml(error.message);
         if (pager) pager.innerHTML = "";
     }
+}
+
+
+function escapeJsString(value) {
+    return String(value ?? "")
+        .replace(/\\/g, "\\\\")
+        .replace(/'/g, "\\'")
+        .replace(/\r/g, "\\r")
+        .replace(/\n/g, "\\n");
+}
+
+function scenarioSampleTestData(scenarioCode) {
+    const code = String(scenarioCode || "").toUpperCase();
+
+    const samples = {
+        STUDENT_ADD: {
+            input: {
+                type: "STUDENT",
+                studentCode: "STU101",
+                firstName: "Aarav",
+                lastName: "Kumar",
+                gpa: 8.2,
+                emailDetails: {
+                    primaryEmail: "aarav.kumar@example.com",
+                    secondaryEmail: "aarav.alt@example.com"
+                },
+                contactDetails: {
+                    primaryContact: "9876543210",
+                    secondaryContact: "9123456780"
+                },
+                address: {
+                    line1: "12 Lake View Road",
+                    line2: "Bengaluru"
+                }
+            },
+            expected: {
+                type: "STUDENT",
+                studentCode: "STU101",
+                firstName: "Aarav",
+                lastName: "Kumar",
+                gpa: 8.2,
+                status: "CREATED"
+            },
+            output: {
+                id: 101,
+                type: "STUDENT",
+                studentCode: "STU101",
+                firstName: "Aarav",
+                lastName: "Kumar",
+                gpa: 8.2,
+                status: "CREATED"
+            }
+        },
+        STUDENT_UPDATE: {
+            input: {
+                id: 101,
+                type: "STUDENT",
+                firstName: "Aarav",
+                lastName: "Kumar",
+                gpa: 8.6
+            },
+            expected: {
+                id: 101,
+                type: "STUDENT",
+                gpa: 8.6,
+                status: "UPDATED"
+            },
+            output: {
+                id: 101,
+                type: "STUDENT",
+                gpa: 8.6,
+                status: "UPDATED"
+            }
+        },
+        STUDENT_DELETE: {
+            input: { id: 101, type: "STUDENT" },
+            expected: { id: 101, deleted: true },
+            output: { id: 101, deleted: true }
+        },
+        STUDENT_ADDRESS_UPDATE: {
+            input: {
+                id: 101,
+                type: "STUDENT",
+                address: {
+                    line1: "45 New Campus Road",
+                    line2: "Hyderabad"
+                }
+            },
+            expected: {
+                address: {
+                    line1: "45 New Campus Road",
+                    line2: "Hyderabad"
+                },
+                status: "UPDATED"
+            },
+            output: {
+                address: {
+                    line1: "45 New Campus Road",
+                    line2: "Hyderabad"
+                },
+                status: "UPDATED"
+            }
+        },
+        STUDENT_CONTACT_UPDATE: {
+            input: {
+                id: 101,
+                type: "STUDENT",
+                primaryContact: "9876543210",
+                secondaryContact: "9123456780"
+            },
+            expected: {
+                primaryContact: "9876543210",
+                secondaryContact: "9123456780",
+                status: "UPDATED"
+            },
+            output: {
+                primaryContact: "9876543210",
+                secondaryContact: "9123456780",
+                status: "UPDATED"
+            }
+        },
+        EMPLOYEE_ADD: {
+            input: {
+                type: "EMPLOYEE",
+                employeeCode: "EMP101",
+                firstName: "Ravi",
+                lastName: "Sharma",
+                emailDetails: { primaryEmail: "ravi.sharma@example.com" },
+                contactDetails: {
+                    primaryContact: "9876501234",
+                    secondaryContact: "9000012345"
+                }
+            },
+            expected: {
+                type: "EMPLOYEE",
+                employeeCode: "EMP101",
+                status: "CREATED"
+            },
+            output: {
+                id: 201,
+                type: "EMPLOYEE",
+                employeeCode: "EMP101",
+                status: "CREATED"
+            }
+        },
+        EMPLOYEE_UPDATE: {
+            input: {
+                id: 201,
+                type: "EMPLOYEE",
+                firstName: "Ravi",
+                lastName: "Sharma",
+                department: "Engineering"
+            },
+            expected: {
+                id: 201,
+                department: "Engineering",
+                status: "UPDATED"
+            },
+            output: {
+                id: 201,
+                department: "Engineering",
+                status: "UPDATED"
+            }
+        },
+        EMPLOYEE_DELETE: {
+            input: { id: 201, type: "EMPLOYEE" },
+            expected: { id: 201, deleted: true },
+            output: { id: 201, deleted: true }
+        },
+        EMPLOYEE_EMAIL_UPDATE: {
+            input: {
+                id: 201,
+                type: "EMPLOYEE",
+                primaryEmail: "ravi.new@example.com",
+                secondaryEmail: "ravi.backup@example.com"
+            },
+            expected: {
+                primaryEmail: "ravi.new@example.com",
+                secondaryEmail: "ravi.backup@example.com",
+                status: "UPDATED"
+            },
+            output: {
+                primaryEmail: "ravi.new@example.com",
+                secondaryEmail: "ravi.backup@example.com",
+                status: "UPDATED"
+            }
+        },
+        EMPLOYEE_CONTACT_UPDATE: {
+            input: {
+                id: 201,
+                type: "EMPLOYEE",
+                primaryContact: "9988776655",
+                secondaryContact: "8877665544"
+            },
+            expected: {
+                primaryContact: "9988776655",
+                secondaryContact: "8877665544",
+                status: "UPDATED"
+            },
+            output: {
+                primaryContact: "9988776655",
+                secondaryContact: "8877665544",
+                status: "UPDATED"
+            }
+        }
+    };
+
+    return samples[code] || {
+        input: { note: "Sample input for " + (scenarioCode || "scenario") },
+        expected: { status: "SUCCESS" },
+        output: {
+            status: "SUCCESS",
+            note: "Sample output only — not executed against the application."
+        }
+    };
+}
+
+function formatScenarioJson(value) {
+    return escapeHtml(JSON.stringify(value, null, 2));
+}
+
+function toggleScenarioTestData(scenarioCode, button) {
+    const item = button?.closest(".scenario-registry-item");
+    const panel = item?.querySelector(".scenario-test-data-panel");
+    if (!panel) return;
+
+    const opening = panel.hidden;
+    if (!opening) {
+        panel.hidden = true;
+        const label = button.querySelector(".scenario-test-data-text");
+        if (label) label.textContent = "Test Data";
+        button.classList.remove("active");
+        return;
+    }
+
+    const sample = scenarioSampleTestData(scenarioCode);
+    panel.innerHTML = `
+        <div class="scenario-test-data-header">
+            <div>
+                <strong>Sample Test Data</strong>
+                <span>UI sample only · not stored in DB</span>
+            </div>
+        </div>
+        <div class="scenario-test-data-grid">
+            <div class="scenario-test-data-card">
+                <div class="scenario-test-data-label">INPUT</div>
+                <pre>${formatScenarioJson(sample.input)}</pre>
+            </div>
+            <div class="scenario-test-data-card">
+                <div class="scenario-test-data-label">EXPECTED</div>
+                <pre>${formatScenarioJson(sample.expected)}</pre>
+            </div>
+            <div class="scenario-test-data-card">
+                <div class="scenario-test-data-label">OUTPUT</div>
+                <pre>${formatScenarioJson(sample.output)}</pre>
+            </div>
+        </div>
+    `;
+    panel.hidden = false;
+    const label = button.querySelector(".scenario-test-data-text");
+    if (label) label.textContent = "Hide Data";
+    button.classList.add("active");
 }
 
 function renderScenarioPager(data, pager) {
@@ -234,7 +665,7 @@ function openNewScenarioModal() {
     const modal = document.getElementById("newScenarioModal");
     if (!modal) return;
 
-    ["newScenarioCode", "newScenarioName", "newScenarioDescription"].forEach(id => {
+    ["newScenarioCode", "newScenarioName", "newScenarioJiraId", "newScenarioDescription", "newScenarioRequestJson", "newScenarioExpectedResponse", "newScenarioExpectedDbEffect"].forEach(id => {
         const element = document.getElementById(id);
         if (element) element.value = "";
     });
@@ -278,6 +709,10 @@ async function registerNewScenario() {
     const code = (document.getElementById("newScenarioCode")?.value || "").trim().toUpperCase();
     const name = (document.getElementById("newScenarioName")?.value || "").trim();
     const description = (document.getElementById("newScenarioDescription")?.value || "").trim();
+    const jiraId = (document.getElementById("newScenarioJiraId")?.value || "").trim().toUpperCase();
+    const requestJson = (document.getElementById("newScenarioRequestJson")?.value || "").trim();
+    const expectedResponseJson = (document.getElementById("newScenarioExpectedResponse")?.value || "").trim();
+    const expectedDbEffect = (document.getElementById("newScenarioExpectedDbEffect")?.value || "").trim();
     const method = (document.getElementById("newScenarioMethod")?.value || "").trim().toUpperCase();
     const endpoint = (document.getElementById("newScenarioEndpoint")?.value || "").trim();
     const error = document.getElementById("newScenarioError");
@@ -293,6 +728,16 @@ async function registerNewScenario() {
         return;
     }
 
+    for (const [label, value] of [["Request JSON", requestJson], ["Expected Response JSON", expectedResponseJson]]) {
+        if (value) {
+            try { JSON.parse(value); }
+            catch (_) {
+                if (error) error.textContent = `${label} must contain valid JSON.`;
+                return;
+            }
+        }
+    }
+
     if (button) { button.disabled = true; button.textContent = "Registering..."; }
     try {
         const response = await fetch("/api/scenarios", {
@@ -304,15 +749,35 @@ async function registerNewScenario() {
                 http_method: method,
                 endpoint: endpoint,
                 description: description || null,
+                jira_id: jiraId || null,
+                request_json: requestJson || null,
+                expected_response_json: expectedResponseJson || null,
+                expected_db_effect: expectedDbEffect || null,
                 status: "ACTIVE"
             })
         });
-        const data = await response.json();
-        if (!response.ok) throw new Error(data.detail || JSON.stringify(data));
+        const responseText = await response.text();
+        let data = {};
+        try {
+            data = responseText ? JSON.parse(responseText) : {};
+        } catch (_) {
+            data = {detail: responseText || `HTTP ${response.status}`};
+        }
+        if (!response.ok) {
+            throw new Error(data.detail || `Scenario registration failed (HTTP ${response.status})`);
+        }
 
         closeNewScenarioModal();
         scenarioPage = 1;
         await loadScenarios(1);
+
+        // Defect Investigation is scenario-driven. Refresh its dropdown
+        // immediately so a newly registered scenario is selectable without
+        // reloading the browser.
+        if (typeof loadDefectScenarioOptions === "function") {
+            await loadDefectScenarioOptions();
+        }
+
         if (typeof loadBaselineOverview === "function") await loadBaselineOverview();
     } catch (e) {
         if (error) error.textContent = e.message || "Could not register scenario.";

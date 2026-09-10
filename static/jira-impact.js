@@ -1,3 +1,40 @@
+
+async function saveAndIndexJira() {
+    const jiraId = document.getElementById('jiraImpactId')?.value?.trim() || '';
+    const title = document.getElementById('jiraImpactTitle')?.value?.trim() || '';
+    const requirement = document.getElementById('jiraImpactRequirement')?.value?.trim() || '';
+    const result = document.getElementById('jiraImpactResult');
+
+    if (!jiraId || !requirement) {
+        result.innerHTML = '<div class="jira-impact-error">JIRA ID and requirement are required to Save & Index.</div>';
+        return;
+    }
+
+    result.innerHTML = '<div class="jira-impact-loading">Saving JIRA locally and rebuilding JIRA RAG index...</div>';
+    try {
+        const response = await fetch('/api/jira-knowledge/save-index', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({jira_id: jiraId, title, requirement})
+        });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.detail || 'Save & Index failed');
+        result.innerHTML = `
+            <div class="jira-impact-block">
+                <h3>${escapeJiraImpact(data.jira?.jira_id || jiraId)} saved & indexed</h3>
+                <div class="jira-impact-note">
+                    ${escapeJiraImpact(data.jira?.title || title || 'JIRA requirement')} ·
+                    ${Number(data.index?.documents || 0)} local JIRA document(s) indexed.
+                </div>
+                <div class="jira-impact-note">
+                    Now search an attribute such as <strong>gpa</strong> in Attribute Impact to see Related JIRAs.
+                </div>
+            </div>`;
+    } catch (error) {
+        result.innerHTML = `<div class="jira-impact-error">${escapeJiraImpact(String(error.message || error))}</div>`;
+    }
+}
+
 async function analyseJiraImpact() {
     const jiraId = document.getElementById('jiraImpactId')?.value?.trim() || null;
     const requirement = document.getElementById('jiraImpactRequirement')?.value?.trim() || '';

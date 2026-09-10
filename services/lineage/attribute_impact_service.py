@@ -24,6 +24,12 @@ class AttributeImpactService:
         self.scenarios = ScenarioService()
 
     def analyze(self, attribute_name: str, db: Session) -> dict:
+        # Code analysis and JIRA RAG are independent branches and are orchestrated
+        # in parallel by LangGraph, then merged into one Attribute Impact result.
+        from graph.attribute_jira_graph import AttributeJiraGraph
+        return AttributeJiraGraph(self._analyze_code_only).run(attribute_name, db)
+
+    def _analyze_code_only(self, attribute_name: str, db: Session) -> dict:
         attribute_name = (attribute_name or "").strip()
         if not attribute_name:
             raise RuntimeError("attribute_name is required")

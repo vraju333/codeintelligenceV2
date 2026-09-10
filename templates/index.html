@@ -5,7 +5,7 @@
 <meta charset="utf-8"/>
 <meta content="width=device-width, initial-scale=1.0" name="viewport"/>
 <title>CodeIntelligence</title>
-<link href="/static/style.css?v=8" rel="stylesheet"/>
+<link href="/static/style.css?v=phase3-defect-ui-2" rel="stylesheet"/>
 <script type="module">
         import mermaid
             from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
@@ -44,69 +44,6 @@
 <button onclick="addProject()" type="button">Add Project</button>
 <span class="project-path" id="activeProjectPath"></span>
 </section>
-<!-- ====================================================== -->
-<!-- JIRA IMPACT ANALYSIS -->
-<!-- ====================================================== -->
-<section class="card accordion-card" id="jiraImpactCard">
-<div aria-expanded="true" class="card-header accordion-header" data-accordion-title="JIRA Impact Analysis" role="button" tabindex="0">
-<div>
-<h2>JIRA Impact Analysis</h2>
-<p>Paste a requirement and find likely code, endpoint and scenario impact in the selected Java project.</p>
-</div>
-<button aria-label="Toggle JIRA Impact Analysis" class="accordion-toggle" tabindex="-1" type="button">⌄</button></div><div class="accordion-body">
-<div class="jira-impact-form">
-<input class="jira-impact-id" id="jiraImpactId" placeholder="JIRA ID (optional) — e.g. EMP-123" type="text"/>
-<textarea class="jira-impact-textarea" id="jiraImpactRequirement" placeholder="Requirement / Description
-Example: Add employmentType attribute to Employee. Store it while creating an employee and return it in the response."></textarea>
-<div class="jira-impact-actions">
-<button onclick="analyseJiraImpact()" type="button">Analyze Impact</button>
-</div>
-</div>
-<div class="result-area" id="jiraImpactResult">
-                Paste a requirement to analyze the active Java project.
-            </div>
-</div></section>
-<!-- ====================================================== -->
-<!-- ATTRIBUTE IMPACT ANALYSIS -->
-<!-- ====================================================== -->
-<section class="card accordion-card is-collapsed" id="attributeImpactCard">
-<div aria-expanded="false" class="card-header accordion-header" data-accordion-title="Attribute Impact Analysis" role="button" tabindex="0">
-<div>
-<h2>Attribute Impact Analysis</h2>
-<p>Trace one Java attribute across models, mappers, services, endpoints and registered scenarios.</p>
-</div>
-<button aria-label="Toggle Attribute Impact Analysis" class="accordion-toggle" tabindex="-1" type="button">›</button></div><div class="accordion-body">
-<div class="attribute-impact-form">
-<input id="attributeImpactInput" placeholder="Attribute — e.g. primaryContact, employmentType, gpa" type="text"/>
-<button onclick="analyseAttributeImpact()" type="button">Analyze Attribute</button>
-</div>
-<div class="result-area" id="attributeImpactResult">
-                Enter an attribute to see its project-wide blast radius.
-            </div>
-</div></section>
-<!-- ====================================================== -->
-<!-- SCENARIO REGISTRY -->
-<!-- ====================================================== -->
-<section class="card accordion-card is-collapsed">
-<div aria-expanded="false" class="card-header accordion-header" data-accordion-title="Scenario Registry" role="button" tabindex="0">
-<div>
-<h2>
-                        Scenario Registry
-                    </h2>
-<p>
-                        Registered application scenarios
-                    </p>
-</div>
-<div class="header-actions">
-<button type="button" onclick="openNewScenarioModal()">+ New Scenario</button>
-<button type="button" class="secondary-button" onclick="loadScenarios(1)">Refresh</button>
-</div>
-<button aria-label="Toggle Scenario Registry" class="accordion-toggle" tabindex="-1" type="button">›</button></div><div class="accordion-body">
-<div class="result-area" id="scenarioList">
-                Loading scenarios...
-            </div>
-<div class="scenario-pager" id="scenarioPager"></div>
-</div></section>
 <!-- ====================================================== -->
 <!-- ENDPOINT FLOW -->
 <!-- ====================================================== -->
@@ -198,6 +135,71 @@ Example: Add employmentType attribute to Employee. Store it while creating an em
             </div>
 </div></section>
 <!-- ====================================================== -->
+<!-- JIRA IMPACT ANALYSIS -->
+<!-- ====================================================== -->
+<section class="card accordion-card" id="jiraImpactCard">
+<div aria-expanded="true" class="card-header accordion-header" data-accordion-title="JIRA Impact Analysis" role="button" tabindex="0">
+<div>
+<h2>JIRA Impact Analysis</h2>
+<p>Paste a requirement and find likely code, endpoint and scenario impact in the selected Java project.</p>
+</div>
+<button aria-label="Toggle JIRA Impact Analysis" class="accordion-toggle" tabindex="-1" type="button">⌄</button></div><div class="accordion-body">
+<div class="jira-impact-form">
+<input class="jira-impact-id" id="jiraImpactId" placeholder="JIRA ID (optional) — e.g. EMP-123" type="text"/>
+<input class="jira-impact-id" id="jiraImpactTitle" placeholder="Title — e.g. Student Promotion Eligibility" type="text"/>
+<textarea class="jira-impact-textarea" id="jiraImpactRequirement" placeholder="Requirement / Description
+Example: Add employmentType attribute to Employee. Store it while creating an employee and return it in the response."></textarea>
+<div class="jira-impact-actions">
+<button onclick="saveAndIndexJira()" type="button">Save &amp; Index</button>
+<button onclick="analyseJiraImpact()" type="button">Analyze Impact</button>
+</div>
+</div>
+<div class="result-area" id="jiraImpactResult">
+                Paste a requirement to analyze the active Java project.
+            </div>
+</div></section>
+<!-- ====================================================== -->
+<!-- ATTRIBUTE IMPACT ANALYSIS -->
+<!-- ====================================================== -->
+<section class="card accordion-card is-collapsed" id="attributeImpactCard">
+<div aria-expanded="false" class="card-header accordion-header" data-accordion-title="Attribute Impact Analysis" role="button" tabindex="0">
+<div>
+<h2>Attribute Impact Analysis</h2>
+<p>Trace one Java attribute across models, mappers, services, endpoints and registered scenarios.</p>
+</div>
+<button aria-label="Toggle Attribute Impact Analysis" class="accordion-toggle" tabindex="-1" type="button">›</button></div><div class="accordion-body">
+<div class="attribute-impact-form">
+<input id="attributeImpactInput" placeholder="Attribute — e.g. primaryContact, employmentType, gpa" type="text"/>
+<button onclick="analyseAttributeImpact()" type="button">Analyze Attribute</button>
+</div>
+<div class="result-area" id="attributeImpactResult">
+                Enter an attribute to see its project-wide blast radius.
+            </div>
+</div></section>
+<!-- ====================================================== -->
+<!-- SCENARIO REGISTRY -->
+<!-- ====================================================== -->
+<section class="card accordion-card is-collapsed">
+<div aria-expanded="false" class="card-header accordion-header" data-accordion-title="Scenario Registry" role="button" tabindex="0">
+<div>
+<h2>
+                        Scenario Registry
+                    </h2>
+<p>
+                        Registered application scenarios
+                    </p>
+</div>
+<div class="header-actions">
+<button type="button" onclick="openNewScenarioModal()">+ New Scenario</button>
+<button type="button" class="secondary-button" onclick="refreshScenarioRegistryAndDefect()">Refresh</button>
+</div>
+<button aria-label="Toggle Scenario Registry" class="accordion-toggle" tabindex="-1" type="button">›</button></div><div class="accordion-body">
+<div class="result-area" id="scenarioList">
+                Loading scenarios...
+            </div>
+<div class="scenario-pager" id="scenarioPager"></div>
+</div></section>
+<!-- ====================================================== -->
 <!-- DEFECT INVESTIGATION -->
 <!-- ====================================================== -->
 <section class="card accordion-card is-collapsed">
@@ -212,29 +214,32 @@ Example: Add employmentType attribute to Employee. Store it while creating an em
                     </p>
 </div>
 <button aria-label="Toggle Defect Investigation" class="accordion-toggle" tabindex="-1" type="button">›</button></div><div class="accordion-body">
-<div class="form-row">
+<div class="defect-scenario-picker">
+<label for="defectScenarioSelect">Scenario <span class="muted-text">(optional)</span></label>
+<select id="defectScenarioSelect" onchange="applyDefectScenario()">
+<option value="">Select a registered scenario to prefill test data...</option>
+</select>
+<div class="defect-scenario-context" id="defectScenarioContext">
+Select a scenario to reuse its endpoint and test data, or continue manually below.
+</div>
+</div>
+<div class="defect-flow-context">
+<div class="defect-selected-flow-label">Selected flow</div>
+<div id="defectSelectedFlow" class="defect-selected-flow-value">Select a scenario or enable manual endpoint selection.</div>
+</div>
+<label class="defect-manual-toggle">
+<input id="defectManualMode" type="checkbox" onchange="toggleDefectManualMode()"/>
+<span>Manual endpoint selection</span>
+</label>
+<div class="form-row defect-manual-endpoint-row" id="defectManualEndpointRow" hidden>
 <select id="investigationMethod">
-<option value="GET">
-                        GET
-                    </option>
-<option selected="" value="POST">
-                        POST
-                    </option>
-<option value="PUT">
-                        PUT
-                    </option>
-<option value="PATCH">
-                        PATCH
-                    </option>
-<option value="DELETE">
-                        DELETE
-                    </option>
+<option value="GET">GET</option>
+<option selected="" value="POST">POST</option>
+<option value="PUT">PUT</option>
+<option value="PATCH">PATCH</option>
+<option value="DELETE">DELETE</option>
 </select>
-<select id="investigationEndpoint">
-<option value="">
-                        Loading endpoints...
-                    </option>
-</select>
+<select id="investigationEndpoint"><option value="">Loading endpoints...</option></select>
 </div>
 <div class="json-grid defect-json-grid">
 <div>
@@ -274,6 +279,10 @@ Example: Add employmentType attribute to Employee. Store it while creating an em
   }
 }</textarea>
 </div>
+</div>
+<div class="defect-db-effect" id="defectExpectedDbEffect" hidden>
+<strong>Expected DB Effect</strong>
+<div id="defectExpectedDbEffectValue"></div>
 </div>
 <button onclick="runInvestigation()">
                 Investigate Defect
@@ -353,11 +362,15 @@ Example: Add employmentType attribute to Employee. Store it while creating an em
 </div>
 </div>
 <div class="scenario-create-form">
+<div class="scenario-create-scroll">
 <label>Scenario Code
 <input id="newScenarioCode" placeholder="e.g. EMPLOYEE_BACKUP_CONTACT_UPDATE" type="text"/>
 </label>
 <label>Scenario Name
 <input id="newScenarioName" placeholder="e.g. Employee Backup Contact Update" type="text"/>
+</label>
+<label>JIRA ID <span class="muted-text">(optional)</span>
+<input id="newScenarioJiraId" placeholder="e.g. EMP-245" type="text"/>
 </label>
 <label>Description <span class="muted-text">(optional)</span>
 <textarea id="newScenarioDescription" placeholder="What business/test scenario does this represent?"></textarea>
@@ -372,8 +385,22 @@ Example: Add employmentType attribute to Employee. Store it while creating an em
 <select id="newScenarioEndpoint"><option value="">Select a discovered endpoint...</option></select>
 </label>
 </div>
+
+<div class="scenario-create-section-title">Test Data</div>
+<div class="scenario-create-help">For POST / PUT / PATCH scenarios, save reproducible request data here. Defect Analysis can reuse this scenario data later.</div>
+<label>Request JSON <span class="muted-text">(optional)</span>
+<textarea class="scenario-json-input" id="newScenarioRequestJson" placeholder='{"primaryContact":"9876543210","secondaryContact":"9123456780"}'></textarea>
+</label>
+<label>Expected Response JSON <span class="muted-text">(optional)</span>
+<textarea class="scenario-json-input" id="newScenarioExpectedResponse" placeholder='{"primaryContact":"9876543210","secondaryContact":"9123456780"}'></textarea>
+</label>
+<label>Expected DB Effect <span class="muted-text">(optional)</span>
+<textarea id="newScenarioExpectedDbEffect" placeholder='e.g. contact_details.primary_contact = "9876543210"'></textarea>
+</label>
+
 <div class="scenario-create-help">After registration, this scenario will appear in <strong>Scenario Baselines</strong> as <strong>No baseline yet</strong>. Test/verify it, then capture its first V1 baseline.</div>
 <div class="scenario-create-error" id="newScenarioError"></div>
+</div>
 <div class="scenario-create-actions">
 <button class="secondary-button" onclick="closeNewScenarioModal()" type="button">Cancel</button>
 <button id="registerScenarioButton" onclick="registerNewScenario()" type="button">Register Scenario</button>
@@ -421,10 +448,10 @@ Example: Add employmentType attribute to Employee. Store it while creating an em
 </div>
 </div>
 <script src="/static/app.js?v=10"></script>
-<script src="/static/project-ui.js?v=3"></script>
+<script src="/static/project-ui.js?v=scenario-defect-hotfix-1"></script>
 <script src="/static/flowchart-ui.js?v=3"></script>
-<script src="/static/jira-impact.js?v=2"></script>
-<script src="/static/attribute-impact.js?v=1"></script>
+<script src="/static/jira-impact.js?v=3"></script>
+<script src="/static/attribute-impact.js?v=2"></script>
 <script src="/static/regression-details.js?v=2"></script>
 <script src="/static/version-source-history.js?v=4"></script>
 <script src="/static/accordion-ui.js?v=2"></script></body>

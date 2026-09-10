@@ -25,6 +25,7 @@ function renderAttributeImpact(data) {
     const endpoints = data.affected_endpoints || [];
     const scenarios = data.affected_scenarios || [];
     const confidence = data.confidence || {};
+    const relatedJiras = data.related_jiras || [];
 
     const layerHtml = layers.length ? layers.map(layer => `
         <div class="attribute-layer-card">
@@ -52,6 +53,18 @@ function renderAttributeImpact(data) {
             ` : ""}
         </div>
     `).join("") : `<div class="muted-box">No endpoint flow currently intersects this attribute.</div>`;
+
+    const jiraHtml = relatedJiras.length ? relatedJiras.map(jira => `
+        <div class="attribute-impact-row">
+            <div>
+                <strong>${escapeHtml(jira.jira_id || "")}</strong>
+                <div class="muted-text">${escapeHtml(jira.title || "")}</div>
+            </div>
+            <span class="tag">${escapeHtml(jira.relationship || "SEMANTIC_RELATED")}</span>
+            ${(jira.reasons || []).map(reason => `<div class="attribute-evidence">• ${escapeHtml(reason)}</div>`).join("")}
+            <div class="attribute-evidence">${escapeHtml(jira.requirement || "")}</div>
+        </div>
+    `).join("") : `<div class="muted-box">No saved JIRA requirement matched this attribute yet.</div>`;
 
     const scenarioHtml = scenarios.length ? scenarios.map(scenario => `
         <div class="attribute-impact-row">
@@ -88,6 +101,11 @@ function renderAttributeImpact(data) {
             </div>
         </div>
 
-        <div class="muted-text attribute-local-note">Local static analysis only · no LLM call is used for Attribute Impact.</div>
+        <div class="attribute-impact-section">
+            <h3>Related JIRAs</h3>
+            ${jiraHtml}
+        </div>
+
+        <div class="muted-text attribute-local-note">LangGraph parallel analysis · local Java analysis + local JIRA RAG · no external LLM required.</div>
     `;
 }

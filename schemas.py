@@ -9,6 +9,7 @@ class ScenarioRequest(BaseModel):
     http_method: str
     endpoint: str
     description: Optional[str] = None
+    jira_id: Optional[str] = None
     request_json: Optional[str] = None
     expected_response_json: Optional[str] = None
     expected_db_effect: Optional[str] = None

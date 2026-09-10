@@ -32,6 +32,12 @@ def get_scenario_page(
     return service.get_page_for_active_project(db, page, page_size)
 
 
+@router.get("/active-project", response_model=List[ScenarioResponse])
+def get_active_project_scenarios(db: Session = Depends(get_db)):
+    """Return only scenarios that belong to endpoints discovered in the active Java project."""
+    return service.get_all_for_active_project(db)
+
+
 @router.get("/{scenario_id}", response_model=ScenarioResponse)
 def get_scenario(scenario_id: int, db: Session = Depends(get_db)):
     return service.get_by_id(db, scenario_id)

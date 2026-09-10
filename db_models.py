@@ -14,10 +14,25 @@ class Scenario(Base):
     http_method = Column(String(20), nullable=False)
     endpoint = Column(String(300), nullable=False)
     description = Column(Text, nullable=True)
+    jira_id = Column(String(100), nullable=True, index=True)
     request_json = Column(Text, nullable=True)
     expected_response_json = Column(Text, nullable=True)
     expected_db_effect = Column(Text, nullable=True)
     involved_classes = Column(Text, nullable=True)
     status = Column(String(50), nullable=False, default="ACTIVE")
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+
+class JiraKnowledge(Base):
+    """Locally saved JIRA/requirement document used by the demo JIRA RAG index."""
+    __tablename__ = "jira_knowledge"
+
+    id = Column(Integer, primary_key=True, index=True)
+    jira_id = Column(String(100), unique=True, nullable=False, index=True)
+    title = Column(String(300), nullable=True)
+    requirement = Column(Text, nullable=False)
+    project_path = Column(Text, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
