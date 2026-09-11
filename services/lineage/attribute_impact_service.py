@@ -102,10 +102,21 @@ class AttributeImpactService:
             (item["http_method"], item["endpoint"])
             for item in endpoints
         }
+        active_scenarios = self.scenarios.get_all_for_active_project(db)
+        domain_tokens = self._infer_attribute_domain_tokens(occurrences, active_scenarios)
+
         scenarios = []
-        for scenario in self.scenarios.get_all_for_active_project(db):
+        for scenario in active_scenarios:
             key = (str(scenario.http_method).upper(), str(scenario.endpoint))
             involved = self._scenario_classes(scenario.involved_classes)
+
+            # A shared endpoint such as /api/persons can execute both Student and
+            # Employee branches.  Endpoint equality alone must therefore never
+            # pull a sibling-domain scenario into a domain-owned attribute impact.
+            # Example: Student.gpa must not report EMPLOYEE_ADD.
+            if domain_tokens and not self._scenario_matches_domain(scenario, involved, domain_tokens):
+                continue
+
             matched = sorted(involved.intersection(impacted_classes))
             endpoint_match = key in endpoint_keys
             if not endpoint_match and not matched:
@@ -182,6 +193,10 @@ class AttributeImpactService:
             "occurrences": occurrences,
             "affected_endpoints": endpoints[:20],
             "affected_scenarios": scenarios[:30],
+            "domain_filter": {
+                "mode": "DOMAIN_ONLY" if domain_tokens else "SHARED_OR_UNKNOWN",
+                "tokens": sorted(domain_tokens),
+            },
             "confidence": {
                 "score": confidence_score,
                 "level": confidence_level,
@@ -237,6 +252,65 @@ class AttributeImpactService:
         if not relevant:
             relevant = flow_methods[:6]
         return list(dict.fromkeys([attribute_name, *relevant[:8], endpoint_label]))
+
+    def _infer_attribute_domain_tokens(self, occurrences: list[dict], scenarios) -> set[str]:
+        """Infer an exclusive business-domain owner without hard-coding domain names.
+
+        We derive candidate owners from classes where the attribute is declared/used
+        (Student, StudentRequest, StudentResponse -> student).  A candidate becomes a
+        domain guard only when it also appears as the leading business token of an
+        existing scenario code/name.  Shared value objects such as Address therefore
+        remain unguarded and can legitimately affect multiple domains.
+        """
+        scenario_domain_tokens = set()
+        for scenario in scenarios:
+            code = str(getattr(scenario, "scenario_code", "") or "")
+            name = str(getattr(scenario, "scenario_name", "") or "")
+            for text in (code, name):
+                parts = re.findall(r"[A-Za-z][A-Za-z0-9]*", text.replace("-", "_").replace(" ", "_"))
+                if parts:
+                    # Scenario codes are normally EMPLOYEE_ADD / STUDENT_UPDATE.
+                    first = re.split(r"_+", text.strip())[0] if "_" in text else parts[0]
+                    if first:
+                        scenario_domain_tokens.add(first.lower())
+
+        owner_tokens = set()
+        suffixes = (
+            "request", "response", "dto", "entity", "model", "mapper",
+            "service", "serviceimpl", "controller", "repository", "impl",
+        )
+        for item in occurrences:
+            class_name = str(item.get("class_name") or "")
+            if not class_name:
+                continue
+            stem = class_name
+            lowered = stem.lower()
+            changed = True
+            while changed:
+                changed = False
+                for suffix in suffixes:
+                    if lowered.endswith(suffix) and len(stem) > len(suffix):
+                        stem = stem[:-len(suffix)]
+                        lowered = stem.lower()
+                        changed = True
+                        break
+            if stem:
+                # Split CamelCase and use the leading business noun.
+                parts = re.findall(r"[A-Z]?[a-z]+|[A-Z]+(?=[A-Z]|$)|\d+", stem)
+                if parts:
+                    owner_tokens.add(parts[0].lower())
+
+        return owner_tokens.intersection(scenario_domain_tokens)
+
+    def _scenario_matches_domain(self, scenario, involved: set[str], domain_tokens: set[str]) -> bool:
+        text = " ".join([
+            str(getattr(scenario, "scenario_code", "") or ""),
+            str(getattr(scenario, "scenario_name", "") or ""),
+            str(getattr(scenario, "description", "") or ""),
+            " ".join(sorted(involved)),
+        ])
+        tokens = {token.lower() for token in re.findall(r"[A-Za-z][A-Za-z0-9]*", re.sub(r"([a-z0-9])([A-Z])", r"\1 \2", text).replace("_", " "))}
+        return bool(tokens.intersection(domain_tokens))
 
     def _scenario_classes(self, raw) -> set[str]:
         if not raw:
