@@ -59,8 +59,24 @@ class ScenarioRepository:
     def find_by_code(self, db: Session, scenario_code: str):
         return db.query(Scenario).filter(Scenario.scenario_code == scenario_code).first()
 
-    def create(self, db: Session, request: ScenarioRequest):
-        scenario = Scenario(**request.model_dump())
+    def find_by_operation(self, db: Session, http_method: str, endpoint: str, project_path: str | None = None):
+        query = db.query(Scenario).filter(
+            Scenario.http_method == str(http_method).upper(),
+            Scenario.endpoint == endpoint
+        )
+        if project_path:
+            # New scenarios are project-bound. Legacy rows may have no project_path,
+            # so include them to avoid accidentally creating another duplicate.
+            query = query.filter(
+                or_(Scenario.project_path == project_path, Scenario.project_path.is_(None))
+            )
+        return query.order_by(Scenario.id).all()
+
+    def create(self, db: Session, request: ScenarioRequest, project_path: str | None = None):
+        data = request.model_dump()
+        if project_path:
+            data["project_path"] = project_path
+        scenario = Scenario(**data)
         db.add(scenario)
         db.commit()
         db.refresh(scenario)

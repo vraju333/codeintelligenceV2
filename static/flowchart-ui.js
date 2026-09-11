@@ -21,6 +21,36 @@ function ciFlowKind(label) {
     return "code";
 }
 
+
+function ciFlowInputText(node) {
+    const params = Array.isArray(node?.input_parameters) ? node.input_parameters : [];
+    if (!params.length) return "Nothing";
+    return params.map(param => {
+        if (typeof param === "string") return param;
+        return param?.display || [param?.type, param?.name].filter(Boolean).join(" ") || "parameter";
+    }).join(", ");
+}
+
+function ciFlowOutputText(node) {
+    const raw = String(node?.return_type || "").trim();
+    if (!raw) return "Nothing";
+
+    // Keep the hover focused on the actual Java type, not declaration
+    // modifiers such as public/private/protected/static/final.
+    const cleaned = raw
+        .replace(/^(?:(?:public|protected|private|abstract|default|static|final|synchronized|native|strictfp)\s+)+/i, "")
+        .trim();
+
+    if (!cleaned || cleaned.toLowerCase() === "void") return "Nothing";
+    return cleaned;
+}
+
+function ciFlowFileText(node) {
+    const value = String(node?.file_path || "");
+    if (!value) return "";
+    return value.replace(/\\/g, "/").split("/").pop();
+}
+
 function ciBuildGraph(nodes, edges) {
     const byId = new Map((nodes || []).map(node => [String(node.id), node]));
     const children = new Map();
@@ -62,9 +92,15 @@ function ciRenderFlowNode(id, graph, ancestry = new Set()) {
 
     return `
         <div class="ci-flow-tree-node">
-            <div class="ci-flow-card ci-flow-${kind}">
+            <div class="ci-flow-card ci-flow-${kind}" tabindex="0">
                 <span>${escapeHtml(kind)}</span>
                 <strong>${escapeHtml(label)}</strong>
+                <div class="ci-flow-tooltip" role="tooltip">
+                    <div class="ci-flow-tooltip-title">${escapeHtml(node?.class_name || "")}\.${escapeHtml(node?.method_name || "")}</div>
+                    <div class="ci-flow-tooltip-row"><b>Input</b><code>${escapeHtml(ciFlowInputText(node))}</code></div>
+                    <div class="ci-flow-tooltip-row"><b>Output</b><code>${escapeHtml(ciFlowOutputText(node))}</code></div>
+                    ${ciFlowFileText(node) ? `<div class="ci-flow-tooltip-row"><b>File</b><code>${escapeHtml(ciFlowFileText(node))}</code></div>` : ""}
+                </div>
             </div>
             ${childIds.length ? `
                 <div class="ci-flow-arrow">↓</div>

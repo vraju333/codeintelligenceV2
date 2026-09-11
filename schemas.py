@@ -15,6 +15,7 @@ class ScenarioRequest(BaseModel):
     expected_db_effect: Optional[str] = None
     involved_classes: Optional[str] = None
     status: str = "ACTIVE"
+    project_path: Optional[str] = None
 
 
 class ScenarioResponse(ScenarioRequest):

@@ -661,21 +661,36 @@ function renderScenarioPager(data, pager) {
 // ------------------------------------------------------
 // Scenario Registry - create a new scenario
 // ------------------------------------------------------
-function openNewScenarioModal() {
+
+let scenarioCoveredOperationKeys = new Set();
+
+function scenarioOperationKey(method, endpoint) {
+    return `${String(method || "").toUpperCase().trim()} ${String(endpoint || "").trim()}`;
+}
+
+async function openNewScenarioModal() {
     const modal = document.getElementById("newScenarioModal");
     if (!modal) return;
 
-    ["newScenarioCode", "newScenarioName", "newScenarioJiraId", "newScenarioDescription", "newScenarioRequestJson", "newScenarioExpectedResponse", "newScenarioExpectedDbEffect"].forEach(id => {
+    ["newScenarioCode", "newScenarioName", "newScenarioJiraId", "newScenarioDescription",
+     "newScenarioRequestJson", "newScenarioExpectedResponse", "newScenarioExpectedDbEffect"].forEach(id => {
         const element = document.getElementById(id);
         if (element) element.value = "";
     });
+
     const error = document.getElementById("newScenarioError");
     if (error) error.textContent = "";
 
-    refreshNewScenarioEndpoints();
+    const details = document.getElementById("newScenarioDetails");
+    if (details) details.classList.add("hidden");
+
+    const registerButton = document.getElementById("registerScenarioButton");
+    if (registerButton) registerButton.disabled = true;
+
     modal.classList.add("open");
     modal.setAttribute("aria-hidden", "false");
-    setTimeout(() => document.getElementById("newScenarioCode")?.focus(), 0);
+
+    await loadAvailableScenarioOperations();
 }
 
 function closeNewScenarioModal() {
@@ -685,23 +700,209 @@ function closeNewScenarioModal() {
     modal.setAttribute("aria-hidden", "true");
 }
 
+async function loadAvailableScenarioOperations() {
+    const methodSelect = document.getElementById("newScenarioMethod");
+    const endpointSelect = document.getElementById("newScenarioEndpoint");
+    const status = document.getElementById("existingOperationScenario");
+    const registerButton = document.getElementById("registerScenarioButton");
+
+    if (!methodSelect || !endpointSelect) return;
+
+    scenarioCoveredOperationKeys = new Set();
+
+    try {
+        // One scenario is allowed per project + method + endpoint.
+        // Therefore registration only presents operations not already represented.
+        const response = await fetch("/api/scenarios/active-project");
+        const scenarios = await response.json();
+        if (!response.ok) throw new Error(JSON.stringify(scenarios));
+
+        (Array.isArray(scenarios) ? scenarios : []).forEach(item => {
+            scenarioCoveredOperationKeys.add(
+                scenarioOperationKey(item.http_method, item.endpoint)
+            );
+        });
+
+        const available = (Array.isArray(discoveredEndpoints) ? discoveredEndpoints : [])
+            .map(item => ({
+                method: String(item.http_method || item.method || "").toUpperCase().trim(),
+                endpoint: String(item.endpoint || item.path || "").trim()
+            }))
+            .filter(item => item.method && item.endpoint)
+            .filter((item, index, values) =>
+                values.findIndex(other =>
+                    other.method === item.method && other.endpoint === item.endpoint
+                ) === index
+            )
+            .filter(item =>
+                !scenarioCoveredOperationKeys.has(
+                    scenarioOperationKey(item.method, item.endpoint)
+                )
+            );
+
+        const methods = [...new Set(available.map(item => item.method))].sort();
+        methodSelect.innerHTML = methods.length
+            ? methods.map(method => `<option value="${escapeHtml(method)}">${escapeHtml(method)}</option>`).join("")
+            : '<option value="">No uncaptured operations</option>';
+
+        if (!methods.length) {
+            endpointSelect.innerHTML = '<option value="">All discovered operations already have scenarios</option>';
+            if (status) {
+                status.className = "scenario-operation-check existing";
+                status.innerHTML = "<strong>All discovered operations are already represented.</strong> Open Scenario Baselines and add a new testing baseline to the existing operation instead of creating another scenario.";
+            }
+            if (registerButton) registerButton.disabled = true;
+            return;
+        }
+
+        refreshNewScenarioEndpoints();
+    } catch (error) {
+        methodSelect.innerHTML = '<option value="">Unable to load operations</option>';
+        endpointSelect.innerHTML = '<option value="">Unable to load operations</option>';
+        if (status) {
+            status.className = "scenario-operation-check error";
+            status.textContent = error.message || "Could not load available operations.";
+        }
+        if (registerButton) registerButton.disabled = true;
+    }
+}
+
 function refreshNewScenarioEndpoints() {
     const method = (document.getElementById("newScenarioMethod")?.value || "").toUpperCase();
     const select = document.getElementById("newScenarioEndpoint");
+    const status = document.getElementById("existingOperationScenario");
+    const details = document.getElementById("newScenarioDetails");
+    const button = document.getElementById("registerScenarioButton");
     if (!select) return;
 
     const matching = (Array.isArray(discoveredEndpoints) ? discoveredEndpoints : [])
         .filter(item => String(item.http_method || item.method || "").toUpperCase() === method)
-        .map(item => String(item.endpoint || item.path || ""))
+        .map(item => String(item.endpoint || item.path || "").trim())
         .filter(Boolean)
+        .filter(endpoint =>
+            !scenarioCoveredOperationKeys.has(scenarioOperationKey(method, endpoint))
+        )
         .filter((value, index, values) => values.indexOf(value) === index)
         .sort();
 
-    select.innerHTML = '<option value="">Select a discovered endpoint...</option>' +
+    select.innerHTML = '<option value="">Select an available endpoint...</option>' +
         matching.map(endpoint => `<option value="${escapeHtml(endpoint)}">${escapeHtml(endpoint)}</option>`).join("");
 
     if (!matching.length) {
-        select.innerHTML = `<option value="">No ${escapeHtml(method)} endpoints discovered</option>`;
+        select.innerHTML = `<option value="">No uncaptured ${escapeHtml(method)} operations</option>`;
+    }
+
+    if (details) details.classList.add("hidden");
+    if (status) {
+        status.className = "scenario-operation-check";
+        status.innerHTML = matching.length
+            ? `Select an endpoint. Only ${escapeHtml(method)} operations without an existing scenario are listed.`
+            : `All discovered ${escapeHtml(method)} operations already have scenarios.`;
+    }
+    if (button) button.disabled = true;
+}
+
+function suggestScenarioIdentity(method, endpoint) {
+    const codeInput = document.getElementById("newScenarioCode");
+    const nameInput = document.getElementById("newScenarioName");
+    if (!codeInput || !nameInput) return;
+
+    const words = String(endpoint || "")
+        .replace(/\{[^}]+\}/g, "")
+        .split("/")
+        .filter(Boolean)
+        .flatMap(part => part.split(/[-_]/g))
+        .filter(Boolean);
+
+    let suffix = words.slice(-2).join("_").toUpperCase();
+    if (!suffix) suffix = "OPERATION";
+
+    if (!codeInput.value.trim()) {
+        codeInput.value = `${suffix}_${String(method || "").toUpperCase()}`;
+    }
+    if (!nameInput.value.trim()) {
+        const title = words.slice(-2)
+            .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+            .join(" ");
+        nameInput.value = `${title || "Operation"} ${String(method || "").toUpperCase()}`;
+    }
+}
+
+async function checkExistingOperationScenario() {
+    const method = (document.getElementById("newScenarioMethod")?.value || "").toUpperCase();
+    const endpoint = (document.getElementById("newScenarioEndpoint")?.value || "").trim();
+    const status = document.getElementById("existingOperationScenario");
+    const button = document.getElementById("registerScenarioButton");
+    const details = document.getElementById("newScenarioDetails");
+    if (!status || !button) return;
+
+    if (!method || !endpoint) {
+        status.className = "scenario-operation-check";
+        status.innerHTML = "Select an available operation.";
+        button.disabled = true;
+        if (details) details.classList.add("hidden");
+        return;
+    }
+
+    const key = scenarioOperationKey(method, endpoint);
+    if (scenarioCoveredOperationKeys.has(key)) {
+        status.className = "scenario-operation-check existing";
+        status.innerHTML = "<strong>This operation already has a scenario.</strong> Open its Scenario Baseline and add another testing baseline instead.";
+        button.disabled = true;
+        if (details) details.classList.add("hidden");
+        return;
+    }
+
+    // Backend re-check prevents stale UI/project-switch races.
+    status.className = "scenario-operation-check checking";
+    status.innerHTML = `Checking ${escapeHtml(method)} ${escapeHtml(endpoint)}...`;
+    button.disabled = true;
+
+    try {
+        const response = await fetch(
+            `/api/scenarios/by-operation?http_method=${encodeURIComponent(method)}&endpoint=${encodeURIComponent(endpoint)}`
+        );
+        const data = await response.json();
+        if (!response.ok) throw new Error(JSON.stringify(data));
+
+        if (Array.isArray(data) && data.length) {
+            scenarioCoveredOperationKeys.add(key);
+            status.className = "scenario-operation-check existing";
+            status.innerHTML = `<strong>${escapeHtml(method)} ${escapeHtml(endpoint)} already has a scenario.</strong> It has been removed from the list.`;
+            if (details) details.classList.add("hidden");
+            button.disabled = true;
+            refreshNewScenarioEndpoints();
+            return;
+        }
+
+        status.className = "scenario-operation-check available";
+        status.innerHTML = `<strong>${escapeHtml(method)} ${escapeHtml(endpoint)} is available.</strong> Enter the scenario details below.`;
+        if (details) details.classList.remove("hidden");
+        suggestScenarioIdentity(method, endpoint);
+        button.disabled = false;
+    } catch (e) {
+        status.className = "scenario-operation-check error";
+        status.textContent = e.message || "Could not check existing scenarios.";
+        if (details) details.classList.add("hidden");
+        button.disabled = true;
+    }
+}
+
+function openExistingOperationScenario(scenarioId) {
+    closeNewScenarioModal();
+    if (typeof selectBaselineScenario === "function") {
+        selectBaselineScenario(scenarioId);
+    }
+    const select = document.getElementById("baselineScenarioSelect");
+    if (select) {
+        select.value = String(scenarioId);
+        if (typeof loadBaselineHistory === "function") loadBaselineHistory();
+    }
+    const baselineCard = Array.from(document.querySelectorAll(".accordion-card"))
+        .find(card => card.querySelector('[data-accordion-title="Scenario Baselines"]'));
+    if (baselineCard) {
+        baselineCard.classList.remove("is-collapsed");
+        baselineCard.scrollIntoView({behavior: "smooth", block: "start"});
     }
 }
 
@@ -764,7 +965,7 @@ async function registerNewScenario() {
             data = {detail: responseText || `HTTP ${response.status}`};
         }
         if (!response.ok) {
-            throw new Error(data.detail || `Scenario registration failed (HTTP ${response.status})`);
+            throw new Error((typeof data.detail === "object" ? data.detail.message : data.detail) || `Scenario registration failed (HTTP ${response.status})`);
         }
 
         closeNewScenarioModal();

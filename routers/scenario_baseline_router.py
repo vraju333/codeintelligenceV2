@@ -27,6 +27,13 @@ class CaptureBaselineRequest(BaseModel):
     endpoint_flow: dict | None = None
 
 
+class CreateTestingBaselineRequest(BaseModel):
+    baseline_name: str
+    request_json: Any = None
+    expected_response: Any = None
+    actual_response: Any = None
+    expected_db_effect: str | None = None
+    jira_ids: list[str] = []
 
 
 @router.get("/overview")
@@ -49,6 +56,32 @@ def capture_baseline(
         successful_response=request.successful_response,
         endpoint_flow=request.endpoint_flow
     )
+
+
+@router.post("/testing/{scenario_id}")
+def create_testing_baseline(
+    scenario_id: int,
+    request: CreateTestingBaselineRequest,
+    db: Session = Depends(get_db)
+):
+    return service.create_test_baseline(
+        db=db,
+        scenario_id=scenario_id,
+        baseline_name=request.baseline_name,
+        request_json=request.request_json,
+        expected_response=request.expected_response,
+        actual_response=request.actual_response,
+        expected_db_effect=request.expected_db_effect,
+        jira_ids=request.jira_ids
+    )
+
+
+@router.get("/testing/{scenario_id}")
+def get_testing_baselines(
+    scenario_id: int,
+    db: Session = Depends(get_db)
+):
+    return service.get_test_baselines(db, scenario_id)
 
 
 @router.get("/latest/{scenario_id}")

@@ -10,91 +10,92 @@ async function loadBaselineHistory() {
     const container = document.getElementById("baselineResult");
 
     if (!scenarioId) {
-        container.innerHTML = "Select a scenario first.";
+        container.innerHTML = "Select an operation scenario first.";
         return;
     }
 
-    container.innerHTML = "Loading baseline history...";
+    container.innerHTML = "Loading code versions and testing baselines...";
 
     try {
-        const response = await fetch(`/api/scenario-baselines/history/${scenarioId}`);
-        const data = await response.json();
+        const [historyResponse, testingResponse] = await Promise.all([
+            fetch(`/api/scenario-baselines/history/${scenarioId}`),
+            fetch(`/api/scenario-baselines/testing/${scenarioId}`)
+        ]);
+        const history = await historyResponse.json();
+        const testing = await testingResponse.json();
 
-        if (!response.ok) {
-            throw new Error(JSON.stringify(data));
-        }
+        if (!historyResponse.ok) throw new Error(JSON.stringify(history));
+        if (!testingResponse.ok) throw new Error(JSON.stringify(testing));
 
-        if (!Array.isArray(data) || data.length === 0) {
-            container.innerHTML = `<div class="warning">No baseline has been captured for this scenario yet.</div>`;
-            return;
-        }
-
-        populateVersionCompare(data);
-
-        const versions = [...data].sort(
+        const versions = Array.isArray(history) ? [...history].sort(
             (a, b) => b.baseline_version - a.baseline_version
-        );
+        ) : [];
+        const testBaselines = Array.isArray(testing) ? testing : [];
 
-        const active = versions.find(item => item.is_active) || versions[0];
-        const previous = versions.filter(item => item.id !== active.id);
-        const previousVersion = versions.find(
-            item => item.baseline_version < active.baseline_version
-        );
+        if (versions.length >= 2) populateVersionCompare(versions);
+        else {
+            const panel = document.getElementById("versionComparePanel");
+            if (panel) panel.classList.add("hidden");
+        }
 
-        container.innerHTML = `
-            <div class="active-baseline-card">
-                <div>
-                    <span class="muted-text">Current baseline</span>
-                    <h3>${escapeHtml(active.scenario_code)} · V${active.baseline_version}</h3>
+        let codeHtml = `<div class="muted-box">No code baseline captured yet.</div>`;
+        if (versions.length) {
+            const active = versions.find(item => item.is_active) || versions[0];
+            const previous = versions.filter(item => item.id !== active.id);
+            const previousVersion = versions.find(
+                item => item.baseline_version < active.baseline_version
+            );
+
+            codeHtml = `
+                <div class="active-baseline-card">
+                    <div>
+                        <span class="muted-text">Current code baseline</span>
+                        <h3>${escapeHtml(active.scenario_code)} · V${active.baseline_version}</h3>
+                    </div>
+                    <span class="tag">ACTIVE</span>
+                    <div class="baseline-detail">${escapeHtml(active.http_method)} ${escapeHtml(active.endpoint)}</div>
+                    <div class="baseline-detail">Flow: ${active.endpoint_flow ? "stored" : "not stored"}</div>
                 </div>
-                <span class="tag">ACTIVE</span>
-                <div class="baseline-detail">${escapeHtml(active.http_method)} ${escapeHtml(active.endpoint)}</div>
-                <div class="baseline-detail">Flow: ${active.endpoint_flow ? "stored" : "not stored"}</div>
-            </div>
 
-            ${previousVersion ? `
-                <div class="version-auto-change-card">
-                    <div class="version-auto-change-header">
-                        <div>
-                            <strong>Changes from V${previousVersion.baseline_version} → V${active.baseline_version}</strong>
-                            <div class="muted-text">What changed when this baseline version became the new working version.</div>
+                ${previousVersion ? `
+                    <div class="version-auto-change-card">
+                        <div class="version-auto-change-header">
+                            <div>
+                                <strong>Changes from V${previousVersion.baseline_version} → V${active.baseline_version}</strong>
+                                <div class="muted-text">A code version is created only when relevant Java source/flow changes.</div>
+                            </div>
+                            <button type="button"
+                                    class="secondary-button"
+                                    onclick="loadInlineVersionChanges(
+                                        ${Number(scenarioId)},
+                                        ${previousVersion.baseline_version},
+                                        ${active.baseline_version}
+                                    )">
+                                Show Changes
+                            </button>
                         </div>
-                        <button type="button"
-                                class="secondary-button"
-                                onclick="loadInlineVersionChanges(
-                                    ${Number(scenarioId)},
-                                    ${previousVersion.baseline_version},
-                                    ${active.baseline_version}
-                                )">
-                            Show Changes
-                        </button>
+                        <div id="inlineVersionChanges" class="inline-version-changes">
+                            Click <strong>Show Changes</strong> to compare the two code versions.
+                        </div>
                     </div>
-                    <div id="inlineVersionChanges" class="inline-version-changes">
-                        Click <strong>Show Changes</strong> to compare the two versions.
-                    </div>
-                </div>
-            ` : ""}
+                ` : ""}
 
-            ${previous.length ? `
-                <details class="technical-details">
-                    <summary>Previous versions (${previous.length})</summary>
-                    ${previous.map(b => {
-                        const next = versions
-                            .filter(v => v.baseline_version > b.baseline_version)
-                            .sort((x, y) => x.baseline_version - y.baseline_version)[0];
-                        return `
+                ${previous.length ? `
+                    <details class="technical-details">
+                        <summary>Previous code versions (${previous.length})</summary>
+                        ${previous.map(b => `
                             <div class="history-row version-history-row">
                                 <strong>V${b.baseline_version}</strong>
                                 <span>${escapeHtml(b.http_method)} ${escapeHtml(b.endpoint)}</span>
                                 <span>Flow: ${b.endpoint_flow ? "stored" : "not stored"}</span>
-                                ${next ? `<button type="button" class="secondary-button version-row-button" onclick="loadVersionRowChanges(${Number(scenarioId)}, ${b.baseline_version}, ${next.baseline_version}, this)">Changes → V${next.baseline_version}</button>` : ""}
                             </div>
-                            <div class="version-row-result" data-from="${b.baseline_version}" data-to="${next ? next.baseline_version : ""}"></div>
-                        `;
-                    }).join("")}
-                </details>
-            ` : `<div class="muted-box">No previous versions.</div>`}
-        `;
+                        `).join("")}
+                    </details>
+                ` : `<div class="muted-box">No previous code versions.</div>`}
+            `;
+        }
+
+        container.innerHTML = codeHtml;
 
     } catch (error) {
         container.innerHTML = renderError(error.message);
@@ -141,21 +142,6 @@ async function loadInlineVersionChanges(
     }
 }
 
-
-async function loadVersionRowChanges(scenarioId, fromVersion, toVersion, button) {
-    const row = button?.closest(".version-history-row");
-    const container = row?.nextElementSibling;
-    if (!container) return;
-    container.innerHTML = "Comparing versions...";
-    try {
-        const response = await fetch(`/api/scenario-baselines/compare/${scenarioId}?from_version=${fromVersion}&to_version=${toVersion}`);
-        const data = await response.json();
-        if (!response.ok) throw new Error(JSON.stringify(data));
-        container.innerHTML = renderVersionSourceSummary(data);
-    } catch (error) {
-        container.innerHTML = renderError(error.message);
-    }
-}
 
 function renderVersionSourceSummary(data) {
     const source = data.source_comparison || {};

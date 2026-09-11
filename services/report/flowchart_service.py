@@ -109,7 +109,16 @@ class FlowchartService:
                 "id": node_id,
                 "label": self._escape_label(
                     label
-                )
+                ),
+                "class_name": class_name,
+                "method_name": method_name,
+                "type": node_type,
+                "operation": operation,
+                "input_parameters": node.get("input_parameters", []),
+                "return_type": node.get("return_type"),
+                "file_path": node.get("file_path"),
+                "signature_owner": node.get("signature_owner"),
+                "external": bool(node.get("external")),
             }
         )
 

@@ -20,6 +20,7 @@ class Scenario(Base):
     expected_db_effect = Column(Text, nullable=True)
     involved_classes = Column(Text, nullable=True)
     status = Column(String(50), nullable=False, default="ACTIVE")
+    project_path = Column(Text, nullable=True, index=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 

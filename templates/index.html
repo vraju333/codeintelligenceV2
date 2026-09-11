@@ -5,7 +5,7 @@
 <meta charset="utf-8"/>
 <meta content="width=device-width, initial-scale=1.0" name="viewport"/>
 <title>CodeIntelligence</title>
-<link href="/static/style.css?v=phase3-defect-ui-2" rel="stylesheet"/>
+<link href="/static/style.css?v=operation-scenario-3" rel="stylesheet"/>
 <script type="module">
         import mermaid
             from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
@@ -44,51 +44,6 @@
 <button onclick="addProject()" type="button">Add Project</button>
 <span class="project-path" id="activeProjectPath"></span>
 </section>
-<!-- ====================================================== -->
-<!-- ENDPOINT FLOW -->
-<!-- ====================================================== -->
-<section class="card accordion-card is-collapsed">
-<div aria-expanded="false" class="card-header accordion-header" data-accordion-title="Endpoint Flow" role="button" tabindex="0">
-<div>
-<h2>
-                        Endpoint Flow
-                    </h2>
-<p>
-                        Understand how an API travels through Java code
-                    </p>
-</div>
-<button aria-label="Toggle Endpoint Flow" class="accordion-toggle" tabindex="-1" type="button">›</button></div><div class="accordion-body">
-<div class="form-row">
-<select id="flowMethod">
-<option value="GET">
-                        GET
-                    </option>
-<option selected="" value="POST">
-                        POST
-                    </option>
-<option value="PUT">
-                        PUT
-                    </option>
-<option value="PATCH">
-                        PATCH
-                    </option>
-<option value="DELETE">
-                        DELETE
-                    </option>
-</select>
-<select id="flowEndpoint">
-<option value="">
-                        Loading endpoints...
-                    </option>
-</select>
-<button onclick="analyseEndpointFlow()">
-                    Analyse Flow
-                </button>
-</div>
-<div class="result-area" id="flowResult">
-                Select an endpoint and click Analyse Flow.
-            </div>
-</div></section>
 <!-- ====================================================== -->
 <!-- SCENARIO FLOWCHART -->
 <!-- ====================================================== -->
@@ -321,27 +276,27 @@ Select a scenario to reuse its endpoint and test data, or continue manually belo
 <div aria-expanded="false" class="card-header accordion-header" data-accordion-title="Scenario Baselines" role="button" tabindex="0">
 <div>
 <h2>Scenario Baselines</h2>
-<p>See every registered scenario and its active baseline. Select one only when you need version history.</p>
+<p>One scenario per HTTP operation. Keep code versions separate from repeatable monthly/testing baselines.</p>
 </div>
 <div class="header-actions">
 <button class="secondary-button" onclick="loadBaselineOverview()">Refresh</button>
-<button onclick="captureMissingBaselines()">Capture Missing Baselines</button>
+<button onclick="captureMissingBaselines()">Capture Missing Code Baselines</button>
 </div>
 <button aria-label="Toggle Scenario Baselines" class="accordion-toggle" tabindex="-1" type="button">›</button></div><div class="accordion-body">
 <div class="baseline-overview" id="baselineOverview">
                 Loading scenario baselines...
             </div>
 <div class="baseline-history-toolbar">
-<label for="baselineScenarioSelect">Version history</label>
+<label for="baselineScenarioSelect">Code version history</label>
 <div class="form-row compact-row">
 <select id="baselineScenarioSelect">
-<option value="">Select a scenario...</option>
+<option value="">Select an operation scenario...</option>
 </select>
 <button onclick="loadBaselineHistory()">View History</button>
 </div>
 </div>
 <div class="result-area compact-result" id="baselineResult">
-                Select a scenario above to view older baseline versions.
+                Select an operation scenario above to view code versions and testing baselines.
             </div>
 
 </div></section>
@@ -363,28 +318,33 @@ Select a scenario to reuse its endpoint and test data, or continue manually belo
 </div>
 <div class="scenario-create-form">
 <div class="scenario-create-scroll">
+<div class="scenario-create-section-title">Choose an uncaptured operation</div>
+<div class="scenario-create-help">Only operations that do not already have a registered scenario are shown here.</div>
+<div class="scenario-create-grid">
+<label>HTTP Method
+<select id="newScenarioMethod" onchange="refreshNewScenarioEndpoints()"></select>
+</label>
+<label>Endpoint
+<select id="newScenarioEndpoint" onchange="checkExistingOperationScenario()"><option value="">Select an available endpoint...</option></select>
+</label>
+</div>
+<div class="scenario-operation-check" id="existingOperationScenario">
+Loading operations that are not yet represented in Scenario Baselines...
+</div>
+
+<div id="newScenarioDetails" class="scenario-create-details hidden">
 <label>Scenario Code
-<input id="newScenarioCode" placeholder="e.g. EMPLOYEE_BACKUP_CONTACT_UPDATE" type="text"/>
+<input id="newScenarioCode" placeholder="e.g. STUDENT_ADDRESS_UPDATE" type="text"/>
 </label>
 <label>Scenario Name
-<input id="newScenarioName" placeholder="e.g. Employee Backup Contact Update" type="text"/>
+<input id="newScenarioName" placeholder="e.g. Student Address Update" type="text"/>
 </label>
 <label>JIRA ID <span class="muted-text">(optional)</span>
-<input id="newScenarioJiraId" placeholder="e.g. EMP-245" type="text"/>
+<input id="newScenarioJiraId" placeholder="e.g. STUD-303" type="text"/>
 </label>
 <label>Description <span class="muted-text">(optional)</span>
 <textarea id="newScenarioDescription" placeholder="What business/test scenario does this represent?"></textarea>
 </label>
-<div class="scenario-create-grid">
-<label>HTTP Method
-<select id="newScenarioMethod" onchange="refreshNewScenarioEndpoints()">
-<option value="GET">GET</option><option value="POST">POST</option><option value="PUT">PUT</option><option value="PATCH" selected>PATCH</option><option value="DELETE">DELETE</option>
-</select>
-</label>
-<label>Endpoint
-<select id="newScenarioEndpoint"><option value="">Select a discovered endpoint...</option></select>
-</label>
-</div>
 
 <div class="scenario-create-section-title">Test Data</div>
 <div class="scenario-create-help">For POST / PUT / PATCH scenarios, save reproducible request data here. Defect Analysis can reuse this scenario data later.</div>
@@ -398,12 +358,92 @@ Select a scenario to reuse its endpoint and test data, or continue manually belo
 <textarea id="newScenarioExpectedDbEffect" placeholder='e.g. contact_details.primary_contact = "9876543210"'></textarea>
 </label>
 
-<div class="scenario-create-help">After registration, this scenario will appear in <strong>Scenario Baselines</strong> as <strong>No baseline yet</strong>. Test/verify it, then capture its first V1 baseline.</div>
+<div class="scenario-create-help">Only one scenario is allowed per HTTP method + endpoint in the selected project. After registration, add monthly/testing baselines under that scenario; create a new code version only when relevant Java code/flow changes.</div>
+</div>
 <div class="scenario-create-error" id="newScenarioError"></div>
 </div>
 <div class="scenario-create-actions">
 <button class="secondary-button" onclick="closeNewScenarioModal()" type="button">Cancel</button>
 <button id="registerScenarioButton" onclick="registerNewScenario()" type="button">Register Scenario</button>
+</div>
+</div>
+</div>
+</div>
+<!-- ====================================================== -->
+<!-- TESTING BASELINE MODAL -->
+<!-- ====================================================== -->
+<div aria-hidden="true" class="flowchart-modal" id="testingBaselineModal">
+<div class="flowchart-modal-panel scenario-modal-panel">
+<div class="flowchart-modal-header">
+<div>
+<h2>Add Testing Baseline</h2>
+<p id="testingBaselineOperation">Save a new test cycle under the existing operation scenario.</p>
+</div>
+<div class="flowchart-modal-actions">
+<button class="secondary-button" onclick="closeTestingBaselineModal()" type="button">Close</button>
+</div>
+</div>
+<div class="scenario-create-form">
+<div class="scenario-create-scroll">
+<label>Baseline Name
+<input id="testingBaselineName" placeholder="e.g. October 2026" type="text"/>
+</label>
+<div class="testing-jira-picker">
+<label>Related JIRAs <span class="muted-text">(optional)</span></label>
+<div class="testing-jira-add-row">
+<select id="testingBaselineJiraSelect">
+<option value="">Select a saved JIRA...</option>
+</select>
+<button class="jira-add-button" type="button" onclick="addTestingBaselineJira()" aria-label="Add selected JIRA">+</button>
+</div>
+<div class="testing-jira-list" id="testingBaselineJiraList">
+<span class="muted-text">No JIRAs added.</span>
+</div>
+</div>
+<label>Request JSON <span class="muted-text">(optional)</span>
+<textarea class="scenario-json-input" id="testingBaselineRequest" placeholder='{"primaryContact":"9876543210"}'></textarea>
+</label>
+<label>Expected Response JSON <span class="muted-text">(optional)</span>
+<textarea class="scenario-json-input" id="testingBaselineExpected" placeholder='{"primaryContact":"9876543210"}'></textarea>
+</label>
+<label>Actual Response JSON <span class="muted-text">(optional)</span>
+<textarea class="scenario-json-input" id="testingBaselineActual" placeholder='{"primaryContact":"9876543210"}'></textarea>
+</label>
+<label>Expected DB Effect <span class="muted-text">(optional)</span>
+<textarea id="testingBaselineDbEffect" placeholder='e.g. address.city = "Hyderabad"'></textarea>
+</label>
+<div class="scenario-create-help">A testing baseline does not create V2/V3. It records a repeatable test cycle (September, October, etc.) against the current code baseline.</div>
+<div class="scenario-create-error" id="testingBaselineError"></div>
+</div>
+<div class="scenario-create-actions">
+<button class="secondary-button" onclick="closeTestingBaselineModal()" type="button">Cancel</button>
+<button id="saveTestingBaselineButton" onclick="saveTestingBaseline()" type="button">Save Testing Baseline</button>
+</div>
+</div>
+</div>
+</div>
+<!-- ====================================================== -->
+<!-- TESTING BASELINE HISTORY MODAL -->
+<!-- ====================================================== -->
+<div aria-hidden="true" class="flowchart-modal" id="testingBaselineHistoryModal">
+<div class="flowchart-modal-panel scenario-modal-panel testing-history-modal-panel">
+<div class="flowchart-modal-header">
+<div>
+<h2>Testing Baselines</h2>
+<p id="testingBaselineHistoryOperation">Saved testing baselines for this operation.</p>
+</div>
+<div class="flowchart-modal-actions">
+<button class="secondary-button" onclick="closeTestingBaselineHistoryModal()" type="button">Close</button>
+</div>
+</div>
+<div class="testing-history-body">
+<label>Saved Baseline
+<select id="testingBaselineHistorySelect" onchange="renderSelectedTestingBaseline()">
+<option value="">Select a saved testing baseline...</option>
+</select>
+</label>
+<div id="testingBaselineHistoryDetail" class="testing-history-detail">
+<div class="muted-box">Select a saved testing baseline.</div>
 </div>
 </div>
 </div>
@@ -447,12 +487,12 @@ Select a scenario to reuse its endpoint and test data, or continue manually belo
 </details>
 </div>
 </div>
-<script src="/static/app.js?v=10"></script>
-<script src="/static/project-ui.js?v=scenario-defect-hotfix-1"></script>
+<script src="/static/app.js?v=12"></script>
+<script src="/static/project-ui.js?v=operation-scenario-3"></script>
 <script src="/static/flowchart-ui.js?v=3"></script>
 <script src="/static/jira-impact.js?v=3"></script>
 <script src="/static/attribute-impact.js?v=2"></script>
 <script src="/static/regression-details.js?v=2"></script>
-<script src="/static/version-source-history.js?v=4"></script>
+<script src="/static/version-source-history.js?v=6"></script>
 <script src="/static/accordion-ui.js?v=2"></script></body>
 </html>

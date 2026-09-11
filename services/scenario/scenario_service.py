@@ -38,11 +38,41 @@ class ScenarioService:
             raise HTTPException(status_code=404, detail="Scenario not found")
         return scenario
 
+    def find_existing_for_operation(self, db: Session, http_method: str, endpoint: str):
+        method = str(http_method or "").upper().strip()
+        path = str(endpoint or "").strip()
+        if not method or not path:
+            return []
+        return self.repository.find_by_operation(
+            db,
+            method,
+            path,
+            settings.JAVA_PROJECT_PATH
+        )
+
     def create(self, db: Session, request: ScenarioRequest):
         existing = self.repository.find_by_code(db, request.scenario_code)
         if existing:
             raise HTTPException(status_code=409, detail="Scenario code already exists")
-        return self.repository.create(db, request)
+
+        operation_matches = self.find_existing_for_operation(
+            db, request.http_method, request.endpoint
+        )
+        if operation_matches:
+            first = operation_matches[0]
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "message": "A scenario already exists for this operation. Open the existing scenario instead of creating a duplicate.",
+                    "scenario_id": first.id,
+                    "scenario_code": first.scenario_code,
+                    "http_method": first.http_method,
+                    "endpoint": first.endpoint,
+                    "existing_count": len(operation_matches),
+                }
+            )
+
+        return self.repository.create(db, request, settings.JAVA_PROJECT_PATH)
 
     def delete(self, db: Session, scenario_id: int):
         scenario = self.get_by_id(db, scenario_id)

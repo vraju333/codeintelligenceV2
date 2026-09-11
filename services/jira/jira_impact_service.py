@@ -106,6 +106,8 @@ class JiraImpactService:
                 requirement_structure,
             )
 
+        requirement_structure = self._normalize_requirement_java_names(requirement_structure)
+
         project_match = self._assess_project_match(classes, requirement_structure, concepts)
         if project_match["status"] == "MISMATCH":
             return {
@@ -237,6 +239,40 @@ class JiraImpactService:
                 "llm_error": llm_error,
             },
         }
+
+    def _normalize_requirement_java_names(self, structure: dict) -> dict:
+        result = dict(structure or {})
+        attribute = result.get("attribute")
+        if attribute:
+            result["attribute"] = self._to_java_field_name(attribute)
+
+        attributes = []
+        for value in result.get("attributes") or []:
+            normalized = self._to_java_field_name(value)
+            if normalized and normalized not in attributes:
+                attributes.append(normalized)
+        if result.get("attribute") and result["attribute"] not in attributes:
+            attributes.insert(0, result["attribute"])
+        result["attributes"] = attributes
+        return result
+
+    @staticmethod
+    def _to_java_field_name(value: str | None) -> str | None:
+        if value is None:
+            return None
+        text = str(value).strip()
+        if not text:
+            return None
+
+        # Preserve an already-valid lower camelCase Java identifier.
+        if re.fullmatch(r"[a-z_$][A-Za-z0-9_$]*", text) and " " not in text and "-" not in text:
+            return text
+
+        words = re.findall(r"[A-Za-z0-9]+", re.sub(r"([a-z0-9])([A-Z])", r"\1 \2", text.replace("_", " ").replace("-", " ")))
+        if not words:
+            return text
+        first = words[0][:1].lower() + words[0][1:]
+        return first + "".join(word[:1].upper() + word[1:] for word in words[1:])
 
     def _assess_project_match(self, classes: Iterable, requirement_structure: dict, concepts: list[str]) -> dict:
         entity = (requirement_structure.get("entity") or "").strip()

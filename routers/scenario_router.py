@@ -38,6 +38,15 @@ def get_active_project_scenarios(db: Session = Depends(get_db)):
     return service.get_all_for_active_project(db)
 
 
+@router.get("/by-operation")
+def get_scenarios_by_operation(
+    http_method: str,
+    endpoint: str,
+    db: Session = Depends(get_db)
+):
+    return service.find_existing_for_operation(db, http_method, endpoint)
+
+
 @router.get("/{scenario_id}", response_model=ScenarioResponse)
 def get_scenario(scenario_id: int, db: Session = Depends(get_db)):
     return service.get_by_id(db, scenario_id)

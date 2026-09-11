@@ -119,6 +119,7 @@ class CodeFlowService:
                 "class_name": class_name,
                 "method_name": method_name,
                 "recursive": True,
+                **self._method_metadata(class_name, method_name),
                 "calls": []
             }
 
@@ -127,6 +128,7 @@ class CodeFlowService:
                 "class_name": class_name,
                 "method_name": method_name,
                 "max_depth_reached": True,
+                **self._method_metadata(class_name, method_name),
                 "calls": []
             }
 
@@ -136,6 +138,7 @@ class CodeFlowService:
                 method_name
             )
         ):
+            repository_metadata = self._repository_method_metadata(method_name)
             return {
                 "class_name": class_name,
                 "method_name": method_name,
@@ -145,6 +148,8 @@ class CodeFlowService:
                 "operation": self._repository_operation_type(
                     method_name
                 ),
+                **repository_metadata,
+                "file_path": str(self.class_files.get(class_name)) if self.class_files.get(class_name) else None,
                 "calls": []
             }
 
@@ -159,6 +164,7 @@ class CodeFlowService:
                 "class_name": class_name,
                 "method_name": method_name,
                 "found": False,
+                **self._method_metadata(class_name, method_name),
                 "calls": []
             }
 
@@ -195,6 +201,7 @@ class CodeFlowService:
                     "method_name": method_name,
                     "found": True,
                     "type": "INTERFACE_DISPATCH",
+                    **self._method_metadata(class_name, method_name),
                     "calls": implementation_calls
                 }
 
@@ -202,6 +209,7 @@ class CodeFlowService:
                 "class_name": class_name,
                 "method_name": method_name,
                 "found": False,
+                **self._method_metadata(class_name, method_name),
                 "calls": []
             }
 
@@ -234,6 +242,8 @@ class CodeFlowService:
                                 target_method
                             )
                         ),
+                        **self._repository_method_metadata(target_method),
+                        "file_path": str(self.class_files.get(target_class)) if self.class_files.get(target_class) else None,
                         "calls": []
                     }
                 )
@@ -246,6 +256,9 @@ class CodeFlowService:
                         "class_name": target_class,
                         "method_name": target_method,
                         "external": True,
+                        "input_parameters": [],
+                        "return_type": "External/library method",
+                        "file_path": None,
                         "calls": []
                     }
                 )
@@ -270,6 +283,7 @@ class CodeFlowService:
             ),
             "method_name": method_name,
             "found": True,
+            **self._method_metadata(trace_class, method_name),
             "calls": child_calls
         }
 
@@ -450,6 +464,189 @@ class CodeFlowService:
             fields[field_name] = field_type
 
         return fields
+
+    def _method_metadata(
+        self,
+        class_name: str,
+        method_name: str
+    ) -> dict:
+        """Return Java signature metadata for a method used by the flow UI.
+
+        Prefer the exact declaration on the requested class, then walk its
+        parent hierarchy.  For interfaces/abstract methods this still works
+        even when there is no method body.
+        """
+        current = class_name
+        seen = set()
+
+        while current and current not in seen:
+            seen.add(current)
+            content = self.class_contents.get(current)
+            if content:
+                signature = self._extract_method_signature(
+                    content,
+                    method_name
+                )
+                if signature:
+                    file_path = self.class_files.get(current)
+                    return {
+                        **signature,
+                        "file_path": str(file_path) if file_path else None,
+                        "signature_owner": current,
+                    }
+            current = self.parent_classes.get(current)
+
+        # Interface declarations may be the only declaration visible from
+        # the declared type.  Check implementations as a safe fallback.
+        for implementation in self.interface_implementations.get(class_name, []):
+            content = self.class_contents.get(implementation)
+            if not content:
+                continue
+            signature = self._extract_method_signature(content, method_name)
+            if signature:
+                file_path = self.class_files.get(implementation)
+                return {
+                    **signature,
+                    "file_path": str(file_path) if file_path else None,
+                    "signature_owner": implementation,
+                }
+
+        return {
+            "input_parameters": [],
+            "return_type": None,
+            "file_path": str(self.class_files.get(class_name)) if self.class_files.get(class_name) else None,
+            "signature_owner": class_name,
+        }
+
+    def _extract_method_signature(
+        self,
+        content: str,
+        method_name: str
+    ) -> dict | None:
+        # Handles normal methods as well as interface/abstract declarations.
+        # Annotations are ignored because we search directly for the Java
+        # declaration that owns the requested method name.
+        pattern = re.compile(
+            rf"""
+            (?:(?:public|protected|private|abstract|default|static|final|synchronized)\s+)*
+            (?:<[^>]+>\s+)?
+            (?P<return_type>[\w.$<>\[\],?\s]+?)
+            \s+
+            {re.escape(method_name)}
+            \s*\(
+                (?P<params>[^)]*)
+            \)
+            \s*(?:throws\s+[^{{;]+)?
+            (?=[{{;])
+            """,
+            re.VERBOSE | re.MULTILINE
+        )
+
+        for match in pattern.finditer(content):
+            return_type = " ".join(match.group("return_type").split())
+            return_type = self._clean_java_return_type(return_type)
+
+            # Avoid a regex match that accidentally starts in the middle of
+            # an annotation or statement.
+            if not return_type or return_type.startswith("return "):
+                continue
+
+            raw_params = match.group("params").strip()
+            params = self._split_java_parameters(raw_params)
+            return {
+                "input_parameters": params,
+                "return_type": return_type,
+            }
+
+        return None
+
+
+    def _clean_java_return_type(self, value: str) -> str:
+        """Return only the Java return type for hover metadata.
+
+        The signature regex can occasionally start at an access modifier and
+        include declaration modifiers in the captured return type.  Those are
+        Java implementation details and should not be shown as the method
+        output in the flowchart UI.
+        """
+        cleaned = " ".join((value or "").split()).strip()
+        if not cleaned:
+            return ""
+
+        # Remove declaration annotations if one was captured.
+        cleaned = re.sub(r"^(?:@[\w.]+(?:\s*\([^)]*\))?\s*)+", "", cleaned).strip()
+
+        modifiers = (
+            "public", "protected", "private", "abstract", "default",
+            "static", "final", "synchronized", "native", "strictfp"
+        )
+        modifier_pattern = r"^(?:(?:" + "|".join(modifiers) + r")\s+)+"
+        cleaned = re.sub(modifier_pattern, "", cleaned).strip()
+
+        return cleaned
+
+    def _split_java_parameters(self, raw_params: str) -> list[dict]:
+        if not raw_params:
+            return []
+
+        parts = []
+        current = []
+        angle = square = paren = 0
+        for char in raw_params:
+            if char == '<':
+                angle += 1
+            elif char == '>':
+                angle = max(0, angle - 1)
+            elif char == '[':
+                square += 1
+            elif char == ']':
+                square = max(0, square - 1)
+            elif char == '(':
+                paren += 1
+            elif char == ')':
+                paren = max(0, paren - 1)
+
+            if char == ',' and angle == 0 and square == 0 and paren == 0:
+                parts.append(''.join(current).strip())
+                current = []
+            else:
+                current.append(char)
+        if current:
+            parts.append(''.join(current).strip())
+
+        result = []
+        for part in parts:
+            # Remove common parameter annotations while preserving generics.
+            cleaned = re.sub(r"@[\w.]+(?:\s*\([^)]*\))?\s*", "", part).strip()
+            cleaned = re.sub(r"\bfinal\s+", "", cleaned).strip()
+            tokens = cleaned.rsplit(None, 1)
+            if len(tokens) == 2:
+                param_type, param_name = tokens
+            else:
+                param_type, param_name = cleaned, ""
+            result.append({
+                "type": param_type.strip(),
+                "name": param_name.strip(),
+                "display": cleaned,
+            })
+        return result
+
+    def _repository_method_metadata(self, method_name: str) -> dict:
+        """Useful hover text for inherited Spring Data methods."""
+        lower = method_name.lower()
+        if lower == "save":
+            return {"input_parameters": [{"type": "Entity", "name": "entity", "display": "Entity entity"}], "return_type": "Entity"}
+        if lower == "findbyid":
+            return {"input_parameters": [{"type": "ID", "name": "id", "display": "ID id"}], "return_type": "Optional<Entity>"}
+        if lower == "deletebyid":
+            return {"input_parameters": [{"type": "ID", "name": "id", "display": "ID id"}], "return_type": "void"}
+        if lower == "delete":
+            return {"input_parameters": [{"type": "Entity", "name": "entity", "display": "Entity entity"}], "return_type": "void"}
+        if lower.startswith("existsby"):
+            return {"input_parameters": [{"type": "derived query parameter", "name": "value", "display": "derived query parameter"}], "return_type": "boolean"}
+        if lower.startswith("findby"):
+            return {"input_parameters": [{"type": "derived query parameter", "name": "value", "display": "derived query parameter"}], "return_type": "Entity / Optional<Entity>"}
+        return {"input_parameters": [], "return_type": "Spring Data result"}
 
     def _extract_method_body(
         self,

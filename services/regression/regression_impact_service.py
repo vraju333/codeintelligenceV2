@@ -1,8 +1,11 @@
 from sqlalchemy.orm import Session
 
-from baseline_models import ScenarioBaseline
+from baseline_models import ScenarioBaseline, OperationBaseline
 from db_models import Scenario
 from services.regression.git_diff_service import GitDiffService
+from services.scenario.scenario_service import ScenarioService
+from config import settings
+from pathlib import Path
 
 
 class RegressionImpactService:
@@ -22,23 +25,40 @@ class RegressionImpactService:
     def analyse(self, db: Session):
         changes = self.git_diff_service.analyse_changes()
 
-        active_baselines = (
+        # Visible baselines are operation-level.  Every scenario/test case under
+        # the same HTTP operation reuses that active baseline/version.
+        project_path = str(Path(settings.JAVA_PROJECT_PATH).resolve())
+        operation_baselines = (
+            db.query(OperationBaseline)
+            .filter(
+                OperationBaseline.project_path == project_path,
+                OperationBaseline.is_active.is_(True),
+            )
+            .all()
+        )
+        operation_by_key = {
+            (str(b.http_method).upper(), str(b.endpoint)): b
+            for b in operation_baselines
+        }
+
+        # Backward compatibility for scenarios captured before operation-level
+        # baselines existed.
+        legacy_baselines = (
             db.query(ScenarioBaseline)
             .filter(ScenarioBaseline.is_active.is_(True))
             .all()
         )
-        all_scenarios = db.query(Scenario).order_by(Scenario.id).all()
+        legacy_by_scenario = {b.scenario_id: b for b in legacy_baselines}
+        all_scenarios = ScenarioService().get_all_for_active_project(db)
 
         changed_classes = set()
         changed_methods = []
         changed_method_keys = set()
-
         for changed_file in changes.get("changed_files", []):
             class_name = changed_file.get("class_name")
             if not class_name:
                 continue
             changed_classes.add(class_name)
-
             for method in changed_file.get("changed_methods", []):
                 method_name = method.get("method_name")
                 item = {
@@ -50,38 +70,49 @@ class RegressionImpactService:
                 if method_name:
                     changed_method_keys.add(f"{class_name}.{method_name}")
 
-        baseline_by_scenario = {
-            baseline.scenario_id: baseline for baseline in active_baselines
-        }
-
         directly_affected = []
         possibly_affected = []
         unaffected = []
 
         for scenario in all_scenarios:
-            baseline = baseline_by_scenario.get(scenario.id)
+            key = (str(scenario.http_method or "").upper(), str(scenario.endpoint or ""))
+            operation_baseline = operation_by_key.get(key)
+            legacy = legacy_by_scenario.get(scenario.id)
 
-            if not baseline:
+            if operation_baseline:
+                endpoint_flow = operation_baseline.endpoint_flow
+                baseline_version = operation_baseline.baseline_version
+                scenario_code = scenario.scenario_code
+                http_method = operation_baseline.http_method
+                endpoint = operation_baseline.endpoint
+                declared_classes = set()
+                baseline_scope = "OPERATION"
+            elif legacy:
+                endpoint_flow = legacy.endpoint_flow
+                baseline_version = legacy.baseline_version
+                scenario_code = legacy.scenario_code
+                http_method = legacy.http_method
+                endpoint = legacy.endpoint
+                declared_classes = set(legacy.involved_classes or [])
+                baseline_scope = "LEGACY_SCENARIO"
+            else:
                 unaffected.append({
                     "scenario_id": scenario.id,
                     "scenario_code": scenario.scenario_code,
                     "http_method": scenario.http_method,
                     "endpoint": scenario.endpoint,
                     "baseline_version": None,
+                    "baseline_scope": None,
                     "impact_status": "NO_BASELINE",
                     "matched_classes": [],
                     "changed_methods": [],
                     "dependency_paths": [],
-                    "reason": "No active baseline has been captured for this scenario.",
+                    "reason": "No active operation baseline has been captured for this scenario's HTTP operation.",
                 })
                 continue
 
-            flow_classes, flow_methods = self._extract_flow_dependencies(
-                baseline.endpoint_flow
-            )
-            declared_classes = set(baseline.involved_classes or [])
+            flow_classes, flow_methods = self._extract_flow_dependencies(endpoint_flow)
             dependency_classes = declared_classes | flow_classes
-
             matched_classes = sorted(dependency_classes & changed_classes)
             declared_matched_classes = sorted(declared_classes & changed_classes)
             matched_method_keys = sorted(flow_methods & changed_method_keys)
@@ -89,20 +120,19 @@ class RegressionImpactService:
                 method for method in changed_methods
                 if f"{method['class_name']}.{method.get('method_name')}" in matched_method_keys
             ]
-
             dependency_paths = self._build_dependency_paths(
-                endpoint_flow=baseline.endpoint_flow,
-                endpoint_label=f"{baseline.http_method} {baseline.endpoint}",
+                endpoint_flow=endpoint_flow,
+                endpoint_label=f"{http_method} {endpoint}",
                 changed_classes=changed_classes,
                 changed_method_keys=changed_method_keys,
             )
-
             base_result = {
-                "scenario_id": baseline.scenario_id,
-                "scenario_code": baseline.scenario_code,
-                "baseline_version": baseline.baseline_version,
-                "http_method": baseline.http_method,
-                "endpoint": baseline.endpoint,
+                "scenario_id": scenario.id,
+                "scenario_code": scenario_code,
+                "baseline_version": baseline_version,
+                "baseline_scope": baseline_scope,
+                "http_method": http_method,
+                "endpoint": endpoint,
                 "matched_classes": matched_classes,
                 "declared_matched_classes": declared_matched_classes,
                 "matched_methods": matched_method_keys,
@@ -120,37 +150,26 @@ class RegressionImpactService:
                     **base_result,
                     "impact_status": "DIRECTLY_AFFECTED",
                     "changed_methods": direct_methods,
-                    "reason": (
-                        "Changed code intersects an explicit scenario dependency"
-                        " or a method in the stored execution flow."
-                    ),
+                    "reason": "Changed code intersects a method in the operation baseline execution flow.",
                 })
             elif matched_classes:
-                class_methods = [
-                    method for method in changed_methods
-                    if method["class_name"] in matched_classes
-                ]
+                class_methods = [m for m in changed_methods if m["class_name"] in matched_classes]
                 possibly_affected.append({
                     **base_result,
                     "impact_status": "POSSIBLY_AFFECTED",
                     "changed_methods": class_methods,
-                    "reason": "Changed class(es) are used by the scenario, but the exact changed method is not recorded in the baseline flow.",
+                    "reason": "Changed class is used by the operation baseline, but the exact changed method is not recorded in the flow.",
                 })
             else:
                 unaffected.append({
                     **base_result,
                     "impact_status": "UNAFFECTED",
-                    "reason": "No changed class or method intersects this scenario baseline.",
+                    "reason": "No changed class or method intersects this operation baseline.",
                 })
 
         affected_scenarios = directly_affected + possibly_affected
-
         return {
-            "status": (
-                "CHANGES_DETECTED"
-                if changes.get("total_changed_java_files", 0) > 0
-                else "NO_CHANGES"
-            ),
+            "status": "CHANGES_DETECTED" if changes.get("total_changed_java_files", 0) > 0 else "NO_CHANGES",
             "total_changed_java_files": changes.get("total_changed_java_files", 0),
             "changed_classes": sorted(changed_classes),
             "changed_methods": changed_methods,
@@ -164,6 +183,7 @@ class RegressionImpactService:
             "unaffected_scenarios": unaffected,
             "affected_scenarios": affected_scenarios,
             "git_changes": changes,
+            "baseline_model": "OPERATION_LEVEL",
         }
 
     def _build_dependency_paths(

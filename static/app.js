@@ -10,41 +10,32 @@ document.addEventListener(
         loadScenarios();
         loadBaselineOverview();
 
-        document
-            .getElementById("flowMethod")
-            .addEventListener(
+        // Endpoint Flow UI was intentionally removed. Guard every optional
+        // control so a missing section never stops the rest of the page
+        // (especially Scenario Flowchart) from loading its endpoints.
+        const flowMethod = document.getElementById("flowMethod");
+        if (flowMethod) {
+            flowMethod.addEventListener(
                 "change",
-                () => {
-                    refreshEndpointDropdown(
-                        "flowMethod",
-                        "flowEndpoint"
-                    );
-                }
+                () => refreshEndpointDropdown("flowMethod", "flowEndpoint")
             );
+        }
 
-        document
-            .getElementById("chartMethod")
-            .addEventListener(
+        const chartMethod = document.getElementById("chartMethod");
+        if (chartMethod) {
+            chartMethod.addEventListener(
                 "change",
-                () => {
-                    refreshEndpointDropdown(
-                        "chartMethod",
-                        "chartEndpoint"
-                    );
-                }
+                () => refreshEndpointDropdown("chartMethod", "chartEndpoint")
             );
+        }
 
-        document
-            .getElementById("investigationMethod")
-            .addEventListener(
+        const investigationMethod = document.getElementById("investigationMethod");
+        if (investigationMethod) {
+            investigationMethod.addEventListener(
                 "change",
-                () => {
-                    refreshEndpointDropdown(
-                        "investigationMethod",
-                        "investigationEndpoint"
-                    );
-                }
+                () => refreshEndpointDropdown("investigationMethod", "investigationEndpoint")
             );
+        }
 
         await loadProjectEndpoints();
     }
@@ -1232,11 +1223,16 @@ async function loadBaselineOverview() {
                         <span class="baseline-code">${escapeHtml(item.scenario_code)}</span>
                         <span class="muted-text">${escapeHtml(item.http_method)} ${escapeHtml(item.endpoint)}</span>
                         <span class="baseline-meta">
-                            ${item.baseline_captured ? `<strong>V${item.active_baseline_version} ACTIVE</strong>` : `<strong>Not captured</strong>`}
-                            <span>${item.history_count || 0} version${item.history_count === 1 ? "" : "s"}</span>
+                            ${item.baseline_captured ? `<strong>Code V${item.active_baseline_version} ACTIVE</strong>` : `<strong>No code baseline</strong>`}
+                            <span>${item.history_count || 0} code version${item.history_count === 1 ? "" : "s"}</span>
+                            <span>${item.testing_baseline_count || 0} testing baseline${item.testing_baseline_count === 1 ? "" : "s"}</span>
                         </span>
                     </button>
-                    <button class="mini-action" onclick="captureScenarioBaseline(${item.scenario_id})">${item.baseline_captured ? "Capture New Version" : "Capture Baseline"}</button>
+                    <div class="baseline-card-actions">
+                        <button class="mini-action" onclick="captureScenarioBaseline(${item.scenario_id})">${item.baseline_captured ? `Capture Code V${Number(item.active_baseline_version || 0) + 1}` : "Capture Code V1"}</button>
+                        <button class="mini-action secondary-button" onclick="openTestingBaselineModal(${item.scenario_id})">Add Testing Baseline</button>
+                        ${Number(item.testing_baseline_count || 0) > 0 ? `<button class="mini-action secondary-button" onclick="openTestingBaselineHistoryModal(${item.scenario_id})">View Testing Baselines</button>` : ""}
+                    </div>
                 </div>
             `;
         }
@@ -1245,7 +1241,7 @@ async function loadBaselineOverview() {
 
         const current = select.value;
         select.innerHTML = `<option value="">Select a scenario...</option>` + data.map(item =>
-            `<option value="${item.scenario_id}">${escapeHtml(item.scenario_code)} ${item.baseline_captured ? `— V${item.active_baseline_version}` : "— no baseline"}</option>`
+            `<option value="${item.scenario_id}">${escapeHtml(item.http_method)} ${escapeHtml(item.endpoint)} — ${escapeHtml(item.scenario_code)} ${item.baseline_captured ? `— Code V${item.active_baseline_version}` : "— no code baseline"}</option>`
         ).join("");
         if (current && data.some(x => String(x.scenario_id) === String(current))) select.value = current;
     } catch (error) {
@@ -1269,13 +1265,281 @@ async function captureScenarioBaseline(scenarioId, silent = false) {
             body: JSON.stringify({successful_response: null, endpoint_flow: flowData})
         });
         const captureData = await captureResponse.json();
-        if (!captureResponse.ok) throw new Error(JSON.stringify(captureData));
+        if (!captureResponse.ok) {
+            const detail = captureData?.detail;
+            const message = typeof detail === "object" ? detail.message : detail;
+            throw new Error(message || JSON.stringify(captureData));
+        }
         if (!silent) await loadBaselineOverview();
         return true;
     } catch (error) {
         if (!silent) alert("Baseline capture failed: " + error.message);
         return false;
     }
+}
+
+let activeTestingBaselineScenarioId = null;
+let testingBaselineJiraIds = [];
+
+async function loadTestingBaselineJiraOptions() {
+    const select = document.getElementById("testingBaselineJiraSelect");
+    if (!select) return;
+
+    select.innerHTML = '<option value="">Loading saved JIRAs...</option>';
+    try {
+        const response = await fetch("/api/jira-knowledge");
+        const data = await response.json();
+        if (!response.ok) throw new Error(JSON.stringify(data));
+
+        const items = Array.isArray(data) ? data : [];
+        select.innerHTML = '<option value="">Select a saved JIRA...</option>' +
+            items.map(item => {
+                const jiraId = String(item.jira_id || "").trim();
+                const title = String(item.title || "").trim();
+                const label = title ? `${jiraId} — ${title}` : jiraId;
+                return `<option value="${escapeHtml(jiraId)}">${escapeHtml(label)}</option>`;
+            }).join("");
+
+        if (!items.length) {
+            select.innerHTML = '<option value="">No saved JIRAs available</option>';
+        }
+    } catch (error) {
+        select.innerHTML = '<option value="">Unable to load saved JIRAs</option>';
+    }
+}
+
+function renderTestingBaselineJiras() {
+    const container = document.getElementById("testingBaselineJiraList");
+    if (!container) return;
+
+    if (!testingBaselineJiraIds.length) {
+        container.innerHTML = '<span class="muted-text">No JIRAs added.</span>';
+        return;
+    }
+
+    container.innerHTML = testingBaselineJiraIds.map((jiraId, index) => `
+        <span class="testing-jira-chip">
+            ${escapeHtml(jiraId)}
+            <button type="button"
+                    class="testing-jira-remove"
+                    aria-label="Remove ${escapeHtml(jiraId)}"
+                    onclick="removeTestingBaselineJira(${index})">×</button>
+        </span>
+    `).join("");
+}
+
+function addTestingBaselineJira() {
+    const select = document.getElementById("testingBaselineJiraSelect");
+    if (!select) return;
+
+    const jiraId = String(select.value || "").trim().toUpperCase();
+    if (!jiraId) return;
+
+    if (!testingBaselineJiraIds.includes(jiraId)) {
+        testingBaselineJiraIds.push(jiraId);
+        renderTestingBaselineJiras();
+    }
+
+    select.value = "";
+}
+
+function removeTestingBaselineJira(index) {
+    testingBaselineJiraIds.splice(Number(index), 1);
+    renderTestingBaselineJiras();
+}
+
+
+async function openTestingBaselineModal(scenarioId) {
+    activeTestingBaselineScenarioId = Number(scenarioId);
+    const modal = document.getElementById("testingBaselineModal");
+    const item = baselineOverviewData.find(x => Number(x.scenario_id) === Number(scenarioId));
+    if (!modal || !item) return;
+
+    document.getElementById("testingBaselineOperation").textContent =
+        `${item.http_method} ${item.endpoint} · ${item.scenario_code}`;
+    ["testingBaselineName", "testingBaselineRequest", "testingBaselineExpected", "testingBaselineActual", "testingBaselineDbEffect"].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.value = "";
+    });
+    const error = document.getElementById("testingBaselineError");
+    if (error) error.textContent = "";
+
+    testingBaselineJiraIds = [];
+    renderTestingBaselineJiras();
+    await loadTestingBaselineJiraOptions();
+
+    try {
+        const response = await fetch(`/api/scenarios/${scenarioId}`);
+        const scenario = await response.json();
+        if (response.ok) {
+            const request = document.getElementById("testingBaselineRequest");
+            const expected = document.getElementById("testingBaselineExpected");
+            const dbEffect = document.getElementById("testingBaselineDbEffect");
+            if (request && scenario.request_json) request.value = prettyScenarioJson(scenario.request_json);
+            if (expected && scenario.expected_response_json) expected.value = prettyScenarioJson(scenario.expected_response_json);
+            if (dbEffect && scenario.expected_db_effect) dbEffect.value = scenario.expected_db_effect;
+        }
+    } catch (_) {}
+
+    modal.classList.add("open");
+    modal.setAttribute("aria-hidden", "false");
+    setTimeout(() => document.getElementById("testingBaselineName")?.focus(), 0);
+}
+
+function closeTestingBaselineModal() {
+    const modal = document.getElementById("testingBaselineModal");
+    if (!modal) return;
+    modal.classList.remove("open");
+    modal.setAttribute("aria-hidden", "true");
+    activeTestingBaselineScenarioId = null;
+    testingBaselineJiraIds = [];
+    renderTestingBaselineJiras();
+}
+
+function prettyScenarioJson(value) {
+    if (value == null || value === "") return "";
+    if (typeof value !== "string") return JSON.stringify(value, null, 2);
+    try { return JSON.stringify(JSON.parse(value), null, 2); }
+    catch (_) { return value; }
+}
+
+function parseOptionalJsonField(id, label) {
+    const raw = (document.getElementById(id)?.value || "").trim();
+    if (!raw) return null;
+    try { return JSON.parse(raw); }
+    catch (_) { throw new Error(`${label} must contain valid JSON.`); }
+}
+
+async function saveTestingBaseline() {
+    const scenarioId = activeTestingBaselineScenarioId;
+    const error = document.getElementById("testingBaselineError");
+    const button = document.getElementById("saveTestingBaselineButton");
+    if (!scenarioId) return;
+    if (error) error.textContent = "";
+
+    try {
+        const name = (document.getElementById("testingBaselineName")?.value || "").trim();
+        if (!name) throw new Error("Baseline Name is required, for example October 2026.");
+
+        const body = {
+            baseline_name: name,
+            request_json: parseOptionalJsonField("testingBaselineRequest", "Request JSON"),
+            expected_response: parseOptionalJsonField("testingBaselineExpected", "Expected Response JSON"),
+            actual_response: parseOptionalJsonField("testingBaselineActual", "Actual Response JSON"),
+            expected_db_effect: (document.getElementById("testingBaselineDbEffect")?.value || "").trim() || null,
+            jira_ids: [...testingBaselineJiraIds]
+        };
+
+        if (button) { button.disabled = true; button.textContent = "Saving..."; }
+        const response = await fetch(`/api/scenario-baselines/testing/${scenarioId}`, {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify(body)
+        });
+        const data = await response.json();
+        if (!response.ok) {
+            const detail = data?.detail;
+            throw new Error(typeof detail === "object" ? (detail.message || JSON.stringify(detail)) : (detail || `HTTP ${response.status}`));
+        }
+
+        closeTestingBaselineModal();
+        await loadBaselineOverview();
+        const select = document.getElementById("baselineScenarioSelect");
+        if (select) select.value = String(scenarioId);
+        if (typeof loadBaselineHistory === "function") await loadBaselineHistory();
+    } catch (e) {
+        if (error) error.textContent = e.message || "Could not save testing baseline.";
+    } finally {
+        if (button) { button.disabled = false; button.textContent = "Save Testing Baseline"; }
+    }
+}
+
+
+let testingBaselineHistoryItems = [];
+
+async function openTestingBaselineHistoryModal(scenarioId) {
+    const modal = document.getElementById("testingBaselineHistoryModal");
+    const select = document.getElementById("testingBaselineHistorySelect");
+    const detail = document.getElementById("testingBaselineHistoryDetail");
+    const operation = document.getElementById("testingBaselineHistoryOperation");
+    const item = baselineOverviewData.find(x => Number(x.scenario_id) === Number(scenarioId));
+    if (!modal || !select || !detail || !item) return;
+
+    operation.textContent = `${item.http_method} ${item.endpoint} · ${item.scenario_code}`;
+    select.innerHTML = `<option value="">Loading saved baselines...</option>`;
+    detail.innerHTML = `<div class="muted-box">Loading saved testing baselines...</div>`;
+    modal.classList.add("open");
+    modal.setAttribute("aria-hidden", "false");
+
+    try {
+        const response = await fetch(`/api/scenario-baselines/testing/${scenarioId}`);
+        const data = await response.json();
+        if (!response.ok) throw new Error(JSON.stringify(data));
+
+        testingBaselineHistoryItems = Array.isArray(data) ? data : [];
+        if (!testingBaselineHistoryItems.length) {
+            select.innerHTML = `<option value="">No saved testing baselines</option>`;
+            detail.innerHTML = `<div class="muted-box">No testing baselines have been saved for this operation.</div>`;
+            return;
+        }
+
+        select.innerHTML = testingBaselineHistoryItems.map((baseline, index) => {
+            const codeVersion = baseline.code_baseline_version ? ` · Code V${baseline.code_baseline_version}` : "";
+            return `<option value="${index}">${escapeHtml(baseline.baseline_name || `Baseline ${index + 1}`)}${escapeHtml(codeVersion)}</option>`;
+        }).join("");
+        select.value = "0";
+        renderSelectedTestingBaseline();
+    } catch (error) {
+        select.innerHTML = `<option value="">Unable to load baselines</option>`;
+        detail.innerHTML = renderError(error.message);
+    }
+}
+
+function closeTestingBaselineHistoryModal() {
+    const modal = document.getElementById("testingBaselineHistoryModal");
+    if (!modal) return;
+    modal.classList.remove("open");
+    modal.setAttribute("aria-hidden", "true");
+    testingBaselineHistoryItems = [];
+}
+
+function renderSelectedTestingBaseline() {
+    const select = document.getElementById("testingBaselineHistorySelect");
+    const detail = document.getElementById("testingBaselineHistoryDetail");
+    if (!select || !detail) return;
+
+    const index = Number(select.value);
+    const baseline = testingBaselineHistoryItems[index];
+    if (!baseline) {
+        detail.innerHTML = `<div class="muted-box">Select a saved testing baseline.</div>`;
+        return;
+    }
+
+    const jiraIds = Array.isArray(baseline.jira_ids) ? baseline.jira_ids : [];
+    const jsonBlock = (label, value) => `
+        <div class="testing-history-field">
+            <div class="testing-history-label">${escapeHtml(label)}</div>
+            <pre>${escapeHtml(prettyScenarioJson(value) || "Nothing")}</pre>
+        </div>`;
+
+    detail.innerHTML = `
+        <div class="testing-history-summary">
+            <div><span class="muted-text">Baseline</span><strong>${escapeHtml(baseline.baseline_name || "Testing baseline")}</strong></div>
+            <div><span class="muted-text">Status</span><strong>${escapeHtml(baseline.status || "NOT_RUN")}</strong></div>
+            <div><span class="muted-text">Code version</span><strong>${baseline.code_baseline_version ? `V${baseline.code_baseline_version}` : "Not captured"}</strong></div>
+            <div><span class="muted-text">Saved</span><strong>${baseline.created_at ? escapeHtml(new Date(baseline.created_at).toLocaleString()) : "-"}</strong></div>
+        </div>
+        <div class="testing-history-jiras">
+            <div class="testing-history-label">Related JIRAs</div>
+            <div class="testing-jira-list">${jiraIds.length ? jiraIds.map(id => `<span class="testing-jira-chip">${escapeHtml(id)}</span>`).join("") : `<span class="muted-text">None</span>`}</div>
+        </div>
+        ${jsonBlock("Request JSON", baseline.request_json)}
+        ${jsonBlock("Expected Response JSON", baseline.expected_response_json)}
+        ${jsonBlock("Actual Response JSON", baseline.actual_response_json)}
+        <div class="testing-history-field">
+            <div class="testing-history-label">Expected DB Effect</div>
+            <pre>${escapeHtml(baseline.expected_db_effect || "Nothing")}</pre>
+        </div>`;
 }
 
 async function captureMissingBaselines() {

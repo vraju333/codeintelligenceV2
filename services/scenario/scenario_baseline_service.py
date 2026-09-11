@@ -9,7 +9,7 @@ from fastapi import HTTPException
 from config import settings
 from sqlalchemy.orm import Session
 
-from baseline_models import ScenarioBaseline, ScenarioBaselineSourceSnapshot
+from baseline_models import ScenarioBaseline, ScenarioBaselineSourceSnapshot, ScenarioTestBaseline
 from repositories.scenario_baseline_repository import (
     ScenarioBaselineRepository
 )
@@ -53,6 +53,14 @@ class ScenarioBaselineService:
             )
         )
 
+        if latest:
+            self._ensure_relevant_change_before_new_version(
+                db=db,
+                scenario=scenario,
+                latest=latest,
+                endpoint_flow=endpoint_flow
+            )
+
         next_version = (
             latest.baseline_version + 1
             if latest
@@ -95,6 +103,80 @@ class ScenarioBaselineService:
         )
 
         return created
+
+    def create_test_baseline(
+        self,
+        db: Session,
+        scenario_id: int,
+        baseline_name: str,
+        request_json: Any = None,
+        expected_response: Any = None,
+        actual_response: Any = None,
+        expected_db_effect: str | None = None,
+        jira_ids: list[str] | None = None
+    ):
+        scenario = self.scenario_repository.find_by_id(db, scenario_id)
+        if not scenario:
+            raise HTTPException(status_code=404, detail="Scenario not found")
+
+        name = str(baseline_name or "").strip()
+        if not name:
+            raise HTTPException(status_code=400, detail="Testing baseline name is required")
+
+        existing = self.baseline_repository.find_test_baseline_by_name(
+            db, scenario_id, name
+        )
+        if existing:
+            raise HTTPException(
+                status_code=409,
+                detail=f"Testing baseline '{name}' already exists for this operation"
+            )
+
+        active_code_baseline = self.baseline_repository.find_active(db, scenario_id)
+        normalized_expected = self._normalize_json(expected_response)
+        normalized_actual = self._normalize_json(actual_response)
+
+        if actual_response is None:
+            status = "NOT_RUN"
+        elif normalized_expected == normalized_actual:
+            status = "PASS"
+        else:
+            status = "FAIL"
+
+        record = ScenarioTestBaseline(
+            scenario_id=scenario.id,
+            baseline_name=name,
+            http_method=scenario.http_method,
+            endpoint=scenario.endpoint,
+            request_json=self._normalize_json(request_json),
+            expected_response_json=normalized_expected,
+            actual_response_json=normalized_actual,
+            expected_db_effect=expected_db_effect or scenario.expected_db_effect,
+            jira_ids=self._normalize_jira_ids(jira_ids),
+            status=status,
+            code_baseline_version=(
+                active_code_baseline.baseline_version if active_code_baseline else None
+            )
+        )
+        return self.baseline_repository.create_test_baseline(db, record)
+
+    @staticmethod
+    def _normalize_jira_ids(jira_ids: list[str] | None) -> list[str]:
+        result = []
+        seen = set()
+        for value in jira_ids or []:
+            jira_id = str(value or "").strip().upper()
+            if not jira_id or jira_id in seen:
+                continue
+            seen.add(jira_id)
+            result.append(jira_id)
+        return result
+
+    def get_test_baselines(self, db: Session, scenario_id: int):
+        scenario = self.scenario_repository.find_by_id(db, scenario_id)
+        if not scenario:
+            raise HTTPException(status_code=404, detail="Scenario not found")
+        return self.baseline_repository.find_test_baselines(db, scenario_id)
 
     def get_latest(
         self,
@@ -172,6 +254,12 @@ class ScenarioBaselineService:
         for baseline in all_baselines:
             history_counts[baseline.scenario_id] = history_counts.get(baseline.scenario_id, 0) + 1
 
+        testing_counts = {}
+        for scenario in scenarios:
+            testing_counts[scenario.id] = len(
+                self.baseline_repository.find_test_baselines(db, scenario.id)
+            )
+
         result = []
         for scenario in scenarios:
             baseline = active.get(scenario.id)
@@ -187,6 +275,7 @@ class ScenarioBaselineService:
                 "active_baseline_id": baseline.id if baseline else None,
                 "flow_stored": bool(baseline and baseline.endpoint_flow),
                 "history_count": history_counts.get(scenario.id, 0),
+                "testing_baseline_count": testing_counts.get(scenario.id, 0),
                 "captured_at": baseline.created_at.isoformat() if baseline else None,
             })
         return result
@@ -298,6 +387,60 @@ class ScenarioBaselineService:
                 ),
             },
         }
+
+    def _ensure_relevant_change_before_new_version(
+        self,
+        db: Session,
+        scenario,
+        latest: ScenarioBaseline,
+        endpoint_flow: dict | None
+    ):
+        """Block V2/V3 creation when the operation's relevant source/flow did not change."""
+        latest_snapshot = self.baseline_repository.find_source_snapshot(db, latest.id)
+
+        class_names = set(self._normalize_list(scenario.involved_classes))
+        class_names.update(self._flow_classes(endpoint_flow))
+        class_names.update(self._flow_classes(latest.endpoint_flow))
+
+        project_path = Path(settings.JAVA_PROJECT_PATH).resolve()
+        current_source = self._read_relevant_java_sources(
+            project_path=project_path,
+            class_names=class_names
+        )
+
+        # If an older baseline predates source snapshots we cannot safely claim
+        # the code is unchanged, so allow one capture to establish the new
+        # source-aware history. From then on duplicate versions are blocked.
+        if latest_snapshot and latest_snapshot.source_snapshot is not None:
+            previous_source = latest_snapshot.source_snapshot or {}
+            source_changed = current_source != previous_source
+            flow_changed = self._flow_signature(endpoint_flow) != self._flow_signature(latest.endpoint_flow)
+
+            if not source_changed and not flow_changed:
+                raise HTTPException(
+                    status_code=409,
+                    detail={
+                        "message": "No relevant code or flow change detected. A new code baseline version was not created.",
+                        "active_version": latest.baseline_version,
+                        "scenario_code": scenario.scenario_code,
+                        "operation": f"{scenario.http_method} {scenario.endpoint}",
+                        "suggestion": "Add a Testing Baseline for a new month/test cycle instead."
+                    }
+                )
+
+    @staticmethod
+    def _flow_signature(flow) -> str:
+        if flow is None:
+            return ""
+        if isinstance(flow, str):
+            try:
+                flow = json.loads(flow)
+            except Exception:
+                return flow
+        try:
+            return json.dumps(flow, sort_keys=True, separators=(",", ":"), default=str)
+        except Exception:
+            return str(flow)
 
     def _capture_source_snapshot(
         self,

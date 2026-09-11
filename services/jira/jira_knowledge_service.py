@@ -8,6 +8,7 @@ from langchain_huggingface import HuggingFaceEmbeddings
 from sqlalchemy.orm import Session
 
 from db_models import JiraKnowledge
+from config import settings
 from services.scanner.java_scanner_service import JavaScannerService
 
 
@@ -118,6 +119,12 @@ class JiraKnowledgeService:
             jira_id = doc.metadata.get("jira_id")
             row = db.query(JiraKnowledge).filter(JiraKnowledge.jira_id == jira_id).first()
             if not row:
+                continue
+            # JIRA knowledge is project-specific. Do not leak matches saved for
+            # another selected Java project into Attribute Impact.
+            active_project = str(settings.JAVA_PROJECT_PATH or "").strip().lower()
+            row_project = str(row.project_path or "").strip().lower()
+            if active_project and row_project and row_project != active_project:
                 continue
             results.append({
                 **self._to_dict(row),

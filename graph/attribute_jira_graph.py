@@ -50,7 +50,14 @@ class AttributeJiraGraph:
             attribute = str(result.get("attribute") or state["query"]).lower()
 
             related = []
+            active_project = str(__import__("config").settings.JAVA_PROJECT_PATH or "").lower()
             for jira in state.get("jira_results") or []:
+                jira_project = str(jira.get("project_path") or "").lower()
+                # Attribute impact is project-scoped. Never mix JIRAs saved for
+                # another selected Java project into the result.
+                if jira_project and active_project and jira_project != active_project:
+                    continue
+
                 haystack = " ".join([
                     jira.get("title") or "",
                     jira.get("requirement") or "",
@@ -73,9 +80,15 @@ class AttributeJiraGraph:
                 if matched_scenarios:
                     reasons.append("Requirement mentions affected scenario: " + ", ".join(matched_scenarios[:3]))
 
-                # RAG itself is useful evidence even when exact words differ.
+                # Do not display every top-k RAG result. Keep only JIRAs with
+                # concrete evidence (attribute/class/scenario) or a genuinely
+                # close semantic distance. FAISS L2 distance: lower is closer.
+                semantic_score = jira.get("similarity_score")
+                strong_semantic = semantic_score is not None and float(semantic_score) <= 0.85
+                if not reasons and strong_semantic:
+                    reasons.append("Strong semantic match from local JIRA RAG")
                 if not reasons:
-                    reasons.append("Semantic match from local JIRA RAG")
+                    continue
 
                 related.append({
                     **jira,
@@ -83,6 +96,11 @@ class AttributeJiraGraph:
                     "reasons": reasons,
                 })
 
+            # Direct matches first; semantic-only evidence after that.
+            related.sort(key=lambda item: (
+                0 if item.get("relationship") == "DIRECT_ATTRIBUTE_MATCH" else 1,
+                float(item.get("similarity_score") or 999),
+            ))
             result["related_jiras"] = related[:6]
             result["analysis_basis"] = {
                 **(result.get("analysis_basis") or {}),

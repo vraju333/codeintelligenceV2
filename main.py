@@ -29,6 +29,7 @@ def _ensure_scenario_registry_columns():
         "expected_response_json": "TEXT",
         "expected_db_effect": "TEXT",
         "involved_classes": "TEXT",
+        "project_path": "TEXT",
     }
 
     try:
@@ -59,8 +60,49 @@ def _ensure_scenario_registry_columns():
         ) from exc
 
 
+
+
+def _ensure_testing_baseline_columns():
+    """Additive upgrade for periodic testing-baseline metadata."""
+    required_columns = {
+        "jira_ids": "JSON",
+    }
+
+    try:
+        inspector = inspect(engine)
+        table_names = set(inspector.get_table_names())
+        if "scenario_test_baselines" not in table_names:
+            return
+
+        existing = {
+            column["name"]
+            for column in inspector.get_columns("scenario_test_baselines")
+        }
+        missing = {
+            name: sql_type
+            for name, sql_type in required_columns.items()
+            if name not in existing
+        }
+        if not missing:
+            return
+
+        with engine.begin() as connection:
+            for name, sql_type in missing.items():
+                connection.execute(
+                    text(
+                        f"ALTER TABLE scenario_test_baselines "
+                        f"ADD COLUMN {name} {sql_type}"
+                    )
+                )
+    except Exception as exc:
+        raise RuntimeError(
+            f"Unable to upgrade testing baseline database schema: {exc}"
+        ) from exc
+
+
 initialize_storage()
 _ensure_scenario_registry_columns()
+_ensure_testing_baseline_columns()
 
 
 from routers.project_router import router as project_router

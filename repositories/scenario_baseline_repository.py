@@ -1,7 +1,7 @@
 from sqlalchemy import desc
 from sqlalchemy.orm import Session
 
-from baseline_models import ScenarioBaseline, ScenarioBaselineSourceSnapshot
+from baseline_models import ScenarioBaseline, ScenarioBaselineSourceSnapshot, ScenarioTestBaseline
 
 
 class ScenarioBaselineRepository:
@@ -101,3 +101,28 @@ class ScenarioBaselineRepository:
             )
             .first()
         )
+
+
+    def find_test_baselines(self, db: Session, scenario_id: int):
+        return (
+            db.query(ScenarioTestBaseline)
+            .filter(ScenarioTestBaseline.scenario_id == scenario_id)
+            .order_by(desc(ScenarioTestBaseline.created_at), desc(ScenarioTestBaseline.id))
+            .all()
+        )
+
+    def find_test_baseline_by_name(self, db: Session, scenario_id: int, baseline_name: str):
+        return (
+            db.query(ScenarioTestBaseline)
+            .filter(
+                ScenarioTestBaseline.scenario_id == scenario_id,
+                ScenarioTestBaseline.baseline_name == baseline_name
+            )
+            .first()
+        )
+
+    def create_test_baseline(self, db: Session, baseline: ScenarioTestBaseline):
+        db.add(baseline)
+        db.commit()
+        db.refresh(baseline)
+        return baseline
