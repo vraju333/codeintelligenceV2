@@ -1223,15 +1223,13 @@ async function loadBaselineOverview() {
                         <span class="baseline-code">${escapeHtml(item.scenario_code)}</span>
                         <span class="muted-text">${escapeHtml(item.http_method)} ${escapeHtml(item.endpoint)}</span>
                         <span class="baseline-meta">
-                            ${item.baseline_captured ? `<strong>Code V${item.active_baseline_version} ACTIVE</strong>` : `<strong>No code baseline</strong>`}
-                            <span>${item.history_count || 0} code version${item.history_count === 1 ? "" : "s"}</span>
-                            <span>${item.testing_baseline_count || 0} testing baseline${item.testing_baseline_count === 1 ? "" : "s"}</span>
+                            ${item.baseline_captured ? `<strong>${escapeHtml(item.active_baseline_name || "Release")} · V${item.active_release_version || item.active_baseline_version} ACTIVE</strong>` : `<strong>No baseline</strong>`}
+                            <span>${item.history_count || 0} baseline version${item.history_count === 1 ? "" : "s"}</span>
                         </span>
                     </button>
                     <div class="baseline-card-actions">
-                        <button class="mini-action" onclick="captureScenarioBaseline(${item.scenario_id})">${item.baseline_captured ? `Capture Code V${Number(item.active_baseline_version || 0) + 1}` : "Capture Code V1"}</button>
-                        <button class="mini-action secondary-button" onclick="openTestingBaselineModal(${item.scenario_id})">Add Testing Baseline</button>
-                        ${Number(item.testing_baseline_count || 0) > 0 ? `<button class="mini-action secondary-button" onclick="openTestingBaselineHistoryModal(${item.scenario_id})">View Testing Baselines</button>` : ""}
+                        <button class="mini-action" onclick="openMainBaselineModal(${item.scenario_id})">Add Baseline</button>
+                        ${item.baseline_captured ? `<button class="mini-action secondary-button" onclick="openTestingBaselineModal(${item.scenario_id})">Add Test Baseline</button>` : ``}
                     </div>
                 </div>
             `;
@@ -1241,7 +1239,7 @@ async function loadBaselineOverview() {
 
         const current = select.value;
         select.innerHTML = `<option value="">Select a scenario...</option>` + data.map(item =>
-            `<option value="${item.scenario_id}">${escapeHtml(item.http_method)} ${escapeHtml(item.endpoint)} — ${escapeHtml(item.scenario_code)} ${item.baseline_captured ? `— Code V${item.active_baseline_version}` : "— no code baseline"}</option>`
+            `<option value="${item.scenario_id}">${escapeHtml(item.http_method)} ${escapeHtml(item.endpoint)} — ${escapeHtml(item.scenario_code)} ${item.baseline_captured ? `— ${escapeHtml(item.active_baseline_name || "Release")} V${item.active_release_version || item.active_baseline_version}` : "— no baseline"}</option>`
         ).join("");
         if (current && data.some(x => String(x.scenario_id) === String(current))) select.value = current;
     } catch (error) {
@@ -1249,37 +1247,180 @@ async function loadBaselineOverview() {
     }
 }
 
-async function captureScenarioBaseline(scenarioId, silent = false) {
+let activeMainBaselineScenarioId = null;
+let mainBaselineCreateMode = "release";
+let mainBaselineHistoryItems = [];
+let activeTestingBaselineHistoryScenarioId = null;
+
+function releaseDisplayVersion(item) {
+    return Number(item?.release_version || item?.baseline_version || 1);
+}
+
+function groupBaselineReleases(items) {
+    const groups = new Map();
+    for (const item of (items || [])) {
+        const name = String(item.baseline_name || "Legacy").trim() || "Legacy";
+        if (!groups.has(name)) groups.set(name, []);
+        groups.get(name).push(item);
+    }
+    for (const versions of groups.values()) {
+        versions.sort((a, b) => releaseDisplayVersion(a) - releaseDisplayVersion(b));
+    }
+    return groups;
+}
+
+async function openMainBaselineModal(scenarioId) {
     const item = baselineOverviewData.find(x => Number(x.scenario_id) === Number(scenarioId));
-    if (!item) return false;
+    const modal = document.getElementById("mainBaselineModal");
+    if (!item || !modal) return;
+
+    activeMainBaselineScenarioId = Number(scenarioId);
+    mainBaselineCreateMode = "release";
+    document.querySelector("#mainBaselineModal h2").textContent = "Add Baseline";
+    document.getElementById("mainBaselineOperation").textContent =
+        `${item.http_method} ${item.endpoint} · ${item.scenario_code} · Release → Version`;
+    const error = document.getElementById("mainBaselineError");
+    if (error) error.textContent = "";
+
     try {
+        const response = await fetch(`/api/scenario-baselines/history/${scenarioId}`);
+        const data = await response.json();
+        if (!response.ok) throw new Error(JSON.stringify(data));
+        mainBaselineHistoryItems = Array.isArray(data) ? data : [];
+    } catch (_) {
+        mainBaselineHistoryItems = [];
+    }
+
+    const groups = groupBaselineReleases(mainBaselineHistoryItems);
+    const releaseSelect = document.getElementById("mainBaselineReleaseSelect");
+    if (releaseSelect) {
+        const existing = [...groups.keys()];
+        releaseSelect.innerHTML = existing.map(name =>
+            `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`
+        ).join("") + `<option value="__new__">+ New Release</option>`;
+        releaseSelect.value = item.baseline_captured && item.active_baseline_name && groups.has(item.active_baseline_name)
+            ? item.active_baseline_name : "__new__";
+    }
+    const name = document.getElementById("mainBaselineName");
+    if (name) name.value = "";
+    onMainBaselineReleaseChanged();
+
+    modal.classList.add("open");
+    modal.setAttribute("aria-hidden", "false");
+}
+
+function onMainBaselineReleaseChanged() {
+    const select = document.getElementById("mainBaselineReleaseSelect");
+    const wrap = document.getElementById("mainBaselineNameWrap");
+    const name = document.getElementById("mainBaselineName");
+    const isNew = !select || select.value === "__new__";
+    if (wrap) wrap.style.display = isNew ? "" : "none";
+    if (name && !isNew) name.value = select.value;
+    updateMainBaselineVersionPreview();
+    if (isNew) setTimeout(() => name?.focus(), 0);
+}
+
+function updateMainBaselineVersionPreview() {
+    const select = document.getElementById("mainBaselineReleaseSelect");
+    const name = document.getElementById("mainBaselineName");
+    const display = document.getElementById("mainBaselineVersionDisplay");
+    const releaseName = select?.value === "__new__" ? (name?.value || "").trim() : (select?.value || "");
+    const groups = groupBaselineReleases(mainBaselineHistoryItems);
+    const versions = groups.get(releaseName) || [];
+    const next = versions.length ? Math.max(...versions.map(releaseDisplayVersion)) + 1 : 1;
+    if (display) display.value = `V${next}`;
+    const button = document.getElementById("saveMainBaselineButton");
+    if (button) button.textContent = `Create ${releaseName || "Release"} V${next}`;
+}
+
+function openNewMainBaselineModalFromHistory() {
+    const scenarioId = activeTestingBaselineHistoryScenarioId;
+    const item = baselineOverviewData.find(x => Number(x.scenario_id) === Number(scenarioId));
+    const modal = document.getElementById("mainBaselineModal");
+    if (!item || !modal || !item.baseline_captured) return;
+
+    mainBaselineCreateMode = "next";
+    activeMainBaselineScenarioId = Number(scenarioId);
+    document.querySelector("#mainBaselineModal h2").textContent = "New Baseline";
+    document.getElementById("mainBaselineOperation").textContent =
+        `Current: ${item.active_baseline_name || "Main Baseline"} · V${item.active_baseline_version} → New: V${Number(item.active_baseline_version || 0) + 1}`;
+    const saveButton = document.getElementById("saveMainBaselineButton");
+    if (saveButton) saveButton.textContent = `Create V${Number(item.active_baseline_version || 0) + 1}`;
+    const name = document.getElementById("mainBaselineName");
+    const error = document.getElementById("mainBaselineError");
+    if (name) {
+        name.value = "";
+        name.placeholder = "e.g. November 2026";
+    }
+    if (error) error.textContent = "";
+
+    closeTestingBaselineHistoryModal(false);
+    modal.classList.add("open");
+    modal.setAttribute("aria-hidden", "false");
+    setTimeout(() => name?.focus(), 0);
+}
+
+function closeMainBaselineModal() {
+    const modal = document.getElementById("mainBaselineModal");
+    if (!modal) return;
+    modal.classList.remove("open");
+    modal.setAttribute("aria-hidden", "true");
+    activeMainBaselineScenarioId = null;
+    mainBaselineCreateMode = "release";
+}
+
+async function saveMainBaseline() {
+    const scenarioId = activeMainBaselineScenarioId;
+    const error = document.getElementById("mainBaselineError");
+    const button = document.getElementById("saveMainBaselineButton");
+    if (!scenarioId) return;
+    if (error) error.textContent = "";
+    try {
+        const releaseSelect = document.getElementById("mainBaselineReleaseSelect");
+        const releaseName = releaseSelect?.value === "__new__"
+            ? (document.getElementById("mainBaselineName")?.value || "").trim()
+            : (releaseSelect?.value || "").trim();
+        if (!releaseName) throw new Error("Release name is required, for example October.");
+        const item = baselineOverviewData.find(x => Number(x.scenario_id) === Number(scenarioId));
+        if (!item) throw new Error("Scenario overview is not loaded.");
+
+        if (button) { button.disabled = true; button.textContent = "Creating..."; }
         const flowResponse = await fetch(
-            "/api/endpoint-flow/analyze?http_method=" + encodeURIComponent(item.http_method) + "&endpoint=" + encodeURIComponent(item.endpoint)
+            "/api/endpoint-flow/analyze?http_method=" + encodeURIComponent(item.http_method)
+            + "&endpoint=" + encodeURIComponent(item.endpoint)
         );
         const flowData = await flowResponse.json();
         if (!flowResponse.ok) throw new Error(JSON.stringify(flowData));
 
-        const captureResponse = await fetch(`/api/scenario-baselines/capture/${scenarioId}`, {
+        const response = await fetch(`/api/scenario-baselines/release-version/${scenarioId}`, {
             method: "POST",
             headers: {"Content-Type": "application/json"},
-            body: JSON.stringify({successful_response: null, endpoint_flow: flowData})
+            body: JSON.stringify({baseline_name: releaseName, successful_response: null, endpoint_flow: flowData})
         });
-        const captureData = await captureResponse.json();
-        if (!captureResponse.ok) {
-            const detail = captureData?.detail;
-            const message = typeof detail === "object" ? detail.message : detail;
-            throw new Error(message || JSON.stringify(captureData));
+        const data = await response.json();
+        if (!response.ok) {
+            const detail = data?.detail;
+            throw new Error(typeof detail === "object" ? (detail.message || JSON.stringify(detail)) : (detail || `HTTP ${response.status}`));
         }
-        if (!silent) await loadBaselineOverview();
-        return true;
-    } catch (error) {
-        if (!silent) alert("Baseline capture failed: " + error.message);
-        return false;
+        closeMainBaselineModal();
+        await loadBaselineOverview();
+        const scenarioSelect = document.getElementById("baselineScenarioSelect");
+        if (scenarioSelect) scenarioSelect.value = String(scenarioId);
+        if (typeof loadBaselineHistory === "function") await loadBaselineHistory();
+        // Continue the workflow immediately: Release/Version is now created,
+        // so the user can attach the first Test Scenario + JIRA to it.
+        await openTestingBaselineModal(scenarioId);
+    } catch (e) {
+        if (error) error.textContent = e.message || "Could not create baseline version.";
+    } finally {
+        if (button) button.disabled = false;
     }
 }
 
+
 let activeTestingBaselineScenarioId = null;
 let testingBaselineJiraIds = [];
+let testingBaselineVersionItems = [];
 
 async function loadTestingBaselineJiraOptions() {
     const select = document.getElementById("testingBaselineJiraSelect");
@@ -1350,13 +1491,34 @@ function removeTestingBaselineJira(index) {
 
 
 async function openTestingBaselineModal(scenarioId) {
-    activeTestingBaselineScenarioId = Number(scenarioId);
     const modal = document.getElementById("testingBaselineModal");
     const item = baselineOverviewData.find(x => Number(x.scenario_id) === Number(scenarioId));
     if (!modal || !item) return;
+    if (!item.baseline_captured) {
+        alert("Create a baseline version first.");
+        return;
+    }
+    activeTestingBaselineScenarioId = Number(scenarioId);
 
     document.getElementById("testingBaselineOperation").textContent =
         `${item.http_method} ${item.endpoint} · ${item.scenario_code}`;
+
+    try {
+        const response = await fetch(`/api/scenario-baselines/history/${scenarioId}`);
+        const data = await response.json();
+        if (!response.ok) throw new Error(JSON.stringify(data));
+        testingBaselineVersionItems = Array.isArray(data) ? data : [];
+    } catch (_) {
+        testingBaselineVersionItems = [];
+    }
+    const groups = groupBaselineReleases(testingBaselineVersionItems);
+    const releaseSelect = document.getElementById("testingBaselineReleaseSelect");
+    if (releaseSelect) {
+        releaseSelect.innerHTML = [...groups.keys()].map(name => `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`).join("");
+        if (item.active_baseline_name && groups.has(item.active_baseline_name)) releaseSelect.value = item.active_baseline_name;
+    }
+    onTestingBaselineReleaseChanged();
+
     ["testingBaselineName", "testingBaselineRequest", "testingBaselineExpected", "testingBaselineActual", "testingBaselineDbEffect"].forEach(id => {
         const el = document.getElementById(id);
         if (el) el.value = "";
@@ -1386,6 +1548,32 @@ async function openTestingBaselineModal(scenarioId) {
     setTimeout(() => document.getElementById("testingBaselineName")?.focus(), 0);
 }
 
+function onTestingBaselineReleaseChanged() {
+    const releaseSelect = document.getElementById("testingBaselineReleaseSelect");
+    const versionSelect = document.getElementById("testingBaselineVersionSelect");
+    if (!releaseSelect || !versionSelect) return;
+    const release = releaseSelect.value;
+    const versions = testingBaselineVersionItems
+        .filter(x => String(x.baseline_name || "Legacy") === release)
+        .sort((a,b) => releaseDisplayVersion(a) - releaseDisplayVersion(b));
+    versionSelect.innerHTML = versions.map(x =>
+        `<option value="${x.id}">V${releaseDisplayVersion(x)}</option>`
+    ).join("");
+    const active = versions.find(x => x.is_active) || versions[versions.length - 1];
+    if (active) versionSelect.value = String(active.id);
+    onTestingBaselineVersionChanged();
+}
+
+function onTestingBaselineVersionChanged() {
+    const releaseSelect = document.getElementById("testingBaselineReleaseSelect");
+    const versionSelect = document.getElementById("testingBaselineVersionSelect");
+    const display = document.getElementById("testingMainBaselineDisplay");
+    const selected = testingBaselineVersionItems.find(x => Number(x.id) === Number(versionSelect?.value));
+    if (display) display.value = selected
+        ? `${releaseSelect?.value || selected.baseline_name || "Release"} · V${releaseDisplayVersion(selected)}`
+        : "";
+}
+
 function closeTestingBaselineModal() {
     const modal = document.getElementById("testingBaselineModal");
     if (!modal) return;
@@ -1393,6 +1581,7 @@ function closeTestingBaselineModal() {
     modal.setAttribute("aria-hidden", "true");
     activeTestingBaselineScenarioId = null;
     testingBaselineJiraIds = [];
+    testingBaselineVersionItems = [];
     renderTestingBaselineJiras();
 }
 
@@ -1419,10 +1608,27 @@ async function saveTestingBaseline() {
 
     try {
         const name = (document.getElementById("testingBaselineName")?.value || "").trim();
-        if (!name) throw new Error("Baseline Name is required, for example October 2026.");
+        if (!name) throw new Error("Test Scenario is required.");
+
+        const item = baselineOverviewData.find(x => Number(x.scenario_id) === Number(scenarioId));
+        if (!item?.baseline_captured) throw new Error("Create the Main Baseline before adding a Test Baseline.");
+
+        // Safety net: if the user selected a JIRA but did not explicitly press +,
+        // include that selection before saving the test baseline.
+        const jiraSelect = document.getElementById("testingBaselineJiraSelect");
+        const selectedJira = String(jiraSelect?.value || "").trim().toUpperCase();
+        if (selectedJira && !testingBaselineJiraIds.includes(selectedJira)) {
+            testingBaselineJiraIds.push(selectedJira);
+            renderTestingBaselineJiras();
+            if (jiraSelect) jiraSelect.value = "";
+        }
+
+        const selectedBaselineId = Number(document.getElementById("testingBaselineVersionSelect")?.value || 0);
+        if (!selectedBaselineId) throw new Error("Select a Release and Version.");
 
         const body = {
             baseline_name: name,
+            baseline_id: selectedBaselineId,
             request_json: parseOptionalJsonField("testingBaselineRequest", "Request JSON"),
             expected_response: parseOptionalJsonField("testingBaselineExpected", "Expected Response JSON"),
             actual_response: parseOptionalJsonField("testingBaselineActual", "Actual Response JSON"),
@@ -1448,9 +1654,9 @@ async function saveTestingBaseline() {
         if (select) select.value = String(scenarioId);
         if (typeof loadBaselineHistory === "function") await loadBaselineHistory();
     } catch (e) {
-        if (error) error.textContent = e.message || "Could not save testing baseline.";
+        if (error) error.textContent = e.message || "Could not save Test Baseline.";
     } finally {
-        if (button) { button.disabled = false; button.textContent = "Save Testing Baseline"; }
+        if (button) { button.disabled = false; button.textContent = "Save Test Baseline"; }
     }
 }
 
@@ -1458,6 +1664,7 @@ async function saveTestingBaseline() {
 let testingBaselineHistoryItems = [];
 
 async function openTestingBaselineHistoryModal(scenarioId) {
+    activeTestingBaselineHistoryScenarioId = Number(scenarioId);
     const modal = document.getElementById("testingBaselineHistoryModal");
     const select = document.getElementById("testingBaselineHistorySelect");
     const detail = document.getElementById("testingBaselineHistoryDetail");
@@ -1465,7 +1672,7 @@ async function openTestingBaselineHistoryModal(scenarioId) {
     const item = baselineOverviewData.find(x => Number(x.scenario_id) === Number(scenarioId));
     if (!modal || !select || !detail || !item) return;
 
-    operation.textContent = `${item.http_method} ${item.endpoint} · ${item.scenario_code}`;
+    operation.textContent = `${item.http_method} ${item.endpoint} · ${item.scenario_code} · ${item.active_baseline_name || "Main Baseline"} · V${item.active_baseline_version}`;
     select.innerHTML = `<option value="">Loading saved baselines...</option>`;
     detail.innerHTML = `<div class="muted-box">Loading saved testing baselines...</div>`;
     modal.classList.add("open");
@@ -1495,12 +1702,13 @@ async function openTestingBaselineHistoryModal(scenarioId) {
     }
 }
 
-function closeTestingBaselineHistoryModal() {
+function closeTestingBaselineHistoryModal(clearScenario = true) {
     const modal = document.getElementById("testingBaselineHistoryModal");
     if (!modal) return;
     modal.classList.remove("open");
     modal.setAttribute("aria-hidden", "true");
     testingBaselineHistoryItems = [];
+    if (clearScenario) activeTestingBaselineHistoryScenarioId = null;
 }
 
 function renderSelectedTestingBaseline() {
@@ -1542,19 +1750,6 @@ function renderSelectedTestingBaseline() {
         </div>`;
 }
 
-async function captureMissingBaselines() {
-    const missing = baselineOverviewData.filter(item => !item.baseline_captured);
-    if (missing.length === 0) {
-        alert("All registered scenarios already have an active baseline.");
-        return;
-    }
-    let successCount = 0;
-    for (const item of missing) {
-        if (await captureScenarioBaseline(item.scenario_id, true)) successCount++;
-    }
-    await loadBaselineOverview();
-    alert(`Captured ${successCount} of ${missing.length} missing baselines.`);
-}
 
 function selectBaselineScenario(scenarioId) {
     const select = document.getElementById("baselineScenarioSelect");
@@ -1583,7 +1778,7 @@ async function loadBaselineHistory() {
         const previous = data.filter(item => item.id !== active.id);
         container.innerHTML = `
             <div class="active-baseline-card">
-                <div><span class="muted-text">Current baseline</span><h3>${escapeHtml(active.scenario_code)} · V${active.baseline_version}</h3></div>
+                <div><span class="muted-text">Current baseline</span><h3>${escapeHtml(active.baseline_name || "Main Baseline")} · V${active.baseline_version}</h3></div>
                 <span class="tag">ACTIVE</span>
                 <div class="baseline-detail">${escapeHtml(active.http_method)} ${escapeHtml(active.endpoint)}</div>
                 <div class="baseline-detail">Flow: ${active.endpoint_flow ? "stored" : "not stored"}</div>

@@ -229,6 +229,12 @@ async function loadDefectScenarioOptions() {
                 ? `${activeProjectScenarios.length} scenario(s) available for the selected project.`
                 : "No registered scenarios are available for the selected project.";
         }
+        if (!activeProjectScenarios.length) {
+            ["inputJson", "expectedJson", "actualJson"].forEach(id => {
+                const field = document.getElementById(id);
+                if (field) field.value = "";
+            });
+        }
     } catch (error) {
         activeProjectScenarios = [];
         select.innerHTML = '<option value="">Unable to load registered scenarios</option>';
@@ -250,6 +256,10 @@ function parseScenarioJsonOrFallback(rawValue, fallbackValue) {
 function applyDefectScenario() {
     const select = document.getElementById("defectScenarioSelect");
     if (!select?.value) {
+        ["inputJson", "expectedJson", "actualJson"].forEach(id => {
+            const field = document.getElementById(id);
+            if (field) field.value = "";
+        });
         const context = document.getElementById("defectScenarioContext");
         if (context) {
             context.textContent = "Select a scenario to reuse its endpoint and test data, or continue manually below.";
@@ -330,6 +340,8 @@ async function refreshScenarioRegistryAndDefect() {
     }
 }
 
+let scenarioRegistryScenarioMap = new Map();
+
 async function loadScenarios(page = scenarioPage) {
     const container = document.getElementById("scenarioList");
     const pager = document.getElementById("scenarioPager");
@@ -344,6 +356,9 @@ async function loadScenarios(page = scenarioPage) {
         if (!response.ok) throw new Error(data.detail || JSON.stringify(data));
 
         const scenarios = data.items || [];
+        scenarioRegistryScenarioMap = new Map(
+            scenarios.map(item => [String(item.scenario_code || ""), item])
+        );
         if (!scenarios.length) {
             container.innerHTML = `<div class="empty-project-state">No registered scenarios match the selected project.</div>`;
         } else {
@@ -595,7 +610,95 @@ function formatScenarioJson(value) {
     return escapeHtml(JSON.stringify(value, null, 2));
 }
 
-function toggleScenarioTestData(scenarioCode, button) {
+function parseStoredScenarioJson(rawValue) {
+    if (rawValue === null || rawValue === undefined || String(rawValue).trim() === "") {
+        return null;
+    }
+    if (typeof rawValue === "object") return rawValue;
+    try {
+        return JSON.parse(String(rawValue));
+    } catch (_) {
+        return null;
+    }
+}
+
+function scenarioDataBlock(label, value, emptyText) {
+    const hasValue = value !== null && value !== undefined;
+    return `
+        <div class="scenario-test-data-card">
+            <div class="scenario-test-data-label">${escapeHtml(label)}</div>
+            ${hasValue
+                ? `<pre>${formatScenarioJson(value)}</pre>`
+                : `<div class="scenario-test-data-empty">${escapeHtml(emptyText || "Not available")}</div>`}
+        </div>
+    `;
+}
+
+async function loadGeneratedScenarioTestData(scenario) {
+    const method = String(scenario?.http_method || "").toUpperCase().trim();
+    const endpoint = String(scenario?.endpoint || "").trim();
+    if (!method || !endpoint) return null;
+
+    try {
+        const response = await fetch(
+            `/api/endpoint-flow/sample-data?http_method=${encodeURIComponent(method)}&endpoint=${encodeURIComponent(endpoint)}`
+        );
+        const text = await response.text();
+        let data = {};
+        try { data = text ? JSON.parse(text) : {}; } catch (_) { data = {}; }
+        if (!response.ok) return null;
+        return data;
+    } catch (error) {
+        console.warn("Could not generate endpoint test data", error);
+        return null;
+    }
+}
+
+async function parseStoredScenarioJson(rawValue) {
+    if (rawValue === null || rawValue === undefined || String(rawValue).trim() === "") {
+        return null;
+    }
+    if (typeof rawValue === "object") return rawValue;
+    try {
+        return JSON.parse(String(rawValue));
+    } catch (_) {
+        return null;
+    }
+}
+
+function scenarioDataBlock(label, value, emptyText) {
+    const hasValue = value !== null && value !== undefined;
+    return `
+        <div class="scenario-test-data-card">
+            <div class="scenario-test-data-label">${escapeHtml(label)}</div>
+            ${hasValue
+                ? `<pre>${formatScenarioJson(value)}</pre>`
+                : `<div class="scenario-test-data-empty">${escapeHtml(emptyText || "Not available")}</div>`}
+        </div>
+    `;
+}
+
+async function loadGeneratedScenarioTestData(scenario) {
+    const method = String(scenario?.http_method || "").toUpperCase().trim();
+    const endpoint = String(scenario?.endpoint || "").trim();
+    if (!method || !endpoint) return null;
+
+    try {
+        const response = await fetch(
+            `/api/endpoint-flow/sample-data?http_method=${encodeURIComponent(method)}&endpoint=${encodeURIComponent(endpoint)}`
+        );
+        const text = await response.text();
+        let data = {};
+        try { data = text ? JSON.parse(text) : {}; } catch (_) { data = {}; }
+        if (!response.ok) return null;
+        return data;
+    } catch (error) {
+        console.warn("Could not generate endpoint test data", error);
+        return null;
+    }
+}
+
+async function toggleScenarioTestData(scenarioCode, button) {
     const item = button?.closest(".scenario-registry-item");
     const panel = item?.querySelector(".scenario-test-data-panel");
     if (!panel) return;
@@ -609,33 +712,79 @@ function toggleScenarioTestData(scenarioCode, button) {
         return;
     }
 
-    const sample = scenarioSampleTestData(scenarioCode);
+    const scenario = scenarioRegistryScenarioMap.get(String(scenarioCode || ""));
+    if (!scenario) {
+        panel.innerHTML = `<div class="scenario-test-data-empty">Scenario data is not available for the selected project.</div>`;
+        panel.hidden = false;
+        return;
+    }
+
+    button.disabled = true;
+    const label = button.querySelector(".scenario-test-data-text");
+    if (label) label.textContent = "Loading...";
+
+    // Scenario Registry test data is intentionally independent from Main/Test
+    // Baselines. A baseline capture must never replace these values.
+    const sample = scenarioSampleTestData(scenario.scenario_code);
+
+    function meaningful(value) {
+        if (value === null || value === undefined) return false;
+        if (Array.isArray(value)) return value.length > 0;
+        if (typeof value === "object") return Object.keys(value).length > 0;
+        return String(value).trim() !== "";
+    }
+
+    const storedInput = parseStoredScenarioJson(scenario.request_json);
+    const storedExpected = parseStoredScenarioJson(scenario.expected_response_json);
+    const storedActual = parseStoredScenarioJson(
+        scenario.actual_response_json ?? scenario.actual_json ?? scenario.output_json ?? null
+    );
+
+    let generated = null;
+    if (!meaningful(storedInput) || !meaningful(storedExpected)) {
+        generated = await loadGeneratedScenarioTestData(scenario);
+    }
+
+    // Priority: useful saved scenario data -> useful generated endpoint data ->
+    // the original Scenario Registry sample data. Empty {} values do not hide
+    // the useful sample data anymore.
+    const generatedInput = generated?.request_json;
+    const generatedExpected = generated?.expected_response_json;
+
+    const input = meaningful(storedInput)
+        ? storedInput
+        : (meaningful(generatedInput) ? generatedInput : sample.input);
+
+    const expected = meaningful(storedExpected)
+        ? storedExpected
+        : (meaningful(generatedExpected) ? generatedExpected : sample.expected);
+
+    const actual = meaningful(storedActual) ? storedActual : sample.output;
+
+    const hasUsefulStored = meaningful(storedInput) || meaningful(storedExpected) || meaningful(storedActual);
+    const hasUsefulGenerated = meaningful(generatedInput) || meaningful(generatedExpected);
+    const sourceText = hasUsefulStored
+        ? "Saved scenario data"
+        : (hasUsefulGenerated ? "Generated from the selected endpoint model" : "Scenario Registry test data");
+
     panel.innerHTML = `
         <div class="scenario-test-data-header">
             <div>
-                <strong>Sample Test Data</strong>
-                <span>UI sample only · not stored in DB</span>
+                <strong>Test Data</strong>
+                <span>${escapeHtml(sourceText)}</span>
             </div>
         </div>
         <div class="scenario-test-data-grid">
-            <div class="scenario-test-data-card">
-                <div class="scenario-test-data-label">INPUT</div>
-                <pre>${formatScenarioJson(sample.input)}</pre>
-            </div>
-            <div class="scenario-test-data-card">
-                <div class="scenario-test-data-label">EXPECTED</div>
-                <pre>${formatScenarioJson(sample.expected)}</pre>
-            </div>
-            <div class="scenario-test-data-card">
-                <div class="scenario-test-data-label">OUTPUT</div>
-                <pre>${formatScenarioJson(sample.output)}</pre>
-            </div>
+            ${scenarioDataBlock("INPUT", input, "No request body for this scenario")}
+            ${scenarioDataBlock("EXPECTED", expected, "No expected response saved")}
+            ${scenarioDataBlock("ACTUAL", actual, "Not executed yet")}
         </div>
     `;
+
     panel.hidden = false;
-    const label = button.querySelector(".scenario-test-data-text");
     if (label) label.textContent = "Hide Data";
     button.classList.add("active");
+    button.disabled = false;
 }
 
 function renderScenarioPager(data, pager) {
@@ -768,6 +917,10 @@ async function loadAvailableScenarioOperations() {
 }
 
 function refreshNewScenarioEndpoints() {
+    /* dynamic-test-data-clear */
+    ["newScenarioRequestJson", "newScenarioExpectedResponse", "newScenarioExpectedDbEffect"].forEach(id => {
+        const el = document.getElementById(id); if (el) el.value = "";
+    });
     const method = (document.getElementById("newScenarioMethod")?.value || "").toUpperCase();
     const select = document.getElementById("newScenarioEndpoint");
     const status = document.getElementById("existingOperationScenario");
@@ -828,6 +981,25 @@ function suggestScenarioIdentity(method, endpoint) {
     }
 }
 
+async function populateScenarioTestData() {
+    const method = (document.getElementById("newScenarioMethod")?.value || "").trim().toUpperCase();
+    const endpoint = (document.getElementById("newScenarioEndpoint")?.value || "").trim();
+    if (!method || !endpoint) return;
+    const req = document.getElementById("newScenarioRequestJson");
+    const exp = document.getElementById("newScenarioExpectedResponse");
+    const db = document.getElementById("newScenarioExpectedDbEffect");
+    try {
+        const r = await fetch(`/api/endpoint-flow/sample-data?http_method=${encodeURIComponent(method)}&endpoint=${encodeURIComponent(endpoint)}`);
+        const data = await r.json();
+        if (!r.ok) throw new Error(data.detail || `HTTP ${r.status}`);
+        if (req) req.value = data.request_json == null ? "" : JSON.stringify(data.request_json, null, 2);
+        if (exp) exp.value = data.expected_response_json == null ? "" : JSON.stringify(data.expected_response_json, null, 2);
+        if (db) db.value = data.expected_db_effect || "";
+    } catch (e) {
+        console.error("Could not generate scenario test data", e);
+    }
+}
+
 async function checkExistingOperationScenario() {
     const method = (document.getElementById("newScenarioMethod")?.value || "").toUpperCase();
     const endpoint = (document.getElementById("newScenarioEndpoint")?.value || "").trim();
@@ -880,6 +1052,7 @@ async function checkExistingOperationScenario() {
         if (details) details.classList.remove("hidden");
         suggestScenarioIdentity(method, endpoint);
         button.disabled = false;
+        await populateScenarioTestData();
     } catch (e) {
         status.className = "scenario-operation-check error";
         status.textContent = e.message || "Could not check existing scenarios.";

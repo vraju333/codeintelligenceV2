@@ -36,6 +36,18 @@ class ScenarioBaseline(Base):
         nullable=False
     )
 
+    baseline_name: Mapped[str | None] = mapped_column(
+        String(150),
+        nullable=True
+    )
+
+    # Display version inside one release/month. Internal baseline_version remains
+    # the globally unique sequence used by comparison/source snapshot APIs.
+    release_version: Mapped[int | None] = mapped_column(
+        Integer,
+        nullable=True
+    )
+
     scenario_code: Mapped[str] = mapped_column(
         String(100),
         nullable=False,
@@ -204,6 +216,12 @@ class ScenarioTestBaseline(Base):
     jira_ids: Mapped[list | None] = mapped_column(JSON, nullable=True)
     status: Mapped[str] = mapped_column(String(30), nullable=False, default="NOT_RUN")
     code_baseline_version: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    baseline_id: Mapped[int | None] = mapped_column(
+        Integer,
+        ForeignKey("scenario_baselines.id"),
+        nullable=True,
+        index=True,
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime,
         default=datetime.utcnow,

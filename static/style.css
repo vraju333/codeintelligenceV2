@@ -1680,3 +1680,28 @@ body {
 @media (max-width: 760px) {
     .testing-history-summary { grid-template-columns: 1fr 1fr; }
 }
+
+
+/* Scenario Registry: real test-data empty state */
+.scenario-test-data-empty {
+    min-height: 96px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 18px;
+    border: 1px dashed #cbd5e1;
+    border-radius: 10px;
+    background: #f8fafc;
+    color: #64748b;
+    text-align: center;
+}
+
+
+/* Release -> Version -> Test Scenario baseline model */
+.release-history-toolbar { display:flex; gap:12px; align-items:end; margin:12px 0 16px; }
+.release-history-toolbar label { min-width:220px; }
+.release-version-card { margin-bottom:14px; }
+.testing-version-tests { grid-column:1 / -1; width:100%; margin-top:12px; }
+.version-test-row { margin-top:10px; padding:12px; border:1px solid #dce4ef; border-radius:10px; background:#fff; }
+.release-compare-card { margin-top:18px; }
+.release-compare-card .scenario-create-grid { margin:12px 0; }

@@ -40,6 +40,28 @@ class ScenarioBaselineRepository:
             .first()
         )
 
+
+    def find_by_id(self, db: Session, scenario_id: int, baseline_id: int):
+        return (
+            db.query(ScenarioBaseline)
+            .filter(
+                ScenarioBaseline.scenario_id == scenario_id,
+                ScenarioBaseline.id == baseline_id
+            )
+            .first()
+        )
+
+    def find_release_versions(self, db: Session, scenario_id: int, release_name: str):
+        return (
+            db.query(ScenarioBaseline)
+            .filter(
+                ScenarioBaseline.scenario_id == scenario_id,
+                ScenarioBaseline.baseline_name == release_name
+            )
+            .order_by(ScenarioBaseline.release_version, ScenarioBaseline.baseline_version)
+            .all()
+        )
+
     def find_latest(self, db: Session, scenario_id: int):
         return (
             db.query(ScenarioBaseline)
@@ -111,13 +133,35 @@ class ScenarioBaselineRepository:
             .all()
         )
 
-    def find_test_baseline_by_name(self, db: Session, scenario_id: int, baseline_name: str):
+    def find_test_baseline_by_name(self, db: Session, scenario_id: int, baseline_name: str, code_version: int | None = None):
+        query = db.query(ScenarioTestBaseline).filter(
+            ScenarioTestBaseline.scenario_id == scenario_id,
+            ScenarioTestBaseline.baseline_name == baseline_name
+        )
+        if code_version is not None:
+            query = query.filter(ScenarioTestBaseline.code_baseline_version == code_version)
+        return query.first()
+
+
+    def find_test_baselines_for_code_version(self, db: Session, scenario_id: int, version: int):
         return (
             db.query(ScenarioTestBaseline)
             .filter(
                 ScenarioTestBaseline.scenario_id == scenario_id,
-                ScenarioTestBaseline.baseline_name == baseline_name
+                ScenarioTestBaseline.code_baseline_version == version
             )
+            .order_by(ScenarioTestBaseline.created_at, ScenarioTestBaseline.id)
+            .all()
+        )
+
+    def find_test_baseline_for_code_version(self, db: Session, scenario_id: int, version: int):
+        return (
+            db.query(ScenarioTestBaseline)
+            .filter(
+                ScenarioTestBaseline.scenario_id == scenario_id,
+                ScenarioTestBaseline.code_baseline_version == version
+            )
+            .order_by(desc(ScenarioTestBaseline.created_at), desc(ScenarioTestBaseline.id))
             .first()
         )
 

@@ -199,40 +199,15 @@ Select a scenario to reuse its endpoint and test data, or continue manually belo
 <div class="json-grid defect-json-grid">
 <div>
 <label>Input JSON</label>
-<textarea id="inputJson">{
-  "type": "EMPLOYEE",
-  "employeeCode": "EMP100",
-  "emailDetails": {
-    "primaryEmail": "raju@test.com"
-  },
-  "phoneContactDetails": {
-    "primaryContact": "9999999999"
-  }
-}</textarea>
+<textarea id="inputJson"></textarea>
 </div>
 <div>
 <label>Expected JSON</label>
-<textarea id="expectedJson">{
-  "employeeCode": "EMP100",
-  "emailDetails": {
-    "primaryEmail": "raju@test.com"
-  },
-  "phoneContactDetails": {
-    "primaryContact": "9999999999"
-  }
-}</textarea>
+<textarea id="expectedJson"></textarea>
 </div>
 <div>
 <label>Actual JSON</label>
-<textarea id="actualJson">{
-  "employeeCode": "EMP100",
-  "emailDetails": {
-    "primaryEmail": null
-  },
-  "phoneContactDetails": {
-    "primaryContact": null
-  }
-}</textarea>
+<textarea id="actualJson"></textarea>
 </div>
 </div>
 <div class="defect-db-effect" id="defectExpectedDbEffect" hidden>
@@ -276,18 +251,17 @@ Select a scenario to reuse its endpoint and test data, or continue manually belo
 <div aria-expanded="false" class="card-header accordion-header" data-accordion-title="Scenario Baselines" role="button" tabindex="0">
 <div>
 <h2>Scenario Baselines</h2>
-<p>One scenario per HTTP operation. Keep code versions separate from repeatable monthly/testing baselines.</p>
+<p>Organize each scenario by Release → Version → Test Scenarios/JIRAs.</p>
 </div>
 <div class="header-actions">
 <button class="secondary-button" onclick="loadBaselineOverview()">Refresh</button>
-<button onclick="captureMissingBaselines()">Capture Missing Code Baselines</button>
 </div>
 <button aria-label="Toggle Scenario Baselines" class="accordion-toggle" tabindex="-1" type="button">›</button></div><div class="accordion-body">
 <div class="baseline-overview" id="baselineOverview">
                 Loading scenario baselines...
             </div>
 <div class="baseline-history-toolbar">
-<label for="baselineScenarioSelect">Code version history</label>
+<label for="baselineScenarioSelect">Version History</label>
 <div class="form-row compact-row">
 <select id="baselineScenarioSelect">
 <option value="">Select an operation scenario...</option>
@@ -349,10 +323,10 @@ Loading operations that are not yet represented in Scenario Baselines...
 <div class="scenario-create-section-title">Test Data</div>
 <div class="scenario-create-help">For POST / PUT / PATCH scenarios, save reproducible request data here. Defect Analysis can reuse this scenario data later.</div>
 <label>Request JSON <span class="muted-text">(optional)</span>
-<textarea class="scenario-json-input" id="newScenarioRequestJson" placeholder='{"primaryContact":"9876543210","secondaryContact":"9123456780"}'></textarea>
+<textarea class="scenario-json-input" id="newScenarioRequestJson" placeholder='Select an endpoint to generate request data'></textarea>
 </label>
 <label>Expected Response JSON <span class="muted-text">(optional)</span>
-<textarea class="scenario-json-input" id="newScenarioExpectedResponse" placeholder='{"primaryContact":"9876543210","secondaryContact":"9123456780"}'></textarea>
+<textarea class="scenario-json-input" id="newScenarioExpectedResponse" placeholder='Select an endpoint to generate request data'></textarea>
 </label>
 <label>Expected DB Effect <span class="muted-text">(optional)</span>
 <textarea id="newScenarioExpectedDbEffect" placeholder='e.g. contact_details.primary_contact = "9876543210"'></textarea>
@@ -370,14 +344,51 @@ Loading operations that are not yet represented in Scenario Baselines...
 </div>
 </div>
 <!-- ====================================================== -->
+<!-- MAIN BASELINE MODAL -->
+<!-- ====================================================== -->
+<div aria-hidden="true" class="flowchart-modal" id="mainBaselineModal">
+<div class="flowchart-modal-panel scenario-modal-panel">
+<div class="flowchart-modal-header">
+<div>
+<h2>Add Baseline</h2>
+<p id="mainBaselineOperation">Create the first Main Baseline for this scenario.</p>
+</div>
+<div class="flowchart-modal-actions">
+<button class="secondary-button" onclick="closeMainBaselineModal()" type="button">Close</button>
+</div>
+</div>
+<div class="scenario-create-form">
+<div class="scenario-create-scroll">
+<label>Release
+<select id="mainBaselineReleaseSelect" onchange="onMainBaselineReleaseChanged()">
+<option value="__new__">+ New Release</option>
+</select>
+</label>
+<label id="mainBaselineNameWrap">New Release Name
+<input id="mainBaselineName" placeholder="e.g. October" type="text" oninput="updateMainBaselineVersionPreview()"/>
+</label>
+<label>Version
+<input id="mainBaselineVersionDisplay" type="text" readonly value="V1"/>
+</label>
+<div class="scenario-create-help">Select an existing release to create its next version, or create a new release which starts at V1.</div>
+<div class="scenario-create-error" id="mainBaselineError"></div>
+</div>
+<div class="scenario-create-actions">
+<button class="secondary-button" onclick="closeMainBaselineModal()" type="button">Cancel</button>
+<button id="saveMainBaselineButton" onclick="saveMainBaseline()" type="button">Create Baseline</button>
+</div>
+</div>
+</div>
+</div>
+<!-- ====================================================== -->
 <!-- TESTING BASELINE MODAL -->
 <!-- ====================================================== -->
 <div aria-hidden="true" class="flowchart-modal" id="testingBaselineModal">
 <div class="flowchart-modal-panel scenario-modal-panel">
 <div class="flowchart-modal-header">
 <div>
-<h2>Add Testing Baseline</h2>
-<p id="testingBaselineOperation">Save a new test cycle under the existing operation scenario.</p>
+<h2>Add Test Baseline</h2>
+<p id="testingBaselineOperation">Add test evidence under the existing Main Baseline.</p>
 </div>
 <div class="flowchart-modal-actions">
 <button class="secondary-button" onclick="closeTestingBaselineModal()" type="button">Close</button>
@@ -385,13 +396,24 @@ Loading operations that are not yet represented in Scenario Baselines...
 </div>
 <div class="scenario-create-form">
 <div class="scenario-create-scroll">
-<label>Baseline Name
-<input id="testingBaselineName" placeholder="e.g. October 2026" type="text"/>
+<div class="scenario-create-grid">
+<label>Release
+<select id="testingBaselineReleaseSelect" onchange="onTestingBaselineReleaseChanged()"></select>
+</label>
+<label>Version
+<select id="testingBaselineVersionSelect" onchange="onTestingBaselineVersionChanged()"></select>
+</label>
+</div>
+<label>Selected Baseline
+<input id="testingMainBaselineDisplay" type="text" readonly/>
+</label>
+<label>Test Scenario
+<input id="testingBaselineName" placeholder="e.g. Employee email update regression" type="text"/>
 </label>
 <div class="testing-jira-picker">
 <label>Related JIRAs <span class="muted-text">(optional)</span></label>
 <div class="testing-jira-add-row">
-<select id="testingBaselineJiraSelect">
+<select id="testingBaselineJiraSelect" onchange="addTestingBaselineJira()">
 <option value="">Select a saved JIRA...</option>
 </select>
 <button class="jira-add-button" type="button" onclick="addTestingBaselineJira()" aria-label="Add selected JIRA">+</button>
@@ -412,12 +434,12 @@ Loading operations that are not yet represented in Scenario Baselines...
 <label>Expected DB Effect <span class="muted-text">(optional)</span>
 <textarea id="testingBaselineDbEffect" placeholder='e.g. address.city = "Hyderabad"'></textarea>
 </label>
-<div class="scenario-create-help">A testing baseline does not create V2/V3. It records a repeatable test cycle (September, October, etc.) against the current code baseline.</div>
+<div class="scenario-create-help">The Test Scenario and selected JIRAs are saved under the Release/Version selected above.</div>
 <div class="scenario-create-error" id="testingBaselineError"></div>
 </div>
 <div class="scenario-create-actions">
 <button class="secondary-button" onclick="closeTestingBaselineModal()" type="button">Cancel</button>
-<button id="saveTestingBaselineButton" onclick="saveTestingBaseline()" type="button">Save Testing Baseline</button>
+<button id="saveTestingBaselineButton" onclick="saveTestingBaseline()" type="button">Save Test Baseline</button>
 </div>
 </div>
 </div>
@@ -433,6 +455,7 @@ Loading operations that are not yet represented in Scenario Baselines...
 <p id="testingBaselineHistoryOperation">Saved testing baselines for this operation.</p>
 </div>
 <div class="flowchart-modal-actions">
+<button id="newMainBaselineButton" onclick="openNewMainBaselineModalFromHistory()" type="button">+ New Baseline</button>
 <button class="secondary-button" onclick="closeTestingBaselineHistoryModal()" type="button">Close</button>
 </div>
 </div>
@@ -488,11 +511,11 @@ Loading operations that are not yet represented in Scenario Baselines...
 </div>
 </div>
 <script src="/static/app.js?v=12"></script>
-<script src="/static/project-ui.js?v=operation-scenario-3"></script>
+<script src="/static/project-ui.js?v=scenario-real-testdata-1"></script>
 <script src="/static/flowchart-ui.js?v=3"></script>
 <script src="/static/jira-impact.js?v=3"></script>
 <script src="/static/attribute-impact.js?v=2"></script>
 <script src="/static/regression-details.js?v=2"></script>
-<script src="/static/version-source-history.js?v=6"></script>
+<script src="/static/version-source-history.js?v=7"></script>
 <script src="/static/accordion-ui.js?v=2"></script></body>
 </html>

@@ -9,6 +9,8 @@ from services.flow.endpoint_flow_service import (
 )
 
 
+from services.scenario.java_sample_data_service import JavaSampleDataService
+
 router = APIRouter(
     prefix="/api/endpoint-flow",
     tags=["Endpoint Flow"]
@@ -65,3 +67,12 @@ def analyze_endpoint(
             status_code=500,
             detail=str(exception)
         )
+
+@router.get("/sample-data")
+def get_sample_data(http_method: str = Query(...), endpoint: str = Query(...)):
+    try:
+        return JavaSampleDataService().generate(http_method=http_method, endpoint=endpoint)
+    except RuntimeError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))

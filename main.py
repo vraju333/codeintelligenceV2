@@ -62,10 +62,31 @@ def _ensure_scenario_registry_columns():
 
 
 
+
+def _ensure_scenario_baseline_columns():
+    """Additive upgrade for named Main Baselines."""
+    required_columns = {
+        "baseline_name": "VARCHAR(150)",
+        "release_version": "INTEGER",
+    }
+    try:
+        inspector = inspect(engine)
+        table_names = set(inspector.get_table_names())
+        if "scenario_baselines" not in table_names:
+            return
+        existing = {column["name"] for column in inspector.get_columns("scenario_baselines")}
+        with engine.begin() as connection:
+            for name, sql_type in required_columns.items():
+                if name not in existing:
+                    connection.execute(text(f"ALTER TABLE scenario_baselines ADD COLUMN {name} {sql_type}"))
+    except Exception as exc:
+        raise RuntimeError(f"Unable to upgrade Main Baseline database schema: {exc}") from exc
+
 def _ensure_testing_baseline_columns():
     """Additive upgrade for periodic testing-baseline metadata."""
     required_columns = {
         "jira_ids": "JSON",
+        "baseline_id": "INTEGER",
     }
 
     try:
@@ -102,6 +123,7 @@ def _ensure_testing_baseline_columns():
 
 initialize_storage()
 _ensure_scenario_registry_columns()
+_ensure_scenario_baseline_columns()
 _ensure_testing_baseline_columns()
 
 
