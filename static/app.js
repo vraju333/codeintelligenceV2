@@ -1282,6 +1282,11 @@ async function openMainBaselineModal(scenarioId) {
     const error = document.getElementById("mainBaselineError");
     if (error) error.textContent = "";
 
+    // Open immediately. Loading history should never make the button appear broken
+    // when the API is slow or temporarily unavailable.
+    modal.classList.add("open");
+    modal.setAttribute("aria-hidden", "false");
+
     try {
         const response = await fetch(`/api/scenario-baselines/history/${scenarioId}`);
         const data = await response.json();
@@ -1304,9 +1309,6 @@ async function openMainBaselineModal(scenarioId) {
     const name = document.getElementById("mainBaselineName");
     if (name) name.value = "";
     onMainBaselineReleaseChanged();
-
-    modal.classList.add("open");
-    modal.setAttribute("aria-hidden", "false");
 }
 
 function onMainBaselineReleaseChanged() {

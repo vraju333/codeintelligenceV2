@@ -4,13 +4,22 @@
     gap: 12px;
     padding: 14px 16px;
     margin-bottom: 20px;
-    background: #ffffff;
-    border: 1px solid #e2e8f0;
+    background: #2563A6;
+    border: 1px solid #2563A6;
     border-radius: 12px;
+    color: #ffffff;
 }
 .project-toolbar-label { font-weight: 700; white-space: nowrap; }
 .project-toolbar select { min-width: 260px; }
-.project-path { color: #64748b; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+.project-toolbar button {
+    background: rgba(255, 255, 255, 0.16);
+    border: 1px solid rgba(255, 255, 255, 0.42);
+    color: #ffffff;
+}
+.project-toolbar button:hover {
+    background: rgba(255, 255, 255, 0.26);
+}
+.project-path { color: rgba(255, 255, 255, 0.82); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
 .scenario-pager { display: flex; justify-content: space-between; align-items: center; margin-top: 12px; gap: 12px; }
 .scenario-page-actions { display: flex; gap: 8px; }
 .scenario-page-info { color: #64748b; font-size: 13px; }

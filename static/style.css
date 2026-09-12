@@ -23,7 +23,14 @@ body {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    padding: 28px 4px 20px;
+    padding: 22px 24px;
+    margin: 18px 0 18px;
+    background: #2563A6;
+    color: #ffffff;
+    border-radius: 16px;
+    box-shadow:
+        0 5px 18px
+        rgba(15, 23, 42, 0.10);
 }
 
 .header h1 {
@@ -33,7 +40,7 @@ body {
 
 .header p {
     margin-top: 5px;
-    color: #64748b;
+    color: rgba(255, 255, 255, 0.88);
 }
 
 .status-badge {
@@ -1543,6 +1550,29 @@ body {
 /* ====================================================== */
 /* Testing Baseline modal: scroll body + always-visible actions */
 /* ====================================================== */
+#mainBaselineModal {
+    align-items: center;
+    justify-content: center;
+}
+
+#mainBaselineModal .scenario-modal-panel {
+    width: min(680px, calc(100vw - 36px));
+    height: auto;
+    max-height: calc(100vh - 36px);
+    overflow: hidden;
+}
+
+#mainBaselineModal .scenario-create-form {
+    min-height: 0;
+    overflow-y: auto;
+}
+
+#mainBaselineModal #mainBaselineVersionDisplay[readonly] {
+    background: #f1f5f9;
+    color: #334155;
+    font-weight: 700;
+}
+
 #testingBaselineModal {
     align-items: center;
     justify-content: center;

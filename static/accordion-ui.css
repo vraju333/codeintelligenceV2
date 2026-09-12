@@ -1,0 +1,241 @@
+
+/* Hackathon UI polish: major feature accordions */
+:root {
+    --ci-navy: #172033;
+    --ci-muted: #64748b;
+    --ci-line: #e2e8f0;
+}
+
+.accordion-card {
+    --section-color: #2563A6;
+    --section-soft: #eff6ff;
+    padding: 0 !important;
+    overflow: hidden;
+    border: 1px solid var(--ci-line) !important;
+    border-left: 5px solid var(--section-color) !important;
+    border-radius: 16px !important;
+    box-shadow: 0 5px 18px rgba(15, 23, 42, .06) !important;
+    transition: box-shadow .18s ease, transform .18s ease, border-color .18s ease;
+}
+
+.accordion-card:hover {
+    box-shadow: 0 9px 26px rgba(15, 23, 42, .09) !important;
+}
+
+.accordion-card > .accordion-header {
+    min-height: 78px;
+    margin: 0 !important;
+    padding: 16px 18px !important;
+    background: linear-gradient(90deg, var(--section-soft), #fff 48%);
+    cursor: pointer;
+    user-select: none;
+}
+
+.accordion-card.is-collapsed > .accordion-header {
+    background: #fff;
+}
+
+.accordion-card > .accordion-header > div:first-child {
+    position: relative;
+    padding-left: 48px;
+}
+
+.accordion-card > .accordion-header > div:first-child::before {
+    content: "▣";
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 36px;
+    height: 36px;
+    border-radius: 11px;
+    display: grid;
+    place-items: center;
+    background: var(--section-soft);
+    color: var(--section-color);
+    font-size: 15px;
+    font-weight: 900;
+}
+
+.accordion-header[data-accordion-title="Scenario Flowchart"] > div:first-child::before {
+    content: "↬";
+}
+
+.accordion-header[data-accordion-title="JIRA Impact Analysis"] > div:first-child::before {
+    content: "JI";
+    font-size: 13px;
+}
+
+.accordion-header[data-accordion-title="Attribute Impact Analysis"] > div:first-child::before {
+    content: "@";
+}
+
+.accordion-header[data-accordion-title="Scenario Registry"] > div:first-child::before {
+    content: "SR";
+    font-size: 13px;
+}
+
+.accordion-header[data-accordion-title="Defect Investigation"] > div:first-child::before {
+    content: "!";
+}
+
+.accordion-header[data-accordion-title="Regression Impact"] > div:first-child::before {
+    content: "Δ";
+}
+
+.accordion-header[data-accordion-title="Scenario Baselines"] > div:first-child::before {
+    content: "V";
+}
+
+.accordion-card > .accordion-header h2 {
+    color: var(--ci-navy);
+    font-size: 20px !important;
+    letter-spacing: -.01em;
+}
+
+.accordion-card > .accordion-header p {
+    color: var(--ci-muted);
+    margin-top: 4px !important;
+}
+
+.accordion-card > .accordion-body {
+    padding: 20px 22px 24px;
+    border-top: 1px solid var(--ci-line);
+    background: #fff;
+}
+
+.accordion-toggle {
+    width: 40px;
+    height: 40px;
+    padding: 0 !important;
+    flex: 0 0 40px;
+    border-radius: 12px !important;
+    display: grid;
+    place-items: center;
+    background: var(--section-color) !important;
+    color: #fff !important;
+    font-size: 26px !important;
+    line-height: 1;
+    box-shadow: 0 4px 10px rgba(15, 23, 42, .12);
+}
+
+.accordion-card.is-collapsed .accordion-toggle {
+    background: var(--section-soft) !important;
+    color: var(--section-color) !important;
+    box-shadow: none;
+}
+
+.accordion-card.is-collapsed {
+    opacity: .94;
+}
+
+#scenario-flowchart {
+    --section-color: #2563A6;
+    --section-soft: #eff6ff;
+}
+#jiraImpactCard {
+    --section-color: #2563A6;
+    --section-soft: #eff6ff;
+}
+#attributeImpactCard {
+    --section-color: #2563A6;
+    --section-soft: #eff6ff;
+}
+#scenario-registry {
+    --section-color: #2563A6;
+    --section-soft: #eff6ff;
+}
+#defect-investigation {
+    --section-color: #2563A6;
+    --section-soft: #eff6ff;
+}
+#regression-impact {
+    --section-color: #2563A6;
+    --section-soft: #eff6ff;
+}
+#scenario-baselines {
+    --section-color: #2563A6;
+    --section-soft: #eff6ff;
+}
+
+/* Make primary content inside an expanded feature feel grouped. */
+.accordion-body > .result-area,
+.accordion-body > .jira-impact-results,
+.accordion-body > .attribute-impact-results {
+    border-radius: 12px;
+}
+
+/* Better action separation without changing existing button semantics. */
+.accordion-header .header-actions {
+    margin-left: auto;
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+@media (max-width: 760px) {
+    .accordion-card > .accordion-header {
+        align-items: flex-start;
+        flex-wrap: wrap;
+    }
+    .accordion-card > .accordion-header > div:first-child {
+        padding-left: 44px;
+        flex: 1 1 70%;
+    }
+    .accordion-header .header-actions {
+        order: 3;
+        width: 100%;
+        margin-top: 10px;
+    }
+}
+
+
+/* Hackathon polish v2: full-color feature headers */
+.accordion-card > .accordion-header,
+.accordion-card.is-collapsed > .accordion-header {
+    background: var(--section-color) !important;
+    color: #ffffff !important;
+    border-bottom: 0 !important;
+}
+
+.accordion-card > .accordion-header h2,
+.accordion-card > .accordion-header p,
+.accordion-card > .accordion-header .muted-text {
+    color: #ffffff !important;
+}
+
+.accordion-card > .accordion-header p {
+    opacity: .88;
+}
+
+.accordion-card > .accordion-header > div:first-child::before {
+    background: rgba(255,255,255,.18) !important;
+    color: #ffffff !important;
+}
+
+.accordion-card .accordion-toggle,
+.accordion-card.is-collapsed .accordion-toggle {
+    background: rgba(255,255,255,.18) !important;
+    color: #ffffff !important;
+    border: 1px solid rgba(255,255,255,.34) !important;
+    box-shadow: none !important;
+}
+
+.accordion-card .accordion-toggle:hover {
+    background: rgba(255,255,255,.28) !important;
+}
+
+/* Header action buttons stay readable on colored feature bars. */
+.accordion-header .header-actions button {
+    background: rgba(255,255,255,.16) !important;
+    color: #ffffff !important;
+    border: 1px solid rgba(255,255,255,.42) !important;
+}
+
+.accordion-header .header-actions button:hover {
+    background: rgba(255,255,255,.26) !important;
+}
+
+/* Top section links were intentionally removed; hide any stale cached copy too. */
+.section-nav {
+    display: none !important;
+}
