@@ -21,7 +21,7 @@
 <link href="/static/jira-impact.css?v=2" rel="stylesheet"/>
 <link href="/static/attribute-impact.css?v=1" rel="stylesheet"/>
 <link href="/static/regression-details.css?v=2" rel="stylesheet"/>
-<link href="/static/version-source-history.css?v=2" rel="stylesheet"/>
+<link href="/static/version-source-history.css?v=3-file-row-fix" rel="stylesheet"/>
 <link href="/static/accordion-ui.css?v=hackathon-4-icons" rel="stylesheet"/></head>
 <body>
 <div class="page">
@@ -398,8 +398,23 @@ Loading operations that are not yet represented in Scenario Baselines...
 </div>
 <div class="scenario-create-form">
 <div class="scenario-create-scroll">
-<label>Baseline Name
-<input id="testingBaselineName" placeholder="e.g. October 2026" type="text"/>
+<div class="scenario-create-grid">
+<label>Release
+<select id="testingBaselineReleaseSelect" onchange="onTestingBaselineReleaseChanged()">
+<option value="">Loading releases...</option>
+</select>
+</label>
+<label>Version
+<select id="testingBaselineVersionSelect" onchange="onTestingBaselineVersionChanged()">
+<option value="">Select version...</option>
+</select>
+</label>
+</div>
+<label>Selected Code Baseline
+<input id="testingMainBaselineDisplay" readonly type="text" value=""/>
+</label>
+<label>Test Scenario Name
+<input id="testingBaselineName" placeholder="e.g. Address update regression test" type="text"/>
 </label>
 <div class="testing-jira-picker">
 <label>Related JIRAs <span class="muted-text">(optional)</span></label>
@@ -500,12 +515,12 @@ Loading operations that are not yet represented in Scenario Baselines...
 </details>
 </div>
 </div>
-<script src="/static/app.js?v=13"></script>
+<script src="/static/app.js?v=17-runtime-baseline-dropdown"></script>
 <script src="/static/project-ui.js?v=scenario-real-testdata-1"></script>
 <script src="/static/flowchart-ui.js?v=3"></script>
 <script src="/static/jira-impact.js?v=3"></script>
 <script src="/static/attribute-impact.js?v=2"></script>
 <script src="/static/regression-details.js?v=2"></script>
-<script src="/static/version-source-history.js?v=6"></script>
+<script src="/static/version-source-history.js?v=7-show-changed-files"></script>
 <script src="/static/accordion-ui.js?v=2"></script></body>
 </html>
