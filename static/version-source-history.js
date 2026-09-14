@@ -183,6 +183,20 @@ function renderReleaseVersionComparison(data) {
     const source = data.source_comparison || {};
     const summary = data.change_summary || {};
     const testing = data.testing_comparison || {};
+    const changedFiles = source.changed_files || [];
+    const changedFileRows = changedFiles.map(file => `
+        <div class="version-source-row version-file-change-row">
+            <strong>${escapeHtml(file.status || "MODIFIED")}</strong>
+            <span>${escapeHtml(file.file_path || "")}</span>
+        </div>
+    `).join("");
+    const codeChangeRows = (source.changes || []).map(change => `
+        <div class="version-source-row">
+            <strong>${escapeHtml(String(change.change_type || "CHANGED").replaceAll("_"," "))}</strong>
+            <span>${escapeHtml(change.file_path || change.symbol || "")}</span>
+        </div>
+    `).join("");
+
     return `
         <div class="version-transition-banner">
             <strong>${escapeHtml(fromLabel)} → ${escapeHtml(toLabel)}</strong>
@@ -195,7 +209,20 @@ function renderReleaseVersionComparison(data) {
             <div><span>Flow methods + / -</span><strong>${Number(summary.flow_methods_added || 0) + Number(summary.flow_methods_removed || 0)}</strong></div>
             <div><span>Testing changed</span><strong>${testing.available ? (testing.changed ? "YES" : "NO") : "N/A"}</strong></div>
         </div>
-        ${(source.changes || []).length ? `<div class="version-change-section"><h4>Code changes</h4>${(source.changes || []).map(change => `<div class="version-source-row"><strong>${escapeHtml(String(change.change_type || "CHANGED").replaceAll("_"," "))}</strong><span>${escapeHtml(change.file_path || change.symbol || "")}</span></div>`).join("")}</div>` : `<div class="muted-box">No classified source change stored for this comparison.</div>`}
+        ${codeChangeRows ? `
+            <div class="version-change-section">
+                <h4>Code changes</h4>
+                ${codeChangeRows}
+            </div>
+        ` : `
+            <div class="muted-box">No classified source change stored for this comparison.</div>
+        `}
+        ${changedFileRows ? `
+            <div class="version-change-section">
+                <h4>Changed source files</h4>
+                ${changedFileRows}
+            </div>
+        ` : ""}
         ${testing.available ? `<div class="version-change-section"><h4>Test/JIRA comparison</h4><div class="muted-text">${escapeHtml(testing.from_name || "No test")} → ${escapeHtml(testing.to_name || "No test")}</div><div class="testing-jira-list">${(testing.from_jiras || []).map(id=>`<span class="testing-jira-chip">${escapeHtml(id)}</span>`).join("") || "None"} <b>→</b> ${(testing.to_jiras || []).map(id=>`<span class="testing-jira-chip">${escapeHtml(id)}</span>`).join("") || "None"}</div></div>` : ``}
     `;
 }

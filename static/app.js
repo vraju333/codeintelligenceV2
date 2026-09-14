@@ -1424,6 +1424,51 @@ let activeTestingBaselineScenarioId = null;
 let testingBaselineJiraIds = [];
 let testingBaselineVersionItems = [];
 
+function ensureTestingBaselineSelectors() {
+    const modal = document.getElementById("testingBaselineModal");
+    if (!modal) return;
+
+    const scroll = modal.querySelector(".scenario-create-scroll");
+    const nameInput = document.getElementById("testingBaselineName");
+    if (!scroll || !nameInput) return;
+
+    let nameLabel = nameInput.closest("label");
+    if (nameLabel) {
+        const childNodes = Array.from(nameLabel.childNodes);
+        const textNode = childNodes.find(node => node.nodeType === Node.TEXT_NODE && String(node.textContent || "").trim());
+        if (textNode) {
+            textNode.textContent = "Test Scenario Name\n";
+        }
+    }
+    nameInput.placeholder = "e.g. Student add happy path test";
+
+    if (document.getElementById("testingBaselineReleaseSelect") && document.getElementById("testingBaselineVersionSelect")) {
+        return;
+    }
+
+    const baselineBlock = document.createElement("div");
+    baselineBlock.id = "testingBaselineSelectorBlock";
+    baselineBlock.innerHTML = `
+        <div class="scenario-create-grid">
+            <label>Existing Code Baseline
+                <select id="testingBaselineReleaseSelect" onchange="onTestingBaselineReleaseChanged()">
+                    <option value="">Loading baselines...</option>
+                </select>
+            </label>
+            <label>Version
+                <select id="testingBaselineVersionSelect" onchange="onTestingBaselineVersionChanged()">
+                    <option value="">Select version...</option>
+                </select>
+            </label>
+        </div>
+        <label>Selected Code Baseline
+            <input id="testingMainBaselineDisplay" readonly type="text" value=""/>
+        </label>
+    `;
+
+    scroll.insertBefore(baselineBlock, nameLabel || scroll.firstChild);
+}
+
 async function loadTestingBaselineJiraOptions() {
     const select = document.getElementById("testingBaselineJiraSelect");
     if (!select) return;
@@ -1496,6 +1541,7 @@ async function openTestingBaselineModal(scenarioId) {
     const modal = document.getElementById("testingBaselineModal");
     const item = baselineOverviewData.find(x => Number(x.scenario_id) === Number(scenarioId));
     if (!modal || !item) return;
+    ensureTestingBaselineSelectors();
     if (!item.baseline_captured) {
         alert("Create a baseline version first.");
         return;
@@ -1513,11 +1559,30 @@ async function openTestingBaselineModal(scenarioId) {
     } catch (_) {
         testingBaselineVersionItems = [];
     }
+
+    if (!testingBaselineVersionItems.length && item.active_baseline_id) {
+        testingBaselineVersionItems = [{
+            id: item.active_baseline_id,
+            baseline_name: item.active_baseline_name || "Current Baseline",
+            release_version: item.active_release_version || item.active_baseline_version || 1,
+            baseline_version: item.active_baseline_version || item.active_release_version || 1,
+            is_active: true
+        }];
+    }
+
     const groups = groupBaselineReleases(testingBaselineVersionItems);
     const releaseSelect = document.getElementById("testingBaselineReleaseSelect");
     if (releaseSelect) {
-        releaseSelect.innerHTML = [...groups.keys()].map(name => `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`).join("");
-        if (item.active_baseline_name && groups.has(item.active_baseline_name)) releaseSelect.value = item.active_baseline_name;
+        const releaseNames = [...groups.keys()];
+        releaseSelect.innerHTML = releaseNames.length
+            ? releaseNames.map(name => `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`).join("")
+            : `<option value="">No baseline versions found</option>`;
+
+        if (item.active_baseline_name && groups.has(item.active_baseline_name)) {
+            releaseSelect.value = item.active_baseline_name;
+        } else if (releaseNames.length) {
+            releaseSelect.value = releaseNames[0];
+        }
     }
     onTestingBaselineReleaseChanged();
 
@@ -1525,6 +1590,7 @@ async function openTestingBaselineModal(scenarioId) {
         const el = document.getElementById(id);
         if (el) el.value = "";
     });
+
     const error = document.getElementById("testingBaselineError");
     if (error) error.textContent = "";
 
@@ -1558,9 +1624,11 @@ function onTestingBaselineReleaseChanged() {
     const versions = testingBaselineVersionItems
         .filter(x => String(x.baseline_name || "Legacy") === release)
         .sort((a,b) => releaseDisplayVersion(a) - releaseDisplayVersion(b));
-    versionSelect.innerHTML = versions.map(x =>
-        `<option value="${x.id}">V${releaseDisplayVersion(x)}</option>`
-    ).join("");
+    versionSelect.innerHTML = versions.length
+        ? versions.map(x =>
+            `<option value="${x.id}">V${releaseDisplayVersion(x)}</option>`
+        ).join("")
+        : `<option value="">No versions found</option>`;
     const active = versions.find(x => x.is_active) || versions[versions.length - 1];
     if (active) versionSelect.value = String(active.id);
     onTestingBaselineVersionChanged();
@@ -1625,8 +1693,11 @@ async function saveTestingBaseline() {
             if (jiraSelect) jiraSelect.value = "";
         }
 
-        const selectedBaselineId = Number(document.getElementById("testingBaselineVersionSelect")?.value || 0);
-        if (!selectedBaselineId) throw new Error("Select a Release and Version.");
+        const selectedBaselineId = Number(
+            document.getElementById("testingBaselineVersionSelect")?.value
+            || item.active_baseline_id
+            || 0
+        ) || null;
 
         const body = {
             baseline_name: name,

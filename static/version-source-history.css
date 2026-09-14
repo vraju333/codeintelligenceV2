@@ -78,6 +78,32 @@
     background: #fef2f2;
 }
 
+.version-file-change-row {
+    grid-template-columns: max-content minmax(0, 1fr);
+    align-items: start;
+}
+
+.version-file-change-row strong {
+    display: inline-flex;
+    align-items: center;
+    width: fit-content;
+    padding: 3px 8px;
+    border-radius: 999px;
+    background: #fef3c7;
+    color: #92400e;
+    font-size: 12px;
+    line-height: 1.2;
+    white-space: nowrap;
+}
+
+.version-file-change-row span {
+    min-width: 0;
+    font-family: Consolas, Monaco, monospace;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+    line-height: 1.35;
+}
+
 .version-change-symbol {
     font-weight: 900;
     font-size: 18px;
