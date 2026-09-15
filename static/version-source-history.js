@@ -4,6 +4,68 @@
  */
 
 let versionHistoryState = {scenarioId: null, scenarioCode: "", scenarioLabel: "", versions: [], tests: []};
+let latestBaselineReport = null;
+
+function renderBaselineLineDiff(diff) {
+    if (!diff) return '<p class="muted-text">Line-level evidence is unavailable.</p>';
+    return `<pre class="baseline-diff-code">${diff.split("\n").map(line => {
+        const style = line.startsWith("+") && !line.startsWith("+++") ? "diff-added"
+            : line.startsWith("-") && !line.startsWith("---") ? "diff-removed"
+            : line.startsWith("@@") ? "diff-hunk" : "";
+        return `<span class="${style}">${escapeHtml(line)}</span>`;
+    }).join("\n")}</pre>`;
+}
+
+function renderBaselineRisk(report) {
+    if (!report) return "";
+    const level = ["LOW", "MEDIUM", "HIGH", "UNKNOWN"].includes(report.risk_level) ? report.risk_level : "UNKNOWN";
+    const score = Math.max(0, Math.min(100, Number(report.score) || 0));
+    const statuses = {PASS: "Passed", FAIL: "Failed", NOT_RUN: "Not run", UNKNOWN: "Unknown"};
+    return `<section class="baseline-risk-panel risk-${level.toLowerCase()}">
+        <header class="risk-panel-header"><h4>Change Impact &amp; Risk Review</h4>
+            <button type="button" onclick="downloadBaselineReport()">Download report JSON</button>
+        </header>
+        <div class="risk-panel-body">
+            <div class="risk-overview">
+                <div class="risk-score"><span class="risk-level">${escapeHtml(level)}</span>
+                    <strong>${score}<small>/100</small></strong><span class="muted-text">Rule score</span>
+                    <meter min="0" max="100" value="${score}" aria-label="Rule score">${score}/100</meter>
+                </div>
+                <div class="risk-test-strip">${Object.entries(statuses).map(([status, label]) =>
+                    `<div class="risk-test risk-test-${status.toLowerCase()}"><span>${label}</span><strong>${Number(report.test_counts?.[status] || 0)}</strong></div>`).join("")}</div>
+            </div>
+            <div class="risk-detail-grid">
+                <section><h5>Potentially affected files <span class="tag">${(report.candidate_files || []).length}</span></h5>
+                    <ul class="risk-file-list">${(report.candidate_files || []).map(file => {
+                        const path = String(file.file_path || "").replaceAll("\\", "/");
+                        return `<li><strong>${escapeHtml(path.split("/").pop())}</strong><span>${escapeHtml(path)}</span></li>`;
+                    }).join("") || "<li>No matching changed dependencies found.</li>"}</ul>
+                </section>
+                <section><h5>Risk evidence</h5><ul class="risk-reasons">${(report.reasons || []).map(reason => `<li>${escapeHtml(reason)}</li>`).join("") || "<li>No configured risk rules triggered.</li>"}</ul>
+                    <h5>Review actions</h5><ol class="risk-actions">${(report.recommendations || []).map(item => `<li>${escapeHtml(item)}</li>`).join("") || "<li>Review the selected baseline pair and test evidence.</li>"}</ol>
+                </section>
+            </div>
+            <details class="risk-calculation"><summary>How this is calculated</summary>
+                <p>${escapeHtml(report.scope || "")}. Each matching rule contributes once; scores are capped at 100. Low: 0–24; medium: 25–59; high: 60–100. Incomplete evidence is unknown.</p>
+                <p>${escapeHtml(report.limitations || "")}</p>
+            </details>
+        </div>
+    </section>`;
+}
+
+function downloadBaselineReport() {
+    if (!latestBaselineReport) return;
+    const data = latestBaselineReport;
+    const blob = new Blob([JSON.stringify(data, null, 2)], {type: "application/json"});
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `baseline-${Number(data.scenario_id)}-${Number(data.from_version)}-to-${Number(data.to_version)}.json`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
 
 function vhReleaseVersion(item) {
     return Number(item?.release_version || item?.baseline_version || 1);
@@ -167,10 +229,15 @@ async function compareBaselineVersions() {
         return;
     }
     result.innerHTML = "Comparing versions...";
+    latestBaselineReport = null;
     try {
         const response = await fetch(`/api/scenario-baselines/compare/${scenarioId}?from_version=${fromVersion}&to_version=${toVersion}`);
         const data = await response.json();
         if (!response.ok) throw new Error(JSON.stringify(data));
+        if (String(versionHistoryState.scenarioId) !== String(scenarioId)
+            || document.getElementById("compareFromVersion")?.value !== fromVersion
+            || document.getElementById("compareToVersion")?.value !== toVersion) return;
+        latestBaselineReport = data;
         result.innerHTML = renderReleaseVersionComparison(data);
     } catch (error) {
         result.innerHTML = renderError(error.message);
@@ -185,23 +252,27 @@ function renderReleaseVersionComparison(data) {
     const testing = data.testing_comparison || {};
     const changedFiles = source.changed_files || [];
     const changedFileRows = changedFiles.map(file => `
-        <div class="version-source-row version-file-change-row">
-            <strong>${escapeHtml(file.status || "MODIFIED")}</strong>
-            <span>${escapeHtml(file.file_path || "")}</span>
-        </div>
+        <details class="baseline-file-diff">
+            <summary><strong>${escapeHtml(file.status || "MODIFIED")}</strong><span>${escapeHtml(file.file_path || "")}</span></summary>
+            ${renderBaselineLineDiff(file.diff || "")}
+        </details>
     `).join("");
     const codeChangeRows = (source.changes || []).map(change => `
-        <div class="version-source-row">
+        <div class="version-source-row version-code-change-row">
             <strong>${escapeHtml(String(change.change_type || "CHANGED").replaceAll("_"," "))}</strong>
             <span>${escapeHtml(change.file_path || change.symbol || "")}</span>
         </div>
     `).join("");
 
     return `
+        ${renderBaselineRisk(data.risk_report)}
+        ${source.message ? `<p class="version-snapshot-note">${escapeHtml(source.message)}</p>` : ""}
+        ${source.scope ? `<p class="muted-text">${escapeHtml(source.scope)}</p>` : ""}
+        ${(source.unverified_files || []).length ? `<details><summary>Unverified historical files (${source.unverified_files.length})</summary><ul>${source.unverified_files.map(path => `<li>${escapeHtml(path)}</li>`).join("")}</ul></details>` : ""}
         <div class="version-transition-banner">
             <strong>${escapeHtml(fromLabel)} → ${escapeHtml(toLabel)}</strong>
             <span>${escapeHtml(data.scenario_code || "")}</span>
-            <span class="tag">${data.scenario_impact?.changed ? "CHANGED" : "NO MATERIAL CHANGE"}</span>
+            <span class="tag">${data.scenario_impact?.changed ? "CHANGED" : source.snapshot_status !== "AVAILABLE" ? "INCOMPLETE EVIDENCE" : "NO MATERIAL CHANGE"}</span>
         </div>
         <div class="version-change-summary-grid">
             <div><span>Source files changed</span><strong>${Number(summary.changed_source_files || 0)}</strong></div>
@@ -215,7 +286,7 @@ function renderReleaseVersionComparison(data) {
                 ${codeChangeRows}
             </div>
         ` : `
-            <div class="muted-box">No classified source change stored for this comparison.</div>
+            <div class="muted-box">No symbol-level classification. Expand changed files below for exact source lines.</div>
         `}
         ${changedFileRows ? `
             <div class="version-change-section">

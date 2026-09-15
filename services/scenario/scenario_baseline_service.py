@@ -16,6 +16,8 @@ from repositories.scenario_baseline_repository import (
 )
 from repositories.scenario_repository import ScenarioRepository
 from services.scenario.scenario_service import ScenarioService
+from services.scenario.source_snapshot_diff import capture_sources, compare_sources, unpack, path_key, EXCLUDED
+from services.scenario.baseline_risk_report import build_risk_report
 
 
 class ScenarioBaselineService:
@@ -269,7 +271,13 @@ class ScenarioBaselineService:
         current_source = self._read_relevant_java_sources(
             project_path=project_path, class_names=class_names
         )
-        source_changed = current_source != (latest_snapshot.source_snapshot or {})
+        previous, _ = unpack(latest_snapshot.source_snapshot)
+        if latest_snapshot.source_snapshot.get("format_version") != 2:
+            current_source = {path: text.replace("\r\n", "\n").replace("\r", "\n")
+                              for path, text in current_source.items()}
+        previous = {path: content for path, content in previous.items()
+                    if not class_names or Path(path).stem in {str(name).split('.')[-1] for name in class_names}}
+        source_changed = current_source != previous
         flow_changed = self._flow_signature(endpoint_flow) != self._flow_signature(latest.endpoint_flow)
         return source_changed or flow_changed
 
@@ -510,8 +518,16 @@ class ScenarioBaselineService:
         )
         source_change_count = len(source_comparison.get("changes") or [])
         changed_file_count = len(source_comparison.get("changed_files") or [])
+        risk_report = build_risk_report(
+            source_comparison, endpoint_changed, db_effect_changed,
+            added_methods, removed_methods,
+            self.baseline_repository.find_test_baselines_for_code_version(db, scenario_id, to_version),
+            scenario.scenario_code,
+            old_classes | new_classes | self._flow_classes(old.endpoint_flow) | self._flow_classes(new.endpoint_flow),
+        )
 
         return {
+            "risk_report": risk_report,
             "scenario_id": scenario_id,
             "scenario_code": scenario.scenario_code,
             "from_version": from_version,
@@ -631,7 +647,13 @@ class ScenarioBaselineService:
         # the code is unchanged, so allow one capture to establish the new
         # source-aware history. From then on duplicate versions are blocked.
         if latest_snapshot and latest_snapshot.source_snapshot is not None:
-            previous_source = latest_snapshot.source_snapshot or {}
+            previous_source, _ = unpack(latest_snapshot.source_snapshot)
+            if latest_snapshot.source_snapshot.get("format_version") != 2:
+                current_source = {path: text.replace("\r\n", "\n").replace("\r", "\n")
+                                  for path, text in current_source.items()}
+            wanted = {str(name).split('.')[-1] for name in class_names}
+            previous_source = {path: content for path, content in previous_source.items()
+                               if not wanted or Path(path).stem in wanted}
             source_changed = current_source != previous_source
             flow_changed = self._flow_signature(endpoint_flow) != self._flow_signature(latest.endpoint_flow)
 
@@ -669,29 +691,15 @@ class ScenarioBaselineService:
         """
         Persist the source state that belongs to a baseline version.
 
-        We snapshot only classes participating in the scenario flow, rather
-        than the entire Java project.  We also store the current Git diff so
-        the first capture after this feature can still explain V1 -> V2 even
-        when V1 predates source snapshots.
+        Store a complete Java-source inventory so changing flow membership
+        cannot masquerade as source-file additions or deletions.
         """
         try:
             project_path = Path(
                 settings.JAVA_PROJECT_PATH
             ).resolve()
 
-            class_names = set(
-                baseline.involved_classes or []
-            )
-            class_names.update(
-                self._flow_classes(
-                    baseline.endpoint_flow
-                )
-            )
-
-            snapshot = self._read_relevant_java_sources(
-                project_path=project_path,
-                class_names=class_names
-            )
+            snapshot = capture_sources(project_path)
 
             git_diff = self._current_git_diff(
                 project_path
@@ -774,21 +782,15 @@ class ScenarioBaselineService:
         }
 
         for java_file in project_path.rglob("*.java"):
+            if any(part in EXCLUDED for part in java_file.relative_to(project_path).parts):
+                continue
             if wanted and java_file.stem not in wanted:
                 continue
 
             try:
-                relative = str(
-                    java_file.relative_to(
-                        project_path
-                    )
-                ).replace("\\\\", "/")
-
-                result[relative] = (
-                    java_file.read_text(
-                        encoding="utf-8"
-                    )
-                )
+                relative = java_file.relative_to(project_path).as_posix()
+                with java_file.open(encoding="utf-8", newline="") as stream:
+                    result[relative] = stream.read()
             except Exception:
                 continue
 
@@ -903,6 +905,9 @@ class ScenarioBaselineService:
         )
 
         for line in raw_diff.splitlines():
+            if line.startswith("--- a/"):
+                current_file = line[6:]
+                continue
             if line.startswith("+++ b/"):
                 current_file = line[6:]
                 continue
@@ -1109,100 +1114,44 @@ class ScenarioBaselineService:
         project_mismatch = bool(
             old_project_path
             and new_project_path
-            and Path(old_project_path).resolve() != Path(new_project_path).resolve()
+            and path_key(old_project_path) != path_key(new_project_path)
         )
 
-        # If the older baseline predates this feature, the Git diff captured
-        # alongside the newer baseline is the best available V1 -> V2 evidence.
-        if not old_snapshot and new_snapshot:
+        if project_mismatch:
             return {
-                "snapshot_status": "PREVIOUS_SNAPSHOT_UNAVAILABLE",
+                "snapshot_status": "PROJECT_MISMATCH",
                 "from_project_path": old_project_path,
                 "to_project_path": new_project_path,
-                "project_mismatch": False,
-                "message": (
-                    f"V{old_baseline.baseline_version} was captured before "
-                    "source snapshots were enabled. Showing the Git changes "
-                    f"stored when V{new_baseline.baseline_version} was captured."
-                ),
-                "changed_files": self._files_from_git_changes(
-                    new_snapshot.source_changes or []
-                ),
-                "changes": new_snapshot.source_changes or [],
-                "raw_diff": new_snapshot.git_diff or ""
+                "project_mismatch": True,
+                "message": "These versions belong to different project paths; source comparison is unavailable.",
+                "changed_files": [], "changes": [], "raw_diff": ""
             }
 
-        if not old_snapshot or not new_snapshot:
+        if (not old_snapshot or not new_snapshot
+                or old_snapshot.source_snapshot is None or new_snapshot.source_snapshot is None):
             return {
                 "snapshot_status": "UNAVAILABLE",
                 "from_project_path": old_project_path,
                 "to_project_path": new_project_path,
                 "project_mismatch": False,
                 "message": (
-                    "Source snapshots are unavailable for one or both versions."
+                    "Source snapshots are unavailable for one or both versions. "
+                    "A working-tree Git diff cannot reconstruct this historical comparison."
                 ),
                 "changed_files": [],
                 "changes": [],
                 "raw_diff": ""
             }
 
-        old_sources = old_snapshot.source_snapshot or {}
-        new_sources = new_snapshot.source_snapshot or {}
-
-        old_files = set(
-            old_sources
-        )
-        new_files = set(
-            new_sources
-        )
-
-        changed_files = []
-
-        for file_path in sorted(
-            old_files | new_files
-        ):
-            before = old_sources.get(
-                file_path
-            )
-            after = new_sources.get(
-                file_path
-            )
-
-            if before == after:
-                continue
-
-            if before is None:
-                status = "ADDED"
-            elif after is None:
-                status = "REMOVED"
-            else:
-                status = "MODIFIED"
-
-            changed_files.append({
-                "file_path": file_path,
-                "status": status
-            })
-
-        # Compare the two stored snapshots directly.  Do not use the Git diff
-        # captured with the newer version here because that diff may contain
-        # older/uncommitted changes and make V3 -> V4 look cumulative.
-        pair_diff = self._build_snapshot_pair_diff(old_sources, new_sources)
-        changes = self._classify_git_diff(pair_diff)
-
-        return {
-            "snapshot_status": "AVAILABLE",
+        comparison = compare_sources(old_snapshot.source_snapshot, new_snapshot.source_snapshot)
+        comparison.update({
             "from_project_path": old_project_path,
             "to_project_path": new_project_path,
-            "project_mismatch": project_mismatch,
-            "message": (
-                "These two baselines were captured from different project paths. "
-                "Execution-flow differences are shown, but source-file differences are suppressed."
-                if project_mismatch else None
-            ),
-            "changed_files": ([] if project_mismatch else changed_files),
-            "changes": ([] if project_mismatch else changes),
-            "raw_diff": ("" if project_mismatch else pair_diff)
-        }
+            "project_mismatch": False,
+            "changes": self._classify_git_diff(comparison["raw_diff"]),
+            "scope": "Stored Java source files; file changes are not proof of scenario impact",
+        })
+        return comparison
 
 
     @staticmethod
