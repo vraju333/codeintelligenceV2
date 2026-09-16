@@ -364,6 +364,80 @@ class ScenarioBaselineService:
             raise HTTPException(status_code=404, detail="Scenario not found")
         return self.baseline_repository.find_test_baselines(db, scenario_id)
 
+    def get_jira_coverage(self, db: Session, jira_id: str):
+        jira_id = str(jira_id or "").strip().upper()
+        if not jira_id:
+            raise HTTPException(status_code=400, detail="JIRA ID is required")
+
+        scenarios = ScenarioService().get_all_for_active_project(db)
+        scenario_by_id = {scenario.id: scenario for scenario in scenarios}
+        if not scenario_by_id:
+            return {
+                "jira_id": jira_id,
+                "covered_count": 0,
+                "scenario_count": 0,
+                "items": [],
+            }
+
+        items = []
+        for scenario in scenarios:
+            for baseline in self.baseline_repository.find_test_baselines(db, scenario.id):
+                baseline_jiras = self._normalize_jira_ids(baseline.jira_ids or [])
+                if jira_id not in baseline_jiras:
+                    continue
+
+                code_baseline = (
+                    self.baseline_repository.find_by_id(db, scenario.id, baseline.baseline_id)
+                    if baseline.baseline_id
+                    else None
+                )
+                release_name = (
+                    code_baseline.baseline_name
+                    if code_baseline and code_baseline.baseline_name
+                    else "Release"
+                )
+                release_version = (
+                    code_baseline.release_version
+                    if code_baseline and code_baseline.release_version
+                    else baseline.code_baseline_version
+                )
+
+                items.append({
+                    "jira_id": jira_id,
+                    "scenario_id": scenario.id,
+                    "scenario_code": scenario.scenario_code,
+                    "scenario_name": scenario.scenario_name,
+                    "http_method": scenario.http_method,
+                    "endpoint": scenario.endpoint,
+                    "testing_baseline_id": baseline.id,
+                    "testing_baseline_name": baseline.baseline_name,
+                    "status": baseline.status,
+                    "release_name": release_name,
+                    "release_version": release_version,
+                    "code_baseline_version": baseline.code_baseline_version,
+                    "related_jiras": baseline_jiras,
+                    "created_at": baseline.created_at.isoformat() if baseline.created_at else None,
+                    "has_request": baseline.request_json is not None,
+                    "has_expected_response": baseline.expected_response_json is not None,
+                    "has_actual_response": baseline.actual_response_json is not None,
+                    "has_db_effect": bool(baseline.expected_db_effect),
+                })
+
+        items.sort(
+            key=lambda item: (
+                item["scenario_code"],
+                item["release_name"] or "",
+                int(item["release_version"] or 0),
+                item["testing_baseline_name"] or "",
+            )
+        )
+        return {
+            "jira_id": jira_id,
+            "covered_count": len(items),
+            "scenario_count": len({item["scenario_id"] for item in items}),
+            "items": items,
+        }
+
     def get_latest(
         self,
         db: Session,

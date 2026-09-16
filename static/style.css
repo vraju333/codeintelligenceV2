@@ -1735,3 +1735,126 @@ body {
 .version-test-row { margin-top:10px; padding:12px; border:1px solid #dce4ef; border-radius:10px; background:#fff; }
 .release-compare-card { margin-top:18px; }
 .release-compare-card .scenario-create-grid { margin:12px 0; }
+
+.jira-history-text-board {
+    display: grid;
+    gap: 10px;
+}
+
+.jira-history-text-board h3,
+.jira-history-text-board h4 {
+    margin: 0;
+}
+
+.jira-history-lines {
+    display: grid;
+    gap: 8px;
+}
+
+.jira-history-line {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+    padding: 10px 12px;
+    border: 1px solid #dbe4ef;
+    border-radius: 10px;
+    background: #f8fafc;
+    overflow-wrap: anywhere;
+}
+
+/* JIRA History Board */
+.jira-history-toolbar {
+    display: grid;
+    grid-template-columns: auto minmax(260px, 1fr) auto;
+    gap: 12px;
+    align-items: center;
+    margin-bottom: 14px;
+}
+
+.jira-history-toolbar select {
+    width: 100%;
+}
+
+.jira-history-summary {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 12px;
+    margin-bottom: 14px;
+}
+
+.jira-history-summary > div {
+    border: 1px solid #dbe4ef;
+    border-radius: 10px;
+    background: #f8fafc;
+    padding: 12px 14px;
+}
+
+.jira-history-summary span,
+.jira-history-summary strong {
+    display: block;
+}
+
+.jira-history-table-wrap {
+    overflow-x: auto;
+    border: 1px solid #dbe4ef;
+    border-radius: 10px;
+    background: #ffffff;
+}
+
+.jira-history-table {
+    width: 100%;
+    border-collapse: collapse;
+    min-width: 960px;
+}
+
+.jira-history-table th,
+.jira-history-table td {
+    text-align: left;
+    vertical-align: top;
+    padding: 12px 14px;
+    border-bottom: 1px solid #e2e8f0;
+}
+
+.jira-history-table th {
+    color: #475569;
+    font-size: 0.8rem;
+    text-transform: uppercase;
+    letter-spacing: 0.02em;
+    background: #f8fafc;
+}
+
+.jira-history-table td {
+    overflow-wrap: anywhere;
+}
+
+.jira-status-pill {
+    display: inline-flex;
+    align-items: center;
+    border-radius: 999px;
+    padding: 4px 9px;
+    font-size: 0.82rem;
+    font-weight: 800;
+}
+
+.jira-status-pass {
+    background: #dcfce7;
+    color: #166534;
+}
+
+.jira-status-fail {
+    background: #fee2e2;
+    color: #991b1b;
+}
+
+.jira-status-muted {
+    background: #e2e8f0;
+    color: #334155;
+}
+
+@media (max-width: 760px) {
+    .jira-history-toolbar,
+    .jira-history-summary {
+        grid-template-columns: 1fr;
+    }
+}

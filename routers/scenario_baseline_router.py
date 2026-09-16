@@ -142,6 +142,14 @@ def get_testing_baselines(
     return service.get_test_baselines(db, scenario_id)
 
 
+@router.get("/jira-coverage/{jira_id}")
+def get_jira_coverage(
+    jira_id: str,
+    db: Session = Depends(get_db)
+):
+    return service.get_jira_coverage(db, jira_id)
+
+
 @router.get("/latest/{scenario_id}")
 def get_latest_baseline(
     scenario_id: int,

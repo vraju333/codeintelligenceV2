@@ -5,7 +5,7 @@
 <meta charset="utf-8"/>
 <meta content="width=device-width, initial-scale=1.0" name="viewport"/>
 <title>CodeIntelligence</title>
-<link href="/static/style.css?v=operation-scenario-4" rel="stylesheet"/>
+<link href="/static/style.css?v=jira-history-text-2" rel="stylesheet"/>
 <script type="module">
         import mermaid
             from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
@@ -295,6 +295,28 @@ Select a scenario to reuse its endpoint and test data, or continue manually belo
 <div class="result-area" id="hackathonDashboardResult">Load the dashboard to see scenario risk and release readiness.</div>
 <div class="result-area" id="scenarioImpactResult">Changed file impact appears here.</div>
 </div></section>
+
+<!-- ====================================================== -->
+<!-- JIRA HISTORY BOARD -->
+<!-- ====================================================== -->
+<section class="card accordion-card is-collapsed" id="jiraHistoryBoardCard">
+<div aria-expanded="false" class="card-header accordion-header" data-accordion-title="JIRA History Board" role="button" tabindex="0">
+<div>
+<h2>JIRA History Board</h2>
+<p>See which scenario baselines and test cycles covered a selected JIRA.</p>
+</div>
+<button aria-label="Toggle JIRA History Board" class="accordion-toggle" tabindex="-1" type="button">›</button></div><div class="accordion-body">
+<div class="jira-history-toolbar">
+<button onclick="loadJiraHistoryBoard()" type="button">Load JIRA Board</button>
+<select id="jiraHistorySelect">
+<option value="">Select a saved JIRA...</option>
+</select>
+<button onclick="loadSelectedJiraCoverage()" type="button">View Coverage</button>
+</div>
+<div class="result-area" id="jiraHistoryBoardResult">
+Select a JIRA to see scenario baseline coverage.
+</div>
+</div></section>
 <!-- ====================================================== -->
 </main>
 </div>
@@ -418,8 +440,23 @@ Loading operations that are not yet represented in Scenario Baselines...
 </div>
 <div class="scenario-create-form">
 <div class="scenario-create-scroll">
-<label>Baseline Name
-<input id="testingBaselineName" placeholder="e.g. October 2026" type="text"/>
+<div class="scenario-create-grid">
+<label>Release
+<select id="testingBaselineReleaseSelect" onchange="onTestingBaselineReleaseChanged()">
+<option value="">Loading releases...</option>
+</select>
+</label>
+<label>Version
+<select id="testingBaselineVersionSelect" onchange="onTestingBaselineVersionChanged()">
+<option value="">Select version...</option>
+</select>
+</label>
+</div>
+<label>Selected Code Baseline
+<input id="testingMainBaselineDisplay" readonly type="text" value=""/>
+</label>
+<label>Test Scenario Name
+<input id="testingBaselineName" placeholder="e.g. Student add happy path test" type="text"/>
 </label>
 <div class="testing-jira-picker">
 <label>Related JIRAs <span class="muted-text">(optional)</span></label>
@@ -519,7 +556,7 @@ Loading operations that are not yet represented in Scenario Baselines...
 </details>
 </div>
 </div>
-<script src="/static/app.js?v=13"></script>
+<script src="/static/app.js?v=jira-history-text-2"></script>
 <script src="/static/project-ui.js?v=scenario-edit-modal-1"></script>
 <script src="/static/flowchart-ui.js?v=3"></script>
 <script src="/static/jira-impact.js?v=3"></script>
