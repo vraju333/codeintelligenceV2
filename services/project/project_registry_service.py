@@ -5,6 +5,7 @@ from pathlib import Path
 from config import settings
 
 
+
 class ProjectRegistryService:
     def __init__(self):
         self.base_dir = Path(__file__).resolve().parents[2]
