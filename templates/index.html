@@ -21,7 +21,8 @@
 <link href="/static/jira-impact.css?v=2" rel="stylesheet"/>
 <link href="/static/attribute-impact.css?v=1" rel="stylesheet"/>
 <link href="/static/regression-details.css?v=2" rel="stylesheet"/>
-<link href="/static/version-source-history.css?v=10-risk-dashboard" rel="stylesheet"/>
+<link href="/static/version-source-history.css?v=4-pair-diff-risk" rel="stylesheet"/>
+<link href="/static/hackathon-dashboard.css?v=5" rel="stylesheet"/>
 <link href="/static/accordion-ui.css?v=hackathon-3" rel="stylesheet"/></head>
 <body>
 <div class="page">
@@ -90,7 +91,6 @@
                 Generate a scenario flowchart.
             </div>
 </div></section>
-<!-- ====================================================== -->
 <!-- JIRA IMPACT ANALYSIS -->
 <!-- ====================================================== -->
 <section class="card accordion-card" id="jiraImpactCard">
@@ -276,6 +276,26 @@ Select a scenario to reuse its endpoint and test data, or continue manually belo
             </div>
 
 </div></section>
+
+<!-- ====================================================== -->
+<!-- CODE DASHBOARD -->
+<!-- ====================================================== -->
+<section class="card accordion-card is-collapsed" id="codeDashboardCard">
+<div aria-expanded="false" class="card-header accordion-header" data-accordion-title="Code Dashboard" role="button" tabindex="0">
+<div>
+<h2>Code Dashboard</h2>
+<p>Release readiness, scenario risk and changed-file impact.</p>
+</div>
+<button aria-label="Toggle Code Dashboard" class="accordion-toggle" tabindex="-1" type="button">›</button></div><div class="accordion-body">
+<div class="hackathon-actions">
+<button onclick="loadHackathonDashboard()" type="button">Load Code Dashboard</button>
+<input id="scenarioImpactFile" placeholder="Changed file/class, e.g. Employee.java"/>
+<button onclick="runScenarioImpactGraph()" type="button">Find Impacted Scenarios</button>
+</div>
+<div class="result-area" id="hackathonDashboardResult">Load the dashboard to see scenario risk and release readiness.</div>
+<div class="result-area" id="scenarioImpactResult">Changed file impact appears here.</div>
+</div></section>
+<!-- ====================================================== -->
 </main>
 </div>
 <!-- ====================================================== -->
@@ -435,7 +455,6 @@ Loading operations that are not yet represented in Scenario Baselines...
 </div>
 </div>
 </div>
-<!-- ====================================================== -->
 <!-- TESTING BASELINE HISTORY MODAL -->
 <!-- ====================================================== -->
 <div aria-hidden="true" class="flowchart-modal" id="testingBaselineHistoryModal">
@@ -501,11 +520,12 @@ Loading operations that are not yet represented in Scenario Baselines...
 </div>
 </div>
 <script src="/static/app.js?v=13"></script>
-<script src="/static/project-ui.js?v=scenario-real-testdata-1"></script>
+<script src="/static/project-ui.js?v=scenario-edit-modal-1"></script>
 <script src="/static/flowchart-ui.js?v=3"></script>
 <script src="/static/jira-impact.js?v=3"></script>
 <script src="/static/attribute-impact.js?v=2"></script>
 <script src="/static/regression-details.js?v=2"></script>
-<script src="/static/version-source-history.js?v=10-risk-dashboard"></script>
+<script src="/static/version-source-history.js?v=8-pair-diff-risk"></script>
+<script src="/static/hackathon-dashboard.js?v=5"></script>
 <script src="/static/accordion-ui.js?v=2"></script></body>
 </html>

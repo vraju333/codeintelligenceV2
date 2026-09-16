@@ -2,7 +2,7 @@ from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
 from repositories.scenario_repository import ScenarioRepository
-from schemas import ScenarioRequest
+from schemas import ScenarioRequest, ScenarioUpdateRequest
 from services.flow.endpoint_flow_service import EndpointFlowService
 from config import settings
 
@@ -73,6 +73,13 @@ class ScenarioService:
             )
 
         return self.repository.create(db, request, settings.JAVA_PROJECT_PATH)
+
+    def update(self, db: Session, scenario_id: int, request: ScenarioUpdateRequest):
+        scenario = self.get_by_id(db, scenario_id)
+        name = request.scenario_name if request.scenario_name is not None else scenario.scenario_name
+        if not str(name or "").strip():
+            raise HTTPException(status_code=400, detail="Scenario name is required")
+        return self.repository.update(db, scenario, request)
 
     def delete(self, db: Session, scenario_id: int):
         scenario = self.get_by_id(db, scenario_id)

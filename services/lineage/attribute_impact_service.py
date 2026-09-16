@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 from services.flow.endpoint_flow_service import EndpointFlowService
 from services.lineage.attribute_lineage_service import AttributeLineageService
 from services.scenario.scenario_service import ScenarioService
+from repositories.scenario_baseline_repository import ScenarioBaselineRepository
 
 
 class AttributeImpactService:
@@ -22,6 +23,7 @@ class AttributeImpactService:
         self.lineage = AttributeLineageService()
         self.endpoint_flow = EndpointFlowService()
         self.scenarios = ScenarioService()
+        self.baselines = ScenarioBaselineRepository()
 
     def analyze(self, attribute_name: str, db: Session) -> dict:
         # Code analysis and JIRA RAG are independent branches and are orchestrated
@@ -102,7 +104,7 @@ class AttributeImpactService:
             (item["http_method"], item["endpoint"])
             for item in endpoints
         }
-        active_scenarios = self.scenarios.get_all_for_active_project(db)
+        active_scenarios = self.scenarios.get_all(db)
         domain_tokens = self._infer_attribute_domain_tokens(occurrences, active_scenarios)
 
         scenarios = []
@@ -119,7 +121,8 @@ class AttributeImpactService:
 
             matched = sorted(involved.intersection(impacted_classes))
             endpoint_match = key in endpoint_keys
-            if not endpoint_match and not matched:
+            text_match = self._scenario_text_matches(scenario, attribute_name, impacted_classes)
+            if not endpoint_match and not matched and not text_match:
                 continue
             reasons = []
             score = 0
@@ -129,6 +132,11 @@ class AttributeImpactService:
             if matched:
                 score += 5
                 reasons.append("Scenario includes attribute-related classes: " + ", ".join(matched[:6]))
+            if endpoint_match and not matched and not involved:
+                reasons.append("Legacy scenario has no stored class dependencies; matched by affected endpoint")
+            if text_match:
+                score += 4
+                reasons.append("Scenario text mentions the attribute or related class")
             scenarios.append({
                 "id": scenario.id,
                 "scenario_code": scenario.scenario_code,
@@ -138,6 +146,7 @@ class AttributeImpactService:
                 "score": score,
                 "matched_classes": matched,
                 "reasons": reasons,
+                "release_history": self._release_history_for_scenario(db, scenario.id),
             })
 
         scenarios.sort(key=lambda item: (-item["score"], item["scenario_code"]))
@@ -207,6 +216,54 @@ class AttributeImpactService:
                 "source_code_sent_external": False,
             },
         }
+
+    def _release_history_for_scenario(self, db: Session, scenario_id: int) -> list[dict]:
+        versions = self.baselines.find_all_for_scenario(db, scenario_id)
+        if not versions:
+            return []
+        releases: dict[str, list[dict]] = {}
+        for baseline in sorted(versions, key=lambda item: int(item.baseline_version or 0)):
+            release_name = str(baseline.baseline_name or "Legacy").strip() or "Legacy"
+            release_version = int(baseline.release_version or baseline.baseline_version or 1)
+            tests = self.baselines.find_test_baselines_for_code_version(
+                db, scenario_id, int(baseline.baseline_version)
+            )
+            releases.setdefault(release_name, []).append({
+                "baseline_id": baseline.id,
+                "internal_version": int(baseline.baseline_version or 0),
+                "release_version": release_version,
+                "is_active": bool(baseline.is_active),
+                "created_at": baseline.created_at.isoformat() if baseline.created_at else None,
+                "tests": [
+                    {
+                        "id": test.id,
+                        "test_scenario": test.baseline_name,
+                        "status": test.status,
+                        "jira_ids": list(test.jira_ids or []),
+                        "created_at": test.created_at.isoformat() if test.created_at else None,
+                    }
+                    for test in tests
+                ],
+            })
+        return [
+            {"release": release_name, "versions": sorted(items, key=lambda item: item["release_version"])}
+            for release_name, items in releases.items()
+        ]
+
+    def _scenario_text_matches(self, scenario, attribute_name: str, impacted_classes: set[str]) -> bool:
+        haystack = " ".join(str(value or "") for value in (
+            scenario.scenario_code,
+            scenario.scenario_name,
+            scenario.description,
+            scenario.request_json,
+            scenario.expected_response_json,
+            scenario.expected_db_effect,
+        )).lower()
+        if not haystack:
+            return False
+        needles = {attribute_name.lower()}
+        needles.update(item.lower() for item in impacted_classes if item)
+        return any(needle and needle in haystack for needle in needles)
 
     def _extract_methods(self, flow: dict) -> list[str]:
         methods = []

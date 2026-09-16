@@ -2,7 +2,7 @@ from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session
 
 from db_models import Scenario
-from schemas import ScenarioRequest
+from schemas import ScenarioRequest, ScenarioUpdateRequest
 
 
 class ScenarioRepository:
@@ -78,6 +78,15 @@ class ScenarioRepository:
             data["project_path"] = project_path
         scenario = Scenario(**data)
         db.add(scenario)
+        db.commit()
+        db.refresh(scenario)
+        return scenario
+
+    def update(self, db: Session, scenario: Scenario, request: ScenarioUpdateRequest):
+        data = request.model_dump(exclude_unset=True)
+        for field, value in data.items():
+            if hasattr(scenario, field):
+                setattr(scenario, field, value)
         db.commit()
         db.refresh(scenario)
         return scenario

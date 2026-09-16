@@ -18,6 +18,16 @@ class ScenarioRequest(BaseModel):
     project_path: Optional[str] = None
 
 
+class ScenarioUpdateRequest(BaseModel):
+    scenario_name: Optional[str] = None
+    description: Optional[str] = None
+    jira_id: Optional[str] = None
+    request_json: Optional[str] = None
+    expected_response_json: Optional[str] = None
+    expected_db_effect: Optional[str] = None
+    status: Optional[str] = None
+
+
 class ScenarioResponse(ScenarioRequest):
     id: int
     model_config = ConfigDict(from_attributes=True)

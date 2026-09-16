@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, Response, status
 from sqlalchemy.orm import Session
 
 from database import get_db
-from schemas import ScenarioRequest, ScenarioResponse
+from schemas import ScenarioRequest, ScenarioResponse, ScenarioUpdateRequest
 from services.scenario.scenario_service import ScenarioService
 
 
@@ -55,6 +55,15 @@ def get_scenario(scenario_id: int, db: Session = Depends(get_db)):
 @router.post("", response_model=ScenarioResponse, status_code=status.HTTP_201_CREATED)
 def create_scenario(request: ScenarioRequest, db: Session = Depends(get_db)):
     return service.create(db, request)
+
+
+@router.patch("/{scenario_id}", response_model=ScenarioResponse)
+def update_scenario(
+    scenario_id: int,
+    request: ScenarioUpdateRequest,
+    db: Session = Depends(get_db)
+):
+    return service.update(db, scenario_id, request)
 
 
 @router.delete("/{scenario_id}", status_code=status.HTTP_204_NO_CONTENT)
