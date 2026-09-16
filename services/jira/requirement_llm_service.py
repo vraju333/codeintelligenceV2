@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import urllib.error
 import urllib.request
 
@@ -16,6 +17,7 @@ class RequirementLlmService:
     Providers:
       - ollama: local/private inference (default)
       - openai: optional hosted provider
+      - azure_openai: Azure OpenAI / Azure AI Foundry deployment
     """
 
     RESPONSE_SCHEMA = {
@@ -68,6 +70,15 @@ class RequirementLlmService:
             return bool((settings.OLLAMA_BASE_URL or "").strip() and (settings.OLLAMA_MODEL or "").strip())
         if provider == "openai":
             return bool((settings.OPENAI_API_KEY or "").strip())
+        if provider in {"azure", "azure_openai"}:
+            return bool(
+                self._setting("AZURE_OPENAI_ENDPOINT")
+                and self._setting("AZURE_OPENAI_DEPLOYMENT")
+                and (
+                    self._setting("AZURE_OPENAI_API_KEY")
+                    or self._setting("AZURE_OPENAI_TOKEN")
+                )
+            )
         return False
 
     def parse(self, requirement: str) -> dict:
@@ -76,11 +87,16 @@ class RequirementLlmService:
             parsed = self._parse_with_ollama(requirement)
         elif provider == "openai":
             parsed = self._parse_with_openai(requirement)
+        elif provider in {"azure", "azure_openai"}:
+            parsed = self._parse_with_azure_openai(requirement)
         else:
             raise RuntimeError(
-                f"Unsupported LLM_PROVIDER '{provider}'. Use 'ollama' or 'openai'."
+                f"Unsupported LLM_PROVIDER '{provider}'. Use 'ollama', 'openai' or 'azure_openai'."
             )
         return self._normalize(parsed)
+
+    def _setting(self, name: str, default: str = "") -> str:
+        return str(getattr(settings, name, None) or os.getenv(name) or default or "").strip()
 
     def _prompt(self, requirement: str) -> str:
         return f"""Convert the Jira requirement below into compact structured JSON.
@@ -203,6 +219,73 @@ Jira requirement:
             raise RuntimeError("OpenAI returned no structured requirement output")
         return json.loads(output_text)
 
+    def _parse_with_azure_openai(self, requirement: str) -> dict:
+        endpoint = self._setting("AZURE_OPENAI_ENDPOINT").rstrip("/")
+        deployment = self._setting("AZURE_OPENAI_DEPLOYMENT")
+        api_version = self._setting("AZURE_OPENAI_API_VERSION", "2024-12-01-preview")
+        api_key = self._setting("AZURE_OPENAI_API_KEY")
+        token = self._setting("AZURE_OPENAI_TOKEN")
+
+        if not endpoint:
+            raise RuntimeError("AZURE_OPENAI_ENDPOINT is not configured")
+        if not deployment:
+            raise RuntimeError("AZURE_OPENAI_DEPLOYMENT is not configured")
+        if not api_key and not token:
+            raise RuntimeError("Configure AZURE_OPENAI_API_KEY or AZURE_OPENAI_TOKEN")
+
+        payload = {
+            "messages": [
+                {
+                    "role": "user",
+                    "content": self._prompt(requirement),
+                }
+            ],
+            "temperature": 0,
+            "response_format": {
+                "type": "json_schema",
+                "json_schema": {
+                    "name": "jira_requirement_understanding",
+                    "strict": True,
+                    "schema": self.RESPONSE_SCHEMA,
+                },
+            },
+        }
+
+        url = (
+            f"{endpoint}/openai/deployments/{deployment}/chat/completions"
+            f"?api-version={api_version}"
+        )
+        headers = {"Content-Type": "application/json"}
+        if api_key:
+            headers["api-key"] = api_key
+        else:
+            headers["Authorization"] = f"Bearer {token}"
+
+        request = urllib.request.Request(
+            url,
+            data=json.dumps(payload).encode("utf-8"),
+            headers=headers,
+            method="POST",
+        )
+
+        try:
+            with urllib.request.urlopen(request, timeout=45) as response:
+                body = json.loads(response.read().decode("utf-8"))
+        except urllib.error.HTTPError as exc:
+            detail = exc.read().decode("utf-8", errors="ignore")
+            raise RuntimeError(
+                f"Azure OpenAI requirement parsing failed ({exc.code}): {detail[:500]}"
+            ) from exc
+        except urllib.error.URLError as exc:
+            raise RuntimeError(
+                f"Azure OpenAI requirement parsing failed: {exc.reason}"
+            ) from exc
+
+        output_text = self._extract_chat_output_text(body)
+        if not output_text:
+            raise RuntimeError("Azure OpenAI returned no structured requirement output")
+        return json.loads(output_text)
+
     def _extract_openai_output_text(self, response: dict) -> str | None:
         if isinstance(response.get("output_text"), str):
             return response["output_text"]
@@ -211,6 +294,25 @@ Jira requirement:
             for content in item.get("content", []) or []:
                 if content.get("type") == "output_text" and isinstance(content.get("text"), str):
                     return content["text"]
+        return None
+
+    def _extract_chat_output_text(self, response: dict) -> str | None:
+        choices = response.get("choices") or []
+        if not choices:
+            return None
+
+        message = choices[0].get("message") or {}
+        content = message.get("content")
+        if isinstance(content, str):
+            return content.strip()
+
+        if isinstance(content, list):
+            parts = []
+            for item in content:
+                if isinstance(item, dict) and isinstance(item.get("text"), str):
+                    parts.append(item["text"])
+            return "".join(parts).strip() or None
+
         return None
 
     def _normalize(self, data: dict) -> dict:
