@@ -233,6 +233,7 @@ Jira requirement:
         if not api_key and not token:
             raise RuntimeError("Configure AZURE_OPENAI_API_KEY or AZURE_OPENAI_TOKEN")
 
+
         payload = {
             "messages": [
                 {
