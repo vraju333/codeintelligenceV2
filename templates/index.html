@@ -132,29 +132,39 @@ Example: Add employmentType attribute to Employee. Store it while creating an em
                 Enter an attribute to see its project-wide blast radius.
             </div>
 </div></section>
+<!-- BASELINE OVERVIEW / HISTORY -->
 <!-- ====================================================== -->
-<!-- SCENARIO REGISTRY -->
-<!-- ====================================================== -->
-<section class="card accordion-card is-collapsed" id="scenario-registry">
-<div aria-expanded="false" class="card-header accordion-header" data-accordion-title="Scenario Registry" role="button" tabindex="0">
+<section class="card accordion-card is-collapsed" id="scenario-baselines">
+<div aria-expanded="false" class="card-header accordion-header" data-accordion-title="Scenario Baselines" role="button" tabindex="0">
 <div>
-<h2>
-                        Scenario Registry
-                    </h2>
-<p>
-                        Registered application scenarios
-                    </p>
+<h2>Scenario Baselines</h2>
+<p>One scenario per HTTP operation. Keep code versions separate from repeatable monthly/testing baselines.</p>
 </div>
 <div class="header-actions">
-<button type="button" onclick="openNewScenarioModal()">+ New Scenario</button>
-<button type="button" class="secondary-button" onclick="refreshScenarioRegistryAndDefect()">Refresh</button>
+<button class="secondary-button" onclick="loadBaselineOverview()">Refresh</button>
+<button onclick="captureMissingBaselines()">Capture Missing Code Baselines</button>
 </div>
-<button aria-label="Toggle Scenario Registry" class="accordion-toggle" tabindex="-1" type="button">›</button></div><div class="accordion-body">
-<div class="result-area" id="scenarioList">
-                Loading scenarios...
+<button aria-label="Toggle Scenario Baselines" class="accordion-toggle" tabindex="-1" type="button">›</button></div><div class="accordion-body">
+<div class="baseline-overview" id="baselineOverview">
+                Loading scenario baselines...
             </div>
-<div class="scenario-pager" id="scenarioPager"></div>
+<div class="baseline-history-toolbar">
+<label for="baselineScenarioSelect">Code version history</label>
+<div class="form-row compact-row">
+<select id="baselineScenarioSelect">
+<option value="">Select an operation scenario...</option>
+</select>
+<button onclick="loadBaselineHistory()">View History</button>
+</div>
+</div>
+<div class="result-area compact-result" id="baselineResult">
+                Select an operation scenario above to view code versions and testing baselines.
+            </div>
+
 </div></section>
+
+<!-- ====================================================== -->
+
 <!-- ====================================================== -->
 <!-- DEFECT INVESTIGATION -->
 <!-- ====================================================== -->
@@ -246,36 +256,7 @@ Select a scenario to reuse its endpoint and test data, or continue manually belo
             </div>
 </div></section>
 <!-- ====================================================== -->
-<!-- BASELINE OVERVIEW / HISTORY -->
-<!-- ====================================================== -->
-<section class="card accordion-card is-collapsed" id="scenario-baselines">
-<div aria-expanded="false" class="card-header accordion-header" data-accordion-title="Scenario Baselines" role="button" tabindex="0">
-<div>
-<h2>Scenario Baselines</h2>
-<p>One scenario per HTTP operation. Keep code versions separate from repeatable monthly/testing baselines.</p>
-</div>
-<div class="header-actions">
-<button class="secondary-button" onclick="loadBaselineOverview()">Refresh</button>
-<button onclick="captureMissingBaselines()">Capture Missing Code Baselines</button>
-</div>
-<button aria-label="Toggle Scenario Baselines" class="accordion-toggle" tabindex="-1" type="button">›</button></div><div class="accordion-body">
-<div class="baseline-overview" id="baselineOverview">
-                Loading scenario baselines...
-            </div>
-<div class="baseline-history-toolbar">
-<label for="baselineScenarioSelect">Code version history</label>
-<div class="form-row compact-row">
-<select id="baselineScenarioSelect">
-<option value="">Select an operation scenario...</option>
-</select>
-<button onclick="loadBaselineHistory()">View History</button>
-</div>
-</div>
-<div class="result-area compact-result" id="baselineResult">
-                Select an operation scenario above to view code versions and testing baselines.
-            </div>
 
-</div></section>
 
 <!-- ====================================================== -->
 <!-- CODE DASHBOARD -->
@@ -317,6 +298,29 @@ Select a scenario to reuse its endpoint and test data, or continue manually belo
 Select a JIRA to see scenario baseline coverage.
 </div>
 </div></section>
+<!-- SCENARIO REGISTRY -->
+<!-- ====================================================== -->
+<section class="card accordion-card is-collapsed" id="scenario-registry">
+<div aria-expanded="false" class="card-header accordion-header" data-accordion-title="Scenario Registry" role="button" tabindex="0">
+<div>
+<h2>
+                        Scenario Registry
+                    </h2>
+<p>
+                        Registered application scenarios
+                    </p>
+</div>
+<div class="header-actions">
+<button type="button" onclick="openNewScenarioModal()">+ New Scenario</button>
+<button type="button" class="secondary-button" onclick="refreshScenarioRegistryAndDefect()">Refresh</button>
+</div>
+<button aria-label="Toggle Scenario Registry" class="accordion-toggle" tabindex="-1" type="button">›</button></div><div class="accordion-body">
+<div class="result-area" id="scenarioList">
+                Loading scenarios...
+            </div>
+<div class="scenario-pager" id="scenarioPager"></div>
+</div></section>
+
 <!-- ====================================================== -->
 </main>
 </div>
