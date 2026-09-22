@@ -2,6 +2,7 @@ import json
 import difflib
 import re
 import subprocess
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -28,6 +29,23 @@ class ScenarioBaselineService:
             ScenarioBaselineRepository()
         )
 
+    @staticmethod
+    def _canonical_release_month(value: str | None) -> str:
+        """Require and canonicalize release names as 'Month YYYY'."""
+        raw = " ".join(str(value or "").strip().split())
+        match = re.fullmatch(r"([A-Za-z]+)\s+(\d{4})", raw)
+        if not match:
+            raise HTTPException(status_code=400, detail="Baseline must use Month YYYY, for example September 2026")
+        month_text, year_text = match.groups()
+        try:
+            month = datetime.strptime(month_text, "%B").strftime("%B")
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid baseline month. Use January through December")
+        year = int(year_text)
+        if year < 2000 or year > 2100:
+            raise HTTPException(status_code=400, detail="Baseline year must be between 2000 and 2100")
+        return f"{month} {year}"
+
     def capture(
         self,
         db: Session,
@@ -50,9 +68,7 @@ class ScenarioBaselineService:
                 detail="Scenario not found"
             )
 
-        name = str(baseline_name or "").strip()
-        if not name:
-            raise HTTPException(status_code=400, detail="Main Baseline name is required")
+        name = self._canonical_release_month(baseline_name)
 
         latest = self.baseline_repository.find_latest(db, scenario_id)
         if latest:
@@ -124,9 +140,7 @@ class ScenarioBaselineService:
         if not scenario:
             raise HTTPException(status_code=404, detail="Scenario not found")
 
-        name = str(baseline_name or "").strip()
-        if not name:
-            raise HTTPException(status_code=400, detail="Main Baseline name is required")
+        name = self._canonical_release_month(baseline_name)
 
         latest = self.baseline_repository.find_latest(db, scenario_id)
         if not latest:
@@ -188,9 +202,7 @@ class ScenarioBaselineService:
         if not scenario:
             raise HTTPException(status_code=404, detail="Scenario not found")
 
-        name = str(release_name or "").strip()
-        if not name:
-            raise HTTPException(status_code=400, detail="Release name is required")
+        name = self._canonical_release_month(release_name)
 
         latest = self.baseline_repository.find_latest(db, scenario_id)
         next_global_version = int(latest.baseline_version or 0) + 1 if latest else 1

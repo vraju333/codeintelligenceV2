@@ -4,7 +4,7 @@ from fastapi import FastAPI
 import logging
 
 from config import settings
-from database import engine, initialize_storage, storage_status
+from database import engine, initialize_storage, storage_status, SessionLocal
 # Import ORM models before create_all so a fresh CodeIntelligence database
 # creates both scenario and baseline tables correctly.
 import db_models  # noqa: F401
@@ -191,6 +191,7 @@ from routers.excel_report_router import (
 )
 from routers.jira_impact_router import router as jira_impact_router
 from routers.jira_knowledge_router import router as jira_knowledge_router
+from routers.scenario_rag_registry_router import router as scenario_rag_registry_router
 logger = logging.getLogger(__name__)
 
 app = FastAPI(
@@ -227,6 +228,7 @@ app.include_router(
     jira_impact_router
 )
 app.include_router(jira_knowledge_router)
+app.include_router(scenario_rag_registry_router)
 
 app.include_router(
     scenario_router
@@ -287,7 +289,7 @@ app.include_router(
 @app.on_event("startup")
 def startup():
 
-    seed_scenarios()
+    #seed_scenarios()
 
     initialization = {
         "enabled": settings.AUTO_PROJECT_INITIALIZATION,
@@ -308,6 +310,16 @@ def startup():
 
             rag_result = rag_service.index_project()
             initialization["rag"] = rag_result
+
+            # Keep operation-level Scenario Registry in sync on automatic startup.
+            startup_db = SessionLocal()
+            try:
+                initialization["scenario_sync"] = (
+                    ScenarioService().sync_discovered_operations(startup_db)
+                )
+            finally:
+                startup_db.close()
+
             initialization["status"] = "READY"
 
             logger.info(
@@ -346,3 +358,4 @@ def health():
         "java_project_path": settings.JAVA_PROJECT_PATH,
         "project_initialization": initialization
     }
+from services.scenario.scenario_service import ScenarioService

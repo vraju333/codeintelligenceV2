@@ -1,6 +1,10 @@
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Depends, Query
+from sqlalchemy.orm import Session
+
+from database import get_db
 
 from services.rag.rag_service import RagService
+from services.scenario.scenario_service import ScenarioService
 
 
 router = APIRouter(
@@ -9,11 +13,14 @@ router = APIRouter(
 )
 
 rag_service = RagService()
+scenario_service = ScenarioService()
 
 
 @router.post("/index")
-def index_project():
-    return rag_service.index_project()
+def index_project(db: Session = Depends(get_db)):
+    result = rag_service.index_project()
+    result["scenario_sync"] = scenario_service.sync_discovered_operations(db)
+    return result
 
 
 @router.get("/search")

@@ -14,6 +14,7 @@ function resetProjectDrivenUi(message = "Loading selected project...") {
         scenarioList: "Loading scenarios...",
         baselineOverview: "Loading scenario baselines...",
         baselineResult: "Select a scenario above to view older baseline versions.",
+        scenarioRagRegistryResult: "Scenario registry search will refresh for the selected project.",
         regressionResult: "Regression impact will refresh for the selected project."
     };
 
@@ -48,6 +49,32 @@ function resetProjectDrivenUi(message = "Loading selected project...") {
 
     if (window.currentFlowchart) window.currentFlowchart = null;
     if (window.currentDefectTraces) window.currentDefectTraces = {};
+
+    resetProjectJiraUi();
+}
+
+function resetProjectJiraUi() {
+    const testingJiraSelect = document.getElementById("testingBaselineJiraSelect");
+    if (testingJiraSelect) {
+        testingJiraSelect.innerHTML = '<option value="">Load saved JIRAs for selected project...</option>';
+    }
+
+    const jiraHistorySelect = document.getElementById("jiraHistorySelect");
+    if (jiraHistorySelect) {
+        jiraHistorySelect.innerHTML = '<option value="">Load saved JIRAs for selected project...</option>';
+    }
+
+    const jiraHistoryResult = document.getElementById("jiraHistoryBoardResult");
+    if (jiraHistoryResult) {
+        jiraHistoryResult.innerHTML = "Select a JIRA to see covered baselines.";
+    }
+
+    try {
+        testingBaselineJiraIds = [];
+        if (typeof renderTestingBaselineJiras === "function") {
+            renderTestingBaselineJiras();
+        }
+    } catch (_) {}
 }
 
 let scenarioPage = 1;
@@ -117,6 +144,10 @@ async function switchProject() {
         await loadDefectScenarioOptions();
         if (typeof loadBaselineOverview === "function") await loadBaselineOverview();
 
+        if (typeof loadTestingBaselineJiraOptions === "function") await loadTestingBaselineJiraOptions();
+        if (typeof loadJiraHistoryBoard === "function") await loadJiraHistoryBoard();
+        if (typeof rebuildScenarioRagRegistry === "function") await rebuildScenarioRagRegistry();
+
         // Regression Impact is project-specific. Re-run it after the project
         // switch completes so results from the previous repository never remain.
         if (typeof analyseRegression === "function") {
@@ -173,6 +204,10 @@ async function addProject() {
         await loadScenarios(1);
         await loadDefectScenarioOptions();
         if (typeof loadBaselineOverview === "function") await loadBaselineOverview();
+
+        if (typeof loadTestingBaselineJiraOptions === "function") await loadTestingBaselineJiraOptions();
+        if (typeof loadJiraHistoryBoard === "function") await loadJiraHistoryBoard();
+        if (typeof rebuildScenarioRagRegistry === "function") await rebuildScenarioRagRegistry();
 
         // Regression Impact is project-specific. Re-run it after the project
         // switch completes so results from the previous repository never remain.
@@ -454,6 +489,8 @@ async function openScenarioEditPrompt(scenarioId) {
     if (details) details.classList.remove("hidden");
     if (error) error.textContent = "";
     if (button) button.disabled = false;
+
+    await loadScenarioJiraOptions(scenario.jira_id || "");
 
     const values = {
         newScenarioCode: scenario.scenario_code || "",
@@ -836,19 +873,47 @@ function scenarioOperationKey(method, endpoint) {
     return `${String(method || "").toUpperCase().trim()} ${String(endpoint || "").trim()}`;
 }
 
+async function loadScenarioJiraOptions(selectedJiraId = "") {
+    const select = document.getElementById("newScenarioJiraId");
+    if (!select) return;
+
+    select.innerHTML = '<option value="">Loading saved JIRAs...</option>';
+    try {
+        const response = await fetch("/api/jira-knowledge");
+        const data = await response.json();
+        if (!response.ok) throw new Error(JSON.stringify(data));
+
+        const items = Array.isArray(data) ? data : [];
+        select.innerHTML = '<option value="">-- No JIRA --</option>' +
+            items.map(item => {
+                const jiraId = String(item.jira_id || "").trim().toUpperCase();
+                const title = String(item.title || "").trim();
+                const label = title ? `${jiraId} — ${title}` : jiraId;
+                return `<option value="${escapeHtml(jiraId)}">${escapeHtml(label)}</option>`;
+            }).join("");
+
+        const wanted = String(selectedJiraId || "").trim().toUpperCase();
+        if (wanted && items.some(item => String(item.jira_id || "").trim().toUpperCase() === wanted)) {
+            select.value = wanted;
+        }
+    } catch (_) {
+        select.innerHTML = '<option value="">Unable to load saved JIRAs</option>';
+    }
+}
+
 async function openNewScenarioModal() {
     const modal = document.getElementById("newScenarioModal");
     if (!modal) return;
     scenarioEditModeId = null;
     setScenarioModalText(
         "Register New Scenario",
-        "Create a scenario from an endpoint discovered in the selected Java project.",
+        "Create a scenario from an endpoint discovered in the selected Python project.",
         "Choose an uncaptured operation",
         "Only operations that do not already have a registered scenario are shown here.",
         "Register Scenario"
     );
 
-    ["newScenarioCode", "newScenarioName", "newScenarioJiraId", "newScenarioDescription",
+    ["newScenarioCode", "newScenarioName", "newScenarioDescription",
      "newScenarioRequestJson", "newScenarioExpectedResponse", "newScenarioExpectedDbEffect"].forEach(id => {
         const element = document.getElementById(id);
         if (element) {
@@ -873,7 +938,10 @@ async function openNewScenarioModal() {
     modal.classList.add("open");
     modal.setAttribute("aria-hidden", "false");
 
-    await loadAvailableScenarioOperations();
+    await Promise.all([
+        loadAvailableScenarioOperations(),
+        loadScenarioJiraOptions()
+    ]);
 }
 
 function closeNewScenarioModal() {

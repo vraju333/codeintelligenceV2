@@ -1,0 +1,193 @@
+[
+  {
+    "document_id": "scenario:1",
+    "scenario_id": 1,
+    "scenario_code": "GET_DATA",
+    "title": "GET_DATA \u00b7 Scenario",
+    "text": "Scenario GET_DATA\nGet Data\nAuto-discovered operation scenario for GET /api/employees/{id}.\nGET\n/api/employees/{id}",
+    "metadata": {
+      "scenario_id": 1,
+      "scenario_code": "GET_DATA",
+      "scenario_name": "Get Data",
+      "http_method": "GET",
+      "endpoint": "/api/employees/{id}",
+      "scenario_jira_id": null
+    }
+  },
+  {
+    "document_id": "scenario:2",
+    "scenario_id": 2,
+    "scenario_code": "CREATE_DATA",
+    "title": "CREATE_DATA \u00b7 Scenario",
+    "text": "Scenario CREATE_DATA\nCreate Data\nAuto-discovered operation scenario for POST /api/persons.\nPOST\n/api/persons",
+    "metadata": {
+      "scenario_id": 2,
+      "scenario_code": "CREATE_DATA",
+      "scenario_name": "Create Data",
+      "http_method": "POST",
+      "endpoint": "/api/persons",
+      "scenario_jira_id": null
+    }
+  },
+  {
+    "document_id": "scenario:3",
+    "scenario_id": 3,
+    "scenario_code": "DELETE_DATA",
+    "title": "DELETE_DATA \u00b7 Scenario",
+    "text": "Scenario DELETE_DATA\nDelete Data\nAuto-discovered operation scenario for DELETE /api/persons/{id}.\nDELETE\n/api/persons/{id}",
+    "metadata": {
+      "scenario_id": 3,
+      "scenario_code": "DELETE_DATA",
+      "scenario_name": "Delete Data",
+      "http_method": "DELETE",
+      "endpoint": "/api/persons/{id}",
+      "scenario_jira_id": null
+    }
+  },
+  {
+    "document_id": "scenario:4",
+    "scenario_id": 4,
+    "scenario_code": "GET_DATA_API_PERSONS_ID",
+    "title": "GET_DATA_API_PERSONS_ID \u00b7 Scenario",
+    "text": "Scenario GET_DATA_API_PERSONS_ID\nGet Data\nAuto-discovered operation scenario for GET /api/persons/{id}.\nGET\n/api/persons/{id}",
+    "metadata": {
+      "scenario_id": 4,
+      "scenario_code": "GET_DATA_API_PERSONS_ID",
+      "scenario_name": "Get Data",
+      "http_method": "GET",
+      "endpoint": "/api/persons/{id}",
+      "scenario_jira_id": null
+    }
+  },
+  {
+    "document_id": "scenario:5",
+    "scenario_id": 5,
+    "scenario_code": "PATCH_DATA",
+    "title": "PATCH_DATA \u00b7 Scenario",
+    "text": "Scenario PATCH_DATA\nPatch Data\nAuto-discovered operation scenario for PATCH /api/persons/{id}.\nPATCH\n/api/persons/{id}",
+    "metadata": {
+      "scenario_id": 5,
+      "scenario_code": "PATCH_DATA",
+      "scenario_name": "Patch Data",
+      "http_method": "PATCH",
+      "endpoint": "/api/persons/{id}",
+      "scenario_jira_id": null
+    }
+  },
+  {
+    "document_id": "scenario:6:baseline:1",
+    "scenario_id": 6,
+    "scenario_code": "UPDATE_DATA",
+    "title": "UPDATE_DATA \u00b7 September 2026 V1",
+    "text": "Scenario UPDATE_DATA\nUpdate Data\nAuto-discovered operation scenario for PUT /api/persons/{id}.\nEndpoint PUT /api/persons/{id}\nRelease September 2026 V1\nCode baseline V1\nActive baseline\nJIRAs EMP-201, STUD-101\nTest baselines EMPLOYEE_UPDATE, STUDENT_UPDATE\nStatuses PASS, PASS\n[]\n{\"http_method\": \"PUT\", \"endpoint\": \"/api/persons/{id}\", \"controller\": {\"class_name\": \"PersonController\", \"method_name\": \"update\", \"file_path\": \"D:\\\\AIlearning\\\\student-employee-project\\\\src\\\\main\\\\java\\\\com\\\\example\\\\studentemployee\\\\controller\\\\PersonController.java\"}, \"simplified_flow\": [\"PersonController.update\", \"PersonService.update\"], \"flow\": {\"class_name\": \"PersonController\", \"declared_class_name\": null, \"method_name\": \"update\", \"found\": true, \"input_parameters\": [{\"type\": \"Long\", \"name\": \"id\", \"display\": \"Long id\"}, {\"type\": \"PersonRequest\", \"name\": \"r\", \"display\": \"PersonRequest r\"}], \"return_type\": \"PersonResponse\", \"file_path\": \"D:\\\\AIlearning\\\\student-employee-project\\\\src\\\\main\\\\java\\\\com\\\\example\\\\studentemployee\\\\controller\\\\PersonController.java\", \"signature_owner\": \"PersonController\", \"calls\": [{\"class_name\": \"PersonService\", \"method_name\": \"update\", \"found\": true, \"type\": \"INTERFACE_DISPATCH\", \"input_parameters\": [{\"type\": \"Long\", \"name\": \"id\", \"display\": \"Long id\"}, {\"type\": \"PersonRequest\", \"name\": \"r\", \"display\": \"PersonRequest r\"}], \"return_type\": \"PersonResponse\", \"file_path\": \"D:\\\\AIlearning\\\\student-employee-project\\\\src\\\\main\\\\java\\\\com\\\\example\\\\studentemployee\\\\service\\\\PersonService.java\", \"signature_owner\": \"PersonService\", \"calls\": [{\"class_name\": \"PersonServiceImpl\", \"declared_class_name\": null, \"method_name\": \"update\", \"found\": true, \"input_parameters\": [{\"type\": \"Long\", \"name\": \"id\", \"display\": \"Long id\"}, {\"type\": \"PersonRequest\", \"name\": \"r\", \"display\": \"PersonRequest r\"}], \"return_type\": \"PersonResponse\", \"file_path\": \"D:\\\\AIlearning\\\\student-employee-project\\\\src\\\\main\\\\java\\\\com\\\\example\\\\studentemployee\\\\service\\\\impl\\\\PersonServiceImpl.java\", \"signature_owner\": \"PersonServiceImpl\", \"calls\": [{\"class_name\": \"PersonRequestValidator\", \"declared_class_name\": null, \"method_name\": \"validate\", \"found\": true, \"input_parameters\": [{\"type\": \"PersonRequest\", \"name\": \"r\", \"display\": \"PersonRequest r\"}], \"return_type\": \"void\", \"file_path\": \"D:\\\\AIlearning\\\\student-employee-project\\\\src\\\\main\\\\java\\\\com\\\\example\\\\studentemployee\\\\validator\\\\PersonRequestValidator.java\", \"signature_owner\": \"PersonRequestValidator\", \"calls\": []}, {\"class_name\": \"EmployeeService\", \"method_name\": \"update\", \"found\": true, \"type\": \"INTERFACE_DISPATCH\", \"input_parameters\": [{\"type\": \"Long\", \"name\": \"id\", \"display\": \"Long id\"}, {\"type\": \"PersonRequest\", \"name\": \"r\", \"display\": \"PersonRequest r\"}], \"return_type\": \"PersonResponse\", \"file_path\": \"D:\\\\AIlearning\\\\student-employee-project\\\\src\\\\main\\\\java\\\\com\\\\example\\\\studentemployee\\\\service\\\\impl\\\\EmployeeServiceImpl.java\", \"signature_owner\": \"EmployeeServiceImpl\", \"calls\": [{\"class_name\": \"EmployeeServiceImpl\", \"declared_class_name\": null, \"method_name\": \"update\", \"found\": true, \"input_parameters\": [{\"type\": \"Long\", \"name\": \"id\", \"display\": \"Long id\"}, {\"type\": \"PersonRequest\", \"name\": \"r\", \"display\": \"PersonRequest r\"}], \"return_type\": \"PersonResponse\", \"file_path\": \"D:\\\\AIlearning\\\\student-employee-project\\\\src\\\\main\\\\java\\\\com\\\\example\\\\studentemployee\\\\service\\\\impl\\\\EmployeeServiceImpl.java\", \"signature_owner\": \"EmployeeServiceImpl\", \"calls\": [{\"class_name\": \"EmployeeServiceImpl\", \"declared_class_name\": null, \"method_name\": \"findEntity\", \"found\": true, \"input_parameters\": [{\"type\": \"Long\", \"name\": \"id\", \"display\": \"Long id\"}], \"return_type\": \"Employee\", \"file_path\": \"D:\\\\AIlearning\\\\student-employee-project\\\\src\\\\main\\\\java\\\\com\\\\example\\\\studentemployee\\\\service\\\\impl\\\\EmployeeServiceImpl.java\", \"signature_owner\": \"EmployeeServiceImpl\", \"calls\": [{\"class_name\": \"EmployeeRepository\", \"method_name\": \"findById\", \"found\": true, \"type\": \"REPOSITORY\", \"framework\": \"SPRING_DATA_JPA\", \"operation\": \"READ\", \"input_parameters\": [{\"type\": \"ID\", \"name\": \"id\", \"display\": \"ID id\"}], \"return_type\": \"Optional<Entity>\", \"file_path\": \"D:\\\\AIlearning\\\\student-employee-project\\\\src\\\\main\\\\java\\\\com\\\\example\\\\studentemployee\\\\repository\\\\EmployeeRepository.java\", \"calls\": []}]}, {\"class_name\": \"EmployeeMapper\", \"declared_class_name\": null, \"method_name\": \"update\", \"found\": true, \"input_parameters\": [{\"type\": \"PersonRequest\", \"name\": \"r\", \"display\": \"PersonRequest r\"}, {\"type\": \"Employee\", \"name\": \"e\", \"display\": \"Employee e\"}], \"return_type\": \"void\", \"file_path\": \"D:\\\\AIlearning\\\\student-employee-project\\\\src\\\\main\\\\java\\\\com\\\\example\\\\studentemployee\\\\mapper\\\\EmployeeMapper.java\", \"signature_owner\": \"EmployeeMapper\", \"calls\": [{\"class_name\": \"AbstractPersonMapper\", \"declared_class_name\": \"EmployeeMapper\", \"method_name\": \"mapCommon\", \"found\": true, \"input_parameters\": [{\"type\": \"PersonRequest\", \"name\": \"r\", \"display\": \"PersonRequest r\"}, {\"type\": \"T\", \"name\": \"p\", \"display\": \"T p\"}], \"return_type\": \"void\", \"file_path\": \"D:\\\\AIlearning\\\\student-employee-project\\\\src\\\\main\\\\java\\\\com\\\\example\\\\studentemployee\\\\mapper\\\\AbstractPersonMapper.java\", \"signature_owner\": \"AbstractPersonMapper\", \"calls\": []}, {\"class_name\": \"EmployeeMapper\", \"declared_class_name\": null, \"method_name\": \"applyEmployee\", \"found\": true, \"input_parameters\": [{\"type\": \"PersonRequest\", \"name\": \"r\", \"display\": \"PersonRequest r\"}, {\"type\": \"Employee\", \"name\": \"e\", \"display\": \"Employee e\"}], \"return_type\": \"void\", \"file_path\": \"D:\\\\AIlearning\\\\student-employee-project\\\\src\\\\main\\\\java\\\\com\\\\example\\\\studentemployee\\\\mapper\\\\EmployeeMapper.java\", \"signature_owner\": \"EmployeeMapper\", \"calls\": []}]}, {\"class_name\": \"EmployeeRepository\", \"method_name\": \"save\", \"found\": true, \"type\": \"REPOSITORY\", \"framework\": \"SPRING_DATA_JPA\", \"operation\": \"WRITE\", \"input_parameters\": [{\"type\": \"Entity\", \"name\": \"entity\", \"display\": \"Entity entity\"}], \"return_type\": \"Entity\", \"file_path\": \"D:\\\\AIlearning\\\\student-employee-project\\\\src\\\\main\\\\java\\\\com\\\\example\\\\studentemployee\\\\repository\\\\EmployeeRepository.java\", \"calls\": []}, {\"class_name\": \"EmployeeMapper\", \"declared_class_name\": null, \"method_name\": \"toResponse\", \"found\": true, \"input_parameters\": [{\"type\": \"Employee\", \"name\": \"e\", \"display\": \"Employee e\"}], \"return_type\": \"PersonResponse\", \"file_path\": \"D:\\\\AIlearning\\\\student-employee-project\\\\src\\\\main\\\\java\\\\com\\\\example\\\\studentemployee\\\\mapper\\\\EmployeeMapper.java\", \"signature_owner\": \"EmployeeMapper\", \"calls\": []}]}]}, {\"class_name\": \"StudentService\", \"method_name\": \"update\", \"found\": true, \"type\": \"INTERFACE_DISPATCH\", \"input_parameters\": [{\"type\": \"Long\", \"name\": \"id\", \"display\": \"Long id\"}, {\"type\": \"PersonRequest\", \"name\": \"r\", \"display\": \"PersonRequest r\"}], \"return_type\": \"PersonResponse\", \"file_path\": \"D:\\\\AIlearning\\\\student-employee-project\\\\src\\\\main\\\\java\\\\com\\\\example\\\\studentemployee\\\\service\\\\impl\\\\StudentServiceImpl.java\", \"signature_owner\": \"StudentServiceImpl\", \"calls\": [{\"class_name\": \"StudentServiceImpl\", \"declared_class_name\": null, \"method_name\": \"update\", \"found\": true, \"input_parameters\": [{\"type\": \"Long\", \"name\": \"id\", \"display\": \"Long id\"}, {\"type\": \"PersonRequest\", \"name\": \"r\", \"display\": \"PersonRequest r\"}], \"return_type\": \"PersonResponse\", \"file_path\": \"D:\\\\AIlearning\\\\student-employee-project\\\\src\\\\main\\\\java\\\\com\\\\example\\\\studentemployee\\\\service\\\\impl\\\\StudentServiceImpl.java\", \"signature_owner\": \"StudentServiceImpl\", \"calls\": [{\"class_name\": \"StudentServiceImpl\", \"declared_class_name\": null, \"method_name\": \"findEntity\", \"found\": true, \"input_parameters\": [{\"type\": \"Long\", \"name\": \"id\", \"display\": \"Long id\"}], \"return_type\": \"Student\", \"file_path\": \"D:\\\\AIlearning\\\\student-employee-project\\\\src\\\\main\\\\java\\\\com\\\\example\\\\studentemployee\\\\service\\\\impl\\\\StudentServiceImpl.java\", \"signature_owner\": \"StudentServiceImpl\", \"calls\": [{\"class_name\": \"StudentRepository\", \"method_name\": \"findById\", \"found\": true, \"type\": \"REPOSITORY\", \"framework\": \"SPRING_DATA_JPA\", \"operation\": \"READ\", \"input_parameters\": [{\"type\": \"ID\", \"name\": \"id\", \"display\": \"ID id\"}], \"return_type\": \"Optional<Entity>\", \"file_path\": \"D:\\\\AIlearning\\\\student-employee-project\\\\src\\\\main\\\\java\\\\com\\\\example\\\\studentemployee\\\\repository\\\\StudentRepository.java\", \"calls\": []}]}, {\"class_name\": \"StudentMapper\", \"declared_class_name\": null, \"method_name\": \"update\", \"found\": true, \"input_parameters\": [{\"type\": \"PersonRequest\", \"name\": \"r\", \"display\": \"PersonRequest r\"}, {\"type\": \"Student\", \"name\": \"s\", \"display\": \"Student s\"}], \"return_type\": \"void\", \"file_path\": \"D:\\\\AIlearning\\\\student-employee-project\\\\src\\\\main\\\\java\\\\com\\\\example\\\\studentemployee\\\\mapper\\\\StudentMapper.java\", \"signature_owner\": \"StudentMapper\", \"calls\": [{\"class_name\": \"AbstractPersonMapper\", \"declared_class_name\": \"StudentMapper\", \"method_name\": \"mapCommon\", \"found\": true, \"input_parameters\": [{\"type\": \"PersonRequest\", \"name\": \"r\", \"display\": \"PersonRequest r\"}, {\"type\": \"T\", \"name\": \"p\", \"display\": \"T p\"}], \"return_type\": \"void\", \"file_path\": \"D:\\\\AIlearning\\\\student-employee-project\\\\src\\\\main\\\\java\\\\com\\\\example\\\\studentemployee\\\\mapper\\\\AbstractPersonMapper.java\", \"signature_owner\": \"AbstractPersonMapper\", \"calls\": []}, {\"class_name\": \"StudentMapper\", \"declared_class_name\": null, \"method_name\": \"applyStudent\", \"found\": true, \"input_parameters\": [{\"type\": \"PersonRequest\", \"name\": \"r\", \"display\": \"PersonRequest r\"}, {\"type\": \"Student\", \"name\": \"s\", \"display\": \"Student s\"}], \"return_type\": \"void\", \"file_path\": \"D:\\\\AIlearning\\\\student-employee-project\\\\src\\\\main\\\\java\\\\com\\\\example\\\\studentemployee\\\\mapper\\\\StudentMapper.java\", \"signature_owner\": \"StudentMapper\", \"calls\": [{\"class_name\": \"PersonCommonMapper\", \"declared_class_name\": null, \"method_name\": \"setResidenceMapper\", \"found\": true, \"input_parameters\": [], \"return_type\": \"String\", \"file_path\": \"D:\\\\AIlearning\\\\student-employee-project\\\\src\\\\main\\\\java\\\\com\\\\example\\\\studentemployee\\\\mapper\\\\PersonCommonMapper.java\", \"signature_owner\": \"PersonCommonMapper\", \"calls\": []}]}]}, {\"class_name\": \"StudentRepository\", \"method_name\": \"save\", \"found\": true, \"type\": \"REPOSITORY\", \"framework\": \"SPRING_DATA_JPA\", \"operation\": \"WRITE\", \"input_parameters\": [{\"type\": \"Entity\", \"name\": \"entity\", \"display\": \"Entity entity\"}], \"return_type\": \"Entity\", \"file_path\": \"D:\\\\AIlearning\\\\student-employee-project\\\\src\\\\main\\\\java\\\\com\\\\example\\\\studentemployee\\\\repository\\\\StudentRepository.java\", \"calls\": []}, {\"class_name\": \"StudentMapper\", \"declared_class_name\": null, \"method_name\": \"toResponse\", \"found\": true, \"input_parameters\": [{\"type\": \"Student\", \"name\": \"s\", \"display\": \"Student s\"}], \"return_type\": \"PersonResponse\", \"file_path\": \"D:\\\\AIlearning\\\\student-employee-project\\\\src\\\\main\\\\java\\\\com\\\\example\\\\studentemployee\\\\mapper\\\\StudentMapper.java\", \"signature_owner\": \"StudentMapper\", \"calls\": []}]}]}]}]}]}}\n[{\"type\": \"employee\", \"name\": \"Raju\", \"annualSalary\": 120000}, {\"type\": \"student\", \"name\": \"Raju\", \"gpa\": 8.2}]\n[{\"type\": \"employee\", \"name\": \"Raju\", \"annualSalary\": 120000}, {\"type\": \"student\", \"name\": \"Raju\", \"gpa\": 8.2}]\n[{\"type\": \"employee\", \"name\": \"Raju\", \"annualSalary\": 120000}, {\"type\": \"student\", \"name\": \"Raju\", \"gpa\": 8.2}]\n[null, null]",
+    "metadata": {
+      "scenario_id": 6,
+      "scenario_code": "UPDATE_DATA",
+      "scenario_name": "Update Data",
+      "http_method": "PUT",
+      "endpoint": "/api/persons/{id}",
+      "scenario_jira_id": null,
+      "release_name": "September 2026",
+      "release_version": 1,
+      "code_baseline_version": 1,
+      "is_active": true,
+      "jira_ids": [
+        "EMP-201",
+        "STUD-101"
+      ],
+      "test_baselines": [
+        {
+          "name": "EMPLOYEE_UPDATE",
+          "status": "PASS",
+          "jira_ids": [
+            "EMP-201"
+          ],
+          "created_at": "2026-09-22T12:25:52.596612"
+        },
+        {
+          "name": "STUDENT_UPDATE",
+          "status": "PASS",
+          "jira_ids": [
+            "STUD-101"
+          ],
+          "created_at": "2026-09-22T12:25:08.908968"
+        }
+      ]
+    }
+  },
+  {
+    "document_id": "scenario:7",
+    "scenario_id": 7,
+    "scenario_code": "PATCH_DATA_API_PERSONS_ID_ADDRESS",
+    "title": "PATCH_DATA_API_PERSONS_ID_ADDRESS \u00b7 Scenario",
+    "text": "Scenario PATCH_DATA_API_PERSONS_ID_ADDRESS\nPatch Data\nAuto-discovered operation scenario for PATCH /api/persons/{id}/address.\nPATCH\n/api/persons/{id}/address",
+    "metadata": {
+      "scenario_id": 7,
+      "scenario_code": "PATCH_DATA_API_PERSONS_ID_ADDRESS",
+      "scenario_name": "Patch Data",
+      "http_method": "PATCH",
+      "endpoint": "/api/persons/{id}/address",
+      "scenario_jira_id": null
+    }
+  },
+  {
+    "document_id": "scenario:8",
+    "scenario_id": 8,
+    "scenario_code": "PATCH_DATA_API_PERSONS_ID_CONTACT",
+    "title": "PATCH_DATA_API_PERSONS_ID_CONTACT \u00b7 Scenario",
+    "text": "Scenario PATCH_DATA_API_PERSONS_ID_CONTACT\nPatch Data\nAuto-discovered operation scenario for PATCH /api/persons/{id}/contact.\nPATCH\n/api/persons/{id}/contact",
+    "metadata": {
+      "scenario_id": 8,
+      "scenario_code": "PATCH_DATA_API_PERSONS_ID_CONTACT",
+      "scenario_name": "Patch Data",
+      "http_method": "PATCH",
+      "endpoint": "/api/persons/{id}/contact",
+      "scenario_jira_id": null
+    }
+  },
+  {
+    "document_id": "scenario:9",
+    "scenario_id": 9,
+    "scenario_code": "PATCH_DATA_API_PERSONS_ID_EMAIL",
+    "title": "PATCH_DATA_API_PERSONS_ID_EMAIL \u00b7 Scenario",
+    "text": "Scenario PATCH_DATA_API_PERSONS_ID_EMAIL\nPatch Data\nAuto-discovered operation scenario for PATCH /api/persons/{id}/email.\nPATCH\n/api/persons/{id}/email",
+    "metadata": {
+      "scenario_id": 9,
+      "scenario_code": "PATCH_DATA_API_PERSONS_ID_EMAIL",
+      "scenario_name": "Patch Data",
+      "http_method": "PATCH",
+      "endpoint": "/api/persons/{id}/email",
+      "scenario_jira_id": null
+    }
+  },
+  {
+    "document_id": "scenario:10",
+    "scenario_id": 10,
+    "scenario_code": "CREATE_DATA_API_PROMOTIONS_CHECK",
+    "title": "CREATE_DATA_API_PROMOTIONS_CHECK \u00b7 Scenario",
+    "text": "Scenario CREATE_DATA_API_PROMOTIONS_CHECK\nCreate Data\nAuto-discovered operation scenario for POST /api/promotions/check.\nPOST\n/api/promotions/check",
+    "metadata": {
+      "scenario_id": 10,
+      "scenario_code": "CREATE_DATA_API_PROMOTIONS_CHECK",
+      "scenario_name": "Create Data",
+      "http_method": "POST",
+      "endpoint": "/api/promotions/check",
+      "scenario_jira_id": null
+    }
+  },
+  {
+    "document_id": "scenario:11",
+    "scenario_id": 11,
+    "scenario_code": "GET_DATA_API_STUDENTS_ID",
+    "title": "GET_DATA_API_STUDENTS_ID \u00b7 Scenario",
+    "text": "Scenario GET_DATA_API_STUDENTS_ID\nGet Data\nAuto-discovered operation scenario for GET /api/students/{id}.\nGET\n/api/students/{id}",
+    "metadata": {
+      "scenario_id": 11,
+      "scenario_code": "GET_DATA_API_STUDENTS_ID",
+      "scenario_name": "Get Data",
+      "http_method": "GET",
+      "endpoint": "/api/students/{id}",
+      "scenario_jira_id": null
+    }
+  }
+]

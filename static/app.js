@@ -1278,12 +1278,10 @@ async function openMainBaselineModal(scenarioId) {
     mainBaselineCreateMode = "release";
     document.querySelector("#mainBaselineModal h2").textContent = "Add Baseline";
     document.getElementById("mainBaselineOperation").textContent =
-        `${item.http_method} ${item.endpoint} · ${item.scenario_code} · Release → Version`;
+        `${item.http_method} ${item.endpoint} · ${item.scenario_code} · Month/Year → Version`;
     const error = document.getElementById("mainBaselineError");
     if (error) error.textContent = "";
 
-    // Open immediately. Loading history should never make the button appear broken
-    // when the API is slow or temporarily unavailable.
     modal.classList.add("open");
     modal.setAttribute("aria-hidden", "false");
 
@@ -1296,70 +1294,43 @@ async function openMainBaselineModal(scenarioId) {
         mainBaselineHistoryItems = [];
     }
 
-    const groups = groupBaselineReleases(mainBaselineHistoryItems);
-    const releaseSelect = document.getElementById("mainBaselineReleaseSelect");
-    if (releaseSelect) {
-        const existing = [...groups.keys()];
-        releaseSelect.innerHTML = existing.map(name =>
-            `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`
-        ).join("") + `<option value="__new__">+ New Release</option>`;
-        releaseSelect.value = item.baseline_captured && item.active_baseline_name && groups.has(item.active_baseline_name)
-            ? item.active_baseline_name : "__new__";
+    const now = new Date();
+    const monthSelect = document.getElementById("mainBaselineMonth");
+    const yearSelect = document.getElementById("mainBaselineYear");
+    if (monthSelect) {
+        monthSelect.value = now.toLocaleString("en-US", {month: "long"});
     }
-    const name = document.getElementById("mainBaselineName");
-    if (name) name.value = "";
-    onMainBaselineReleaseChanged();
+    if (yearSelect) {
+        const currentYear = now.getFullYear();
+        yearSelect.innerHTML = Array.from({length: 7}, (_, i) => currentYear - 2 + i)
+            .map(year => `<option value="${year}">${year}</option>`).join("");
+        yearSelect.value = String(currentYear);
+    }
+    updateMainBaselineVersionPreview();
 }
 
-function onMainBaselineReleaseChanged() {
-    const select = document.getElementById("mainBaselineReleaseSelect");
-    const wrap = document.getElementById("mainBaselineNameWrap");
-    const name = document.getElementById("mainBaselineName");
-    const isNew = !select || select.value === "__new__";
-    if (wrap) wrap.style.display = isNew ? "" : "none";
-    if (name && !isNew) name.value = select.value;
-    updateMainBaselineVersionPreview();
-    if (isNew) setTimeout(() => name?.focus(), 0);
+function selectedMainBaselineReleaseName() {
+    const month = (document.getElementById("mainBaselineMonth")?.value || "").trim();
+    const year = (document.getElementById("mainBaselineYear")?.value || "").trim();
+    return month && year ? `${month} ${year}` : "";
 }
 
 function updateMainBaselineVersionPreview() {
-    const select = document.getElementById("mainBaselineReleaseSelect");
-    const name = document.getElementById("mainBaselineName");
+    const releaseName = selectedMainBaselineReleaseName();
     const display = document.getElementById("mainBaselineVersionDisplay");
-    const releaseName = select?.value === "__new__" ? (name?.value || "").trim() : (select?.value || "");
     const groups = groupBaselineReleases(mainBaselineHistoryItems);
     const versions = groups.get(releaseName) || [];
     const next = versions.length ? Math.max(...versions.map(releaseDisplayVersion)) + 1 : 1;
     if (display) display.value = `V${next}`;
     const button = document.getElementById("saveMainBaselineButton");
-    if (button) button.textContent = `Create ${releaseName || "Release"} V${next}`;
+    if (button) button.textContent = releaseName ? `Create ${releaseName} · V${next}` : `Create Baseline V${next}`;
 }
 
-function openNewMainBaselineModalFromHistory() {
+async function openNewMainBaselineModalFromHistory() {
     const scenarioId = activeTestingBaselineHistoryScenarioId;
-    const item = baselineOverviewData.find(x => Number(x.scenario_id) === Number(scenarioId));
-    const modal = document.getElementById("mainBaselineModal");
-    if (!item || !modal || !item.baseline_captured) return;
-
-    mainBaselineCreateMode = "next";
-    activeMainBaselineScenarioId = Number(scenarioId);
-    document.querySelector("#mainBaselineModal h2").textContent = "New Baseline";
-    document.getElementById("mainBaselineOperation").textContent =
-        `Current: ${item.active_baseline_name || "Main Baseline"} · V${item.active_baseline_version} → New: V${Number(item.active_baseline_version || 0) + 1}`;
-    const saveButton = document.getElementById("saveMainBaselineButton");
-    if (saveButton) saveButton.textContent = `Create V${Number(item.active_baseline_version || 0) + 1}`;
-    const name = document.getElementById("mainBaselineName");
-    const error = document.getElementById("mainBaselineError");
-    if (name) {
-        name.value = "";
-        name.placeholder = "e.g. November 2026";
-    }
-    if (error) error.textContent = "";
-
+    if (!scenarioId) return;
     closeTestingBaselineHistoryModal(false);
-    modal.classList.add("open");
-    modal.setAttribute("aria-hidden", "false");
-    setTimeout(() => name?.focus(), 0);
+    await openMainBaselineModal(scenarioId);
 }
 
 function closeMainBaselineModal() {
@@ -1378,11 +1349,8 @@ async function saveMainBaseline() {
     if (!scenarioId) return;
     if (error) error.textContent = "";
     try {
-        const releaseSelect = document.getElementById("mainBaselineReleaseSelect");
-        const releaseName = releaseSelect?.value === "__new__"
-            ? (document.getElementById("mainBaselineName")?.value || "").trim()
-            : (releaseSelect?.value || "").trim();
-        if (!releaseName) throw new Error("Release name is required, for example October.");
+        const releaseName = selectedMainBaselineReleaseName();
+        if (!releaseName) throw new Error("Month and year are required.");
         const item = baselineOverviewData.find(x => Number(x.scenario_id) === Number(scenarioId));
         if (!item) throw new Error("Scenario overview is not loaded.");
 
@@ -1536,10 +1504,10 @@ function removeTestingBaselineJira(index) {
 
 
 async function openTestingBaselineModal(scenarioId) {
-    ensureTestingBaselineSelectors();
     const modal = document.getElementById("testingBaselineModal");
     const item = baselineOverviewData.find(x => Number(x.scenario_id) === Number(scenarioId));
     if (!modal || !item) return;
+    ensureTestingBaselineSelectors();
     if (!item.baseline_captured) {
         alert("Create a baseline version first.");
         return;
@@ -1557,11 +1525,30 @@ async function openTestingBaselineModal(scenarioId) {
     } catch (_) {
         testingBaselineVersionItems = [];
     }
+
+    if (!testingBaselineVersionItems.length && item.active_baseline_id) {
+        testingBaselineVersionItems = [{
+            id: item.active_baseline_id,
+            baseline_name: item.active_baseline_name || "Current Baseline",
+            release_version: item.active_release_version || item.active_baseline_version || 1,
+            baseline_version: item.active_baseline_version || item.active_release_version || 1,
+            is_active: true
+        }];
+    }
+
     const groups = groupBaselineReleases(testingBaselineVersionItems);
     const releaseSelect = document.getElementById("testingBaselineReleaseSelect");
     if (releaseSelect) {
-        releaseSelect.innerHTML = [...groups.keys()].map(name => `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`).join("");
-        if (item.active_baseline_name && groups.has(item.active_baseline_name)) releaseSelect.value = item.active_baseline_name;
+        const releaseNames = [...groups.keys()];
+        releaseSelect.innerHTML = releaseNames.length
+            ? releaseNames.map(name => `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`).join("")
+            : `<option value="">No baseline versions found</option>`;
+
+        if (item.active_baseline_name && groups.has(item.active_baseline_name)) {
+            releaseSelect.value = item.active_baseline_name;
+        } else if (releaseNames.length) {
+            releaseSelect.value = releaseNames[0];
+        }
     }
     onTestingBaselineReleaseChanged();
 
@@ -1569,6 +1556,7 @@ async function openTestingBaselineModal(scenarioId) {
         const el = document.getElementById(id);
         if (el) el.value = "";
     });
+
     const error = document.getElementById("testingBaselineError");
     if (error) error.textContent = "";
 
@@ -1602,9 +1590,11 @@ function onTestingBaselineReleaseChanged() {
     const versions = testingBaselineVersionItems
         .filter(x => String(x.baseline_name || "Legacy") === release)
         .sort((a,b) => releaseDisplayVersion(a) - releaseDisplayVersion(b));
-    versionSelect.innerHTML = versions.map(x =>
-        `<option value="${x.id}">V${releaseDisplayVersion(x)}</option>`
-    ).join("");
+    versionSelect.innerHTML = versions.length
+        ? versions.map(x =>
+            `<option value="${x.id}">V${releaseDisplayVersion(x)}</option>`
+        ).join("")
+        : `<option value="">No versions found</option>`;
     const active = versions.find(x => x.is_active) || versions[versions.length - 1];
     if (active) versionSelect.value = String(active.id);
     onTestingBaselineVersionChanged();
@@ -1669,8 +1659,11 @@ async function saveTestingBaseline() {
             if (jiraSelect) jiraSelect.value = "";
         }
 
-        const selectedBaselineId = Number(document.getElementById("testingBaselineVersionSelect")?.value || 0);
-        if (!selectedBaselineId) throw new Error("Select a Release and Version.");
+        const selectedBaselineId = Number(
+            document.getElementById("testingBaselineVersionSelect")?.value
+            || item.active_baseline_id
+            || 0
+        ) || null;
 
         const body = {
             baseline_name: name,
@@ -1933,6 +1926,154 @@ function renderJiraCoverage(data) {
             <div class="muted-text">${Number(data.scenario_count || 0)} scenario(s), ${Number(data.covered_count || items.length)} baseline coverage item(s)</div>
             <h4>Covered Baselines</h4>
             <div class="jira-history-lines">${lines}</div>
+        </div>
+    `;
+}
+
+async function rebuildScenarioRagRegistry() {
+    const result = document.getElementById("scenarioRagRegistryResult");
+    if (!result) return;
+
+    result.innerHTML = "Rebuilding scenario registry index...";
+    try {
+        const response = await fetch("/api/scenario-rag-registry/index", {
+            method: "POST"
+        });
+        const data = await readJsonOrText(response);
+        if (!response.ok) throw new Error(typeof data === "string" ? data : JSON.stringify(data));
+
+        result.innerHTML = `
+            <div class="success">
+                Scenario registry indexed · ${Number(data.documents || 0)} document(s)
+            </div>
+            <div class="muted-box">
+                Indexed scenarios, release versions, test baselines, JIRAs and stored flow/test data for the selected project.
+            </div>
+        `;
+    } catch (error) {
+        result.innerHTML = renderError(error.message);
+    }
+}
+
+async function searchScenarioRagRegistry() {
+    const input = document.getElementById("scenarioRagQuery");
+    const result = document.getElementById("scenarioRagRegistryResult");
+    if (!input || !result) return;
+
+    const query = String(input.value || "").trim();
+    if (!query) {
+        result.innerHTML = `<div class="warning">Enter an attribute, JIRA, release, version or scenario to search.</div>`;
+        return;
+    }
+
+    result.innerHTML = "Searching scenario registry...";
+    try {
+        const response = await fetch(`/api/scenario-rag-registry/search?query=${encodeURIComponent(query)}&top_k=10`);
+        const data = await readJsonOrText(response);
+        if (!response.ok) throw new Error(typeof data === "string" ? data : JSON.stringify(data));
+
+        result.innerHTML = renderScenarioRagRegistryResults(data);
+    } catch (error) {
+        result.innerHTML = renderError(error.message);
+    }
+}
+
+async function readJsonOrText(response) {
+    const text = await response.text();
+    if (!text) return {};
+    try {
+        return JSON.parse(text);
+    } catch (_) {
+        return text;
+    }
+}
+
+function renderScenarioRagRegistryResults(data) {
+    const results = Array.isArray(data.results) ? data.results : [];
+    const query = data.query || "";
+
+    if (!results.length) {
+        return `
+            <div class="muted-box">
+                No scenario registry match found for <strong>${escapeHtml(query)}</strong>.
+                Rebuild the index after adding scenarios, baselines or JIRAs.
+            </div>
+        `;
+    }
+
+    const understanding = data.llm_understanding || {};
+    const llmPanel = understanding.enabled ? `
+        <div class="muted-box">
+            <strong>LLM query understanding:</strong>
+            ${understanding.used ? "Used" : "Fallback"}
+            ${(understanding.attributes || []).length ? ` · Attributes: ${(understanding.attributes || []).map(escapeHtml).join(", ")}` : ""}
+            ${(understanding.concepts || []).length ? ` · Concepts: ${(understanding.concepts || []).map(escapeHtml).join(", ")}` : ""}
+            ${understanding.reason ? ` · ${escapeHtml(understanding.reason)}` : ""}
+        </div>
+    ` : `
+        <div class="muted-box">
+            <strong>LLM query understanding:</strong> Not configured. Used local keyword search.
+        </div>
+    `;
+
+    const cards = results.map(item => {
+        const meta = item.metadata || {};
+        const release = meta.release_name
+            ? `${meta.release_name}${meta.release_version ? ` V${meta.release_version}` : ""}`
+            : "No release captured";
+        const codeVersion = meta.code_baseline_version
+            ? `Code V${meta.code_baseline_version}`
+            : "No code version";
+        const jiras = Array.isArray(meta.jira_ids) ? meta.jira_ids : [];
+        const tests = Array.isArray(meta.test_baselines) ? meta.test_baselines : [];
+        const reasons = Array.isArray(item.reasons) ? item.reasons : [];
+
+        return `
+            <div class="active-baseline-card">
+                <div>
+                    <span class="muted-text">Score ${Number(item.score || 0)}</span>
+                    <h3>${escapeHtml(
+                        meta.document_type === "test_baseline"
+                            ? (meta.relevant_test_baseline || meta.scenario_code || item.scenario_code || "")
+                            : (meta.scenario_code || item.scenario_code || "")
+                    )}</h3>
+                    ${meta.document_type === "test_baseline"
+                        ? `<div class="muted-text">Parent scenario: ${escapeHtml(meta.scenario_code || item.scenario_code || "")}</div>`
+                        : ""}
+                </div>
+                <span class="tag">${escapeHtml(release)}</span>
+                <div class="baseline-detail">${escapeHtml(meta.http_method || "")} ${escapeHtml(meta.endpoint || "")}</div>
+                <div class="baseline-detail">${escapeHtml(codeVersion)}</div>
+                <div class="baseline-detail">
+                    ${(jiras.length ? jiras : ["No JIRA"]).map(id => `<span class="testing-jira-chip">${escapeHtml(id)}</span>`).join("")}
+                </div>
+                ${tests.length ? `
+                    <div class="testing-history-field">
+                        <div class="testing-history-label">Testing baselines</div>
+                        ${tests.map(test => `
+                            <div class="jira-history-line">
+                                <strong>${escapeHtml(test.name || "Testing baseline")}</strong>
+                                <span>→</span>
+                                <span>${escapeHtml(test.status || "NOT_RUN")}</span>
+                                ${(Array.isArray(test.jira_ids) && test.jira_ids.length)
+                                    ? `<span>→</span>${test.jira_ids.map(id => `<span class="testing-jira-chip">${escapeHtml(id)}</span>`).join("")}`
+                                    : ""}
+                            </div>
+                        `).join("")}
+                    </div>
+                ` : ""}
+                ${reasons.length ? `<div class="muted-text">${reasons.map(escapeHtml).join(" · ")}</div>` : ""}
+                ${item.summary ? `<details class="muted-box"><summary>View matched evidence</summary><div>${escapeHtml(item.summary)}</div></details>` : ""}
+            </div>
+        `;
+    }).join("");
+
+    return `
+        <div class="jira-history-text-board">
+            <h3>Scenario Registry Results</h3>
+            <div class="muted-text">${Number(data.total_matches || results.length)} match(es) for ${escapeHtml(query)}</div>
+            ${llmPanel}
+            ${cards}
         </div>
     `;
 }

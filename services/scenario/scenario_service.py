@@ -50,27 +50,83 @@ class ScenarioService:
             settings.JAVA_PROJECT_PATH
         )
 
+    @staticmethod
+    def _operation_scenario_base(http_method: str) -> tuple[str, str]:
+        method = str(http_method or "").upper().strip()
+        mapping = {
+            "GET": ("GET_DATA", "Get Data"),
+            "POST": ("CREATE_DATA", "Create Data"),
+            "PUT": ("UPDATE_DATA", "Update Data"),
+            "PATCH": ("PATCH_DATA", "Patch Data"),
+            "DELETE": ("DELETE_DATA", "Delete Data"),
+        }
+        return mapping.get(method, (f"{method or 'OPERATION'}_DATA", f"{method.title() or 'Operation'} Data"))
+
+    @staticmethod
+    def _endpoint_suffix(endpoint: str) -> str:
+        import re
+        value = re.sub(r"[^A-Za-z0-9]+", "_", str(endpoint or "")).strip("_").upper()
+        return value[:60] or "ENDPOINT"
+
+    def sync_discovered_operations(self, db: Session):
+        """Create one high-level scenario for each discovered HTTP operation.
+
+        Test variations (STUDENT_UPDATE, EMPLOYEE_UPDATE, etc.) belong under
+        the release baseline as Test Baselines; they are not top-level scenarios.
+        Existing operations are never duplicated or overwritten.
+        """
+        endpoints = EndpointFlowService().discover_endpoints()
+        created = []
+        existing = []
+
+        for item in endpoints:
+            method = str(item.get("http_method") or "").upper().strip()
+            endpoint = str(item.get("endpoint") or "").strip()
+            if not method or not endpoint:
+                continue
+
+            operation_matches = self.find_existing_for_operation(db, method, endpoint)
+            if operation_matches:
+                existing.append(operation_matches[0].scenario_code)
+                continue
+
+            base_code, base_name = self._operation_scenario_base(method)
+            code = base_code
+            if self.repository.find_by_code(db, code):
+                code = f"{base_code}_{self._endpoint_suffix(endpoint)}"
+                counter = 2
+                candidate = code
+                while self.repository.find_by_code(db, candidate):
+                    candidate = f"{code}_{counter}"
+                    counter += 1
+                code = candidate
+
+            request = ScenarioRequest(
+                scenario_code=code,
+                scenario_name=base_name,
+                http_method=method,
+                endpoint=endpoint,
+                description=f"Auto-discovered operation scenario for {method} {endpoint}.",
+                status="ACTIVE",
+            )
+            row = self.repository.create(db, request, settings.JAVA_PROJECT_PATH)
+            created.append({
+                "scenario_id": row.id,
+                "scenario_code": row.scenario_code,
+                "http_method": row.http_method,
+                "endpoint": row.endpoint,
+            })
+
+        return {
+            "created_count": len(created),
+            "existing_count": len(existing),
+            "created": created,
+        }
+
     def create(self, db: Session, request: ScenarioRequest):
         existing = self.repository.find_by_code(db, request.scenario_code)
         if existing:
             raise HTTPException(status_code=409, detail="Scenario code already exists")
-
-        operation_matches = self.find_existing_for_operation(
-            db, request.http_method, request.endpoint
-        )
-        if operation_matches:
-            first = operation_matches[0]
-            raise HTTPException(
-                status_code=409,
-                detail={
-                    "message": "A scenario already exists for this operation. Open the existing scenario instead of creating a duplicate.",
-                    "scenario_id": first.id,
-                    "scenario_code": first.scenario_code,
-                    "http_method": first.http_method,
-                    "endpoint": first.endpoint,
-                    "existing_count": len(operation_matches),
-                }
-            )
 
         return self.repository.create(db, request, settings.JAVA_PROJECT_PATH)
 

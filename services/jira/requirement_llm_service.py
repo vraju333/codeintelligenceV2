@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import urllib.error
 import urllib.request
 
@@ -316,6 +317,43 @@ Jira requirement:
 
         return None
 
+    def _normalize_attribute_name(self, value: str | None) -> str | None:
+        """Normalize business/LLM attribute names to a stable code-style form.
+
+        Examples:
+          GPA               -> gpa
+          gPA               -> gpa
+          primary_email     -> primaryEmail
+          primary email     -> primaryEmail
+          OrganizationCode  -> organizationCode
+
+        This normalization is intentionally applied to attributes only; entity,
+        condition and business-concept text keep their natural wording.
+        """
+        if not isinstance(value, str):
+            return value
+
+        value = " ".join(value.strip().split())
+        if not value:
+            return None
+
+        # A single acronym/case variant such as GPA/Gpa/gPA should be stable.
+        if re.fullmatch(r"[A-Za-z]+", value):
+            # Preserve genuine camelCase names, but collapse short mixed-case
+            # acronym variants such as gPA to lowercase.
+            if value.isupper() or len(value) <= 4:
+                return value.lower()
+            return value[0].lower() + value[1:]
+
+        # snake_case, kebab-case and business phrases -> lower camelCase.
+        parts = [p for p in re.split(r"[_\-\s]+", value) if p]
+        if len(parts) > 1:
+            first = parts[0].lower()
+            rest = "".join(p.lower().capitalize() for p in parts[1:])
+            return first + rest
+
+        return value[0].lower() + value[1:]
+
     def _normalize(self, data: dict) -> dict:
         def clean(value):
             if isinstance(value, str):
@@ -325,11 +363,11 @@ Jira requirement:
 
         attributes = []
         for value in data.get("attributes", []) or []:
-            value = clean(value)
+            value = self._normalize_attribute_name(clean(value))
             if value and value.lower() not in {x.lower() for x in attributes}:
                 attributes.append(value)
 
-        main_attribute = clean(data.get("attribute"))
+        main_attribute = self._normalize_attribute_name(clean(data.get("attribute")))
         if main_attribute and main_attribute.lower() not in {x.lower() for x in attributes}:
             attributes.insert(0, main_attribute)
 

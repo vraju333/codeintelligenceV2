@@ -1,0 +1,310 @@
+[
+  {
+    "document_id": "scenario:1",
+    "scenario_id": 1,
+    "scenario_code": "GET_DATA",
+    "title": "GET_DATA \u00b7 Operation",
+    "text": "Operation scenario GET_DATA\nGet Data\nAuto-discovered operation scenario for GET /api/employees/{id}.\nEndpoint GET /api/employees/{id}",
+    "metadata": {
+      "scenario_id": 1,
+      "scenario_code": "GET_DATA",
+      "scenario_name": "Get Data",
+      "http_method": "GET",
+      "endpoint": "/api/employees/{id}",
+      "scenario_jira_id": null,
+      "document_type": "scenario",
+      "jira_ids": [],
+      "test_baselines": []
+    }
+  },
+  {
+    "document_id": "scenario:2",
+    "scenario_id": 2,
+    "scenario_code": "CREATE_DATA",
+    "title": "CREATE_DATA \u00b7 Operation",
+    "text": "Operation scenario CREATE_DATA\nCreate Data\nAuto-discovered operation scenario for POST /api/persons.\nEndpoint POST /api/persons",
+    "metadata": {
+      "scenario_id": 2,
+      "scenario_code": "CREATE_DATA",
+      "scenario_name": "Create Data",
+      "http_method": "POST",
+      "endpoint": "/api/persons",
+      "scenario_jira_id": null,
+      "document_type": "scenario",
+      "jira_ids": [],
+      "test_baselines": []
+    }
+  },
+  {
+    "document_id": "scenario:3",
+    "scenario_id": 3,
+    "scenario_code": "DELETE_DATA",
+    "title": "DELETE_DATA \u00b7 Operation",
+    "text": "Operation scenario DELETE_DATA\nDelete Data\nAuto-discovered operation scenario for DELETE /api/persons/{id}.\nEndpoint DELETE /api/persons/{id}",
+    "metadata": {
+      "scenario_id": 3,
+      "scenario_code": "DELETE_DATA",
+      "scenario_name": "Delete Data",
+      "http_method": "DELETE",
+      "endpoint": "/api/persons/{id}",
+      "scenario_jira_id": null,
+      "document_type": "scenario",
+      "jira_ids": [],
+      "test_baselines": []
+    }
+  },
+  {
+    "document_id": "scenario:4",
+    "scenario_id": 4,
+    "scenario_code": "GET_DATA_API_PERSONS_ID",
+    "title": "GET_DATA_API_PERSONS_ID \u00b7 Operation",
+    "text": "Operation scenario GET_DATA_API_PERSONS_ID\nGet Data\nAuto-discovered operation scenario for GET /api/persons/{id}.\nEndpoint GET /api/persons/{id}",
+    "metadata": {
+      "scenario_id": 4,
+      "scenario_code": "GET_DATA_API_PERSONS_ID",
+      "scenario_name": "Get Data",
+      "http_method": "GET",
+      "endpoint": "/api/persons/{id}",
+      "scenario_jira_id": null,
+      "document_type": "scenario",
+      "jira_ids": [],
+      "test_baselines": []
+    }
+  },
+  {
+    "document_id": "scenario:5",
+    "scenario_id": 5,
+    "scenario_code": "PATCH_DATA",
+    "title": "PATCH_DATA \u00b7 Operation",
+    "text": "Operation scenario PATCH_DATA\nPatch Data\nAuto-discovered operation scenario for PATCH /api/persons/{id}.\nEndpoint PATCH /api/persons/{id}",
+    "metadata": {
+      "scenario_id": 5,
+      "scenario_code": "PATCH_DATA",
+      "scenario_name": "Patch Data",
+      "http_method": "PATCH",
+      "endpoint": "/api/persons/{id}",
+      "scenario_jira_id": null,
+      "document_type": "scenario",
+      "jira_ids": [],
+      "test_baselines": []
+    }
+  },
+  {
+    "document_id": "scenario:6",
+    "scenario_id": 6,
+    "scenario_code": "UPDATE_DATA",
+    "title": "UPDATE_DATA \u00b7 Operation",
+    "text": "Operation scenario UPDATE_DATA\nUpdate Data\nAuto-discovered operation scenario for PUT /api/persons/{id}.\nEndpoint PUT /api/persons/{id}",
+    "metadata": {
+      "scenario_id": 6,
+      "scenario_code": "UPDATE_DATA",
+      "scenario_name": "Update Data",
+      "http_method": "PUT",
+      "endpoint": "/api/persons/{id}",
+      "scenario_jira_id": null,
+      "document_type": "scenario",
+      "jira_ids": [],
+      "test_baselines": []
+    }
+  },
+  {
+    "document_id": "scenario:6:release:1",
+    "scenario_id": 6,
+    "scenario_code": "UPDATE_DATA",
+    "title": "UPDATE_DATA \u00b7 September 2026 V1",
+    "text": "Release baseline for UPDATE_DATA\nEndpoint PUT /api/persons/{id}\nRelease September 2026 V1\nCode baseline V1\nTest baselines EMPLOYEE_UPDATE, STUDENT_UPDATE\nJIRAs EMP-201, STUD-101",
+    "metadata": {
+      "scenario_id": 6,
+      "scenario_code": "UPDATE_DATA",
+      "scenario_name": "Update Data",
+      "http_method": "PUT",
+      "endpoint": "/api/persons/{id}",
+      "scenario_jira_id": null,
+      "document_type": "release",
+      "release_name": "September 2026",
+      "release_version": 1,
+      "code_baseline_version": 1,
+      "is_active": true,
+      "jira_ids": [
+        "EMP-201",
+        "STUD-101"
+      ],
+      "test_baselines": [
+        {
+          "name": "EMPLOYEE_UPDATE",
+          "status": "PASS",
+          "jira_ids": [
+            "EMP-201"
+          ],
+          "created_at": "2026-09-22T12:25:52.596612"
+        },
+        {
+          "name": "STUDENT_UPDATE",
+          "status": "PASS",
+          "jira_ids": [
+            "STUD-101"
+          ],
+          "created_at": "2026-09-22T12:25:08.908968"
+        }
+      ]
+    }
+  },
+  {
+    "document_id": "scenario:6:test:2:release:1",
+    "scenario_id": 6,
+    "scenario_code": "UPDATE_DATA",
+    "title": "EMPLOYEE_UPDATE \u00b7 September 2026 V1",
+    "text": "Test baseline EMPLOYEE_UPDATE\nParent scenario UPDATE_DATA\nEndpoint PUT /api/persons/{id}\nRelease September 2026 V1\nStatus PASS\nJIRA EMP-201\nJIRA title Employee Salary Band Validation\nJIRA requirement When an employee's annual salary is greater than 100000,\nthe employee should be classified as a high salary band employee.\nUpdate the employee processing logic to support salary band classification.\nRequest {'type': 'employee', 'name': 'Raju', 'annualSalary': 120000}\nExpected response {'type': 'employee', 'name': 'Raju', 'annualSalary': 120000}\nActual response {'type': 'employee', 'name': 'Raju', 'annualSalary': 120000}",
+    "metadata": {
+      "scenario_id": 6,
+      "scenario_code": "UPDATE_DATA",
+      "scenario_name": "Update Data",
+      "http_method": "PUT",
+      "endpoint": "/api/persons/{id}",
+      "scenario_jira_id": null,
+      "document_type": "test_baseline",
+      "release_name": "September 2026",
+      "release_version": 1,
+      "code_baseline_version": 1,
+      "jira_ids": [
+        "EMP-201"
+      ],
+      "relevant_test_baseline": "EMPLOYEE_UPDATE",
+      "test_status": "PASS",
+      "test_baselines": [
+        {
+          "name": "EMPLOYEE_UPDATE",
+          "status": "PASS",
+          "jira_ids": [
+            "EMP-201"
+          ],
+          "created_at": "2026-09-22T12:25:52.596612"
+        }
+      ]
+    }
+  },
+  {
+    "document_id": "scenario:6:test:1:release:1",
+    "scenario_id": 6,
+    "scenario_code": "UPDATE_DATA",
+    "title": "STUDENT_UPDATE \u00b7 September 2026 V1",
+    "text": "Test baseline STUDENT_UPDATE\nParent scenario UPDATE_DATA\nEndpoint PUT /api/persons/{id}\nRelease September 2026 V1\nStatus PASS\nJIRA STUD-101\nJIRA title Student GPA Promotion Eligibility\nJIRA requirement If a student's GPA is greater than 7, the student should be eligible for promotion. Update the student processing logic to support promotion eligibility.\nRequest {'type': 'student', 'name': 'Raju', 'gpa': 8.2}\nExpected response {'type': 'student', 'name': 'Raju', 'gpa': 8.2}\nActual response {'type': 'student', 'name': 'Raju', 'gpa': 8.2}",
+    "metadata": {
+      "scenario_id": 6,
+      "scenario_code": "UPDATE_DATA",
+      "scenario_name": "Update Data",
+      "http_method": "PUT",
+      "endpoint": "/api/persons/{id}",
+      "scenario_jira_id": null,
+      "document_type": "test_baseline",
+      "release_name": "September 2026",
+      "release_version": 1,
+      "code_baseline_version": 1,
+      "jira_ids": [
+        "STUD-101"
+      ],
+      "relevant_test_baseline": "STUDENT_UPDATE",
+      "test_status": "PASS",
+      "test_baselines": [
+        {
+          "name": "STUDENT_UPDATE",
+          "status": "PASS",
+          "jira_ids": [
+            "STUD-101"
+          ],
+          "created_at": "2026-09-22T12:25:08.908968"
+        }
+      ]
+    }
+  },
+  {
+    "document_id": "scenario:7",
+    "scenario_id": 7,
+    "scenario_code": "PATCH_DATA_API_PERSONS_ID_ADDRESS",
+    "title": "PATCH_DATA_API_PERSONS_ID_ADDRESS \u00b7 Operation",
+    "text": "Operation scenario PATCH_DATA_API_PERSONS_ID_ADDRESS\nPatch Data\nAuto-discovered operation scenario for PATCH /api/persons/{id}/address.\nEndpoint PATCH /api/persons/{id}/address",
+    "metadata": {
+      "scenario_id": 7,
+      "scenario_code": "PATCH_DATA_API_PERSONS_ID_ADDRESS",
+      "scenario_name": "Patch Data",
+      "http_method": "PATCH",
+      "endpoint": "/api/persons/{id}/address",
+      "scenario_jira_id": null,
+      "document_type": "scenario",
+      "jira_ids": [],
+      "test_baselines": []
+    }
+  },
+  {
+    "document_id": "scenario:8",
+    "scenario_id": 8,
+    "scenario_code": "PATCH_DATA_API_PERSONS_ID_CONTACT",
+    "title": "PATCH_DATA_API_PERSONS_ID_CONTACT \u00b7 Operation",
+    "text": "Operation scenario PATCH_DATA_API_PERSONS_ID_CONTACT\nPatch Data\nAuto-discovered operation scenario for PATCH /api/persons/{id}/contact.\nEndpoint PATCH /api/persons/{id}/contact",
+    "metadata": {
+      "scenario_id": 8,
+      "scenario_code": "PATCH_DATA_API_PERSONS_ID_CONTACT",
+      "scenario_name": "Patch Data",
+      "http_method": "PATCH",
+      "endpoint": "/api/persons/{id}/contact",
+      "scenario_jira_id": null,
+      "document_type": "scenario",
+      "jira_ids": [],
+      "test_baselines": []
+    }
+  },
+  {
+    "document_id": "scenario:9",
+    "scenario_id": 9,
+    "scenario_code": "PATCH_DATA_API_PERSONS_ID_EMAIL",
+    "title": "PATCH_DATA_API_PERSONS_ID_EMAIL \u00b7 Operation",
+    "text": "Operation scenario PATCH_DATA_API_PERSONS_ID_EMAIL\nPatch Data\nAuto-discovered operation scenario for PATCH /api/persons/{id}/email.\nEndpoint PATCH /api/persons/{id}/email",
+    "metadata": {
+      "scenario_id": 9,
+      "scenario_code": "PATCH_DATA_API_PERSONS_ID_EMAIL",
+      "scenario_name": "Patch Data",
+      "http_method": "PATCH",
+      "endpoint": "/api/persons/{id}/email",
+      "scenario_jira_id": null,
+      "document_type": "scenario",
+      "jira_ids": [],
+      "test_baselines": []
+    }
+  },
+  {
+    "document_id": "scenario:10",
+    "scenario_id": 10,
+    "scenario_code": "CREATE_DATA_API_PROMOTIONS_CHECK",
+    "title": "CREATE_DATA_API_PROMOTIONS_CHECK \u00b7 Operation",
+    "text": "Operation scenario CREATE_DATA_API_PROMOTIONS_CHECK\nCreate Data\nAuto-discovered operation scenario for POST /api/promotions/check.\nEndpoint POST /api/promotions/check",
+    "metadata": {
+      "scenario_id": 10,
+      "scenario_code": "CREATE_DATA_API_PROMOTIONS_CHECK",
+      "scenario_name": "Create Data",
+      "http_method": "POST",
+      "endpoint": "/api/promotions/check",
+      "scenario_jira_id": null,
+      "document_type": "scenario",
+      "jira_ids": [],
+      "test_baselines": []
+    }
+  },
+  {
+    "document_id": "scenario:11",
+    "scenario_id": 11,
+    "scenario_code": "GET_DATA_API_STUDENTS_ID",
+    "title": "GET_DATA_API_STUDENTS_ID \u00b7 Operation",
+    "text": "Operation scenario GET_DATA_API_STUDENTS_ID\nGet Data\nAuto-discovered operation scenario for GET /api/students/{id}.\nEndpoint GET /api/students/{id}",
+    "metadata": {
+      "scenario_id": 11,
+      "scenario_code": "GET_DATA_API_STUDENTS_ID",
+      "scenario_name": "Get Data",
+      "http_method": "GET",
+      "endpoint": "/api/students/{id}",
+      "scenario_jira_id": null,
+      "document_type": "scenario",
+      "jira_ids": [],
+      "test_baselines": []
+    }
+  }
+]
