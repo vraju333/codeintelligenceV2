@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import math
 import re
 from collections import Counter
 from dataclasses import dataclass
@@ -12,6 +11,7 @@ from typing import Any
 from langchain_core.documents import Document
 from langchain_community.vectorstores import FAISS
 from langchain_huggingface import HuggingFaceEmbeddings
+from rank_bm25 import BM25Okapi
 from sqlalchemy.orm import Session
 
 from baseline_models import ScenarioBaseline
@@ -150,6 +150,33 @@ class ScenarioRagRegistryService:
         # to the best candidate and require a minimum hybrid confidence.
         threshold = max(0.30, best * 0.58)
         selected = [item for item in ranked if item[0] >= threshold]
+
+        # If the user names an exact test-baseline identifier (for example
+        # EMPLOYEE_UPDATE), keep the evidence scoped to that child baseline.
+        # This prevents the parent UPDATE_DATA document from returning JIRAs
+        # belonging to sibling test baselines.
+        selected = self._prefer_exact_test_baseline(
+            selected,
+            query=query,
+        )
+
+        # Historical/release questions need evidence for the business subject,
+        # not merely a broad entity match such as "employee" or "student".
+        selected = self._filter_historical_evidence(
+            selected,
+            query=query,
+            understanding=understanding,
+        )
+
+        # For release-wide questions, prefer the aggregate release document.
+        # It already contains all test baselines/JIRAs and avoids repeating the
+        # same answer again as individual child test-baseline cards.
+        selected = self._prefer_release_aggregate(
+            selected,
+            query=query,
+            understanding=understanding,
+        )
+
         selected = selected[: max(1, min(int(top_k or 10), 10))]
 
         results = []
@@ -175,6 +202,12 @@ class ScenarioRagRegistryService:
                 "summary": self._snippet(doc.text, query_tokens),
             })
 
+        historical_answer = self._build_historical_answer(
+            query=query,
+            understanding=understanding,
+            results=results,
+        )
+
         return {
             "query": query,
             "expanded_query": expanded_query,
@@ -183,8 +216,272 @@ class ScenarioRagRegistryService:
             "total_matches": len(results),
             "candidate_documents": len(documents),
             "retrieval": "HYBRID_EXACT_BM25_FAISS",
+            "historical_answer": historical_answer,
             "results": results,
         }
+
+
+    def _build_historical_answer(self, query: str, understanding: dict, results: list[dict]) -> dict:
+        """Create a compact, evidence-only historical answer.
+
+        This does not ask the LLM to invent history. The LLM may help understand
+        the query, but the answer below is assembled only from retrieved,
+        evidence-validated Scenario Registry metadata.
+        """
+        raw = set(self._token_list(query))
+        historical_words = {
+            "history", "historical", "when", "release", "version", "jira",
+            "jiras", "tested", "testing", "baseline", "covered", "executed",
+            "first", "latest", "last",
+        }
+        is_historical = bool(raw & historical_words)
+        if not is_historical:
+            return {
+                "is_historical_query": False,
+                "status": "NOT_HISTORICAL",
+                "message": None,
+                "timeline": [],
+            }
+
+        if not results:
+            return {
+                "is_historical_query": True,
+                "status": "NO_EVIDENCE",
+                "message": "No captured historical evidence supports this question.",
+                "timeline": [],
+            }
+
+        rows = []
+        seen = set()
+        for item in results:
+            meta = item.get("metadata") or {}
+            release_name = meta.get("release_name")
+            release_version = meta.get("release_version")
+            code_version = meta.get("code_baseline_version")
+            tests = meta.get("test_baselines") or []
+            jiras = meta.get("jira_ids") or []
+
+            if tests:
+                for test in tests:
+                    row = {
+                        "scenario_code": meta.get("scenario_code") or item.get("scenario_code"),
+                        "http_method": meta.get("http_method"),
+                        "endpoint": meta.get("endpoint"),
+                        "release_name": release_name,
+                        "release_version": release_version,
+                        "code_baseline_version": code_version,
+                        "test_baseline": test.get("name"),
+                        "test_status": test.get("status"),
+                        "jira_ids": test.get("jira_ids") or jiras,
+                        "created_at": test.get("created_at"),
+                    }
+                    key = json.dumps(row, sort_keys=True, default=str)
+                    if key not in seen:
+                        seen.add(key)
+                        rows.append(row)
+            else:
+                row = {
+                    "scenario_code": meta.get("scenario_code") or item.get("scenario_code"),
+                    "http_method": meta.get("http_method"),
+                    "endpoint": meta.get("endpoint"),
+                    "release_name": release_name,
+                    "release_version": release_version,
+                    "code_baseline_version": code_version,
+                    "test_baseline": meta.get("relevant_test_baseline"),
+                    "test_status": meta.get("test_status"),
+                    "jira_ids": jiras,
+                    "created_at": None,
+                }
+                key = json.dumps(row, sort_keys=True, default=str)
+                if key not in seen:
+                    seen.add(key)
+                    rows.append(row)
+
+        def version_number(value):
+            try:
+                return int(value or 0)
+            except Exception:
+                return 0
+
+        rows.sort(
+            key=lambda row: (
+                str(row.get("release_name") or ""),
+                version_number(row.get("release_version")),
+                str(row.get("created_at") or ""),
+            )
+        )
+
+        # Natural-language intent changes presentation, not the underlying evidence.
+        if "first" in raw and rows:
+            rows = [rows[0]]
+        elif raw & {"latest", "last"} and rows:
+            rows = [rows[-1]]
+
+        release_labels = []
+        jira_ids = []
+        test_names = []
+        for row in rows:
+            if row.get("release_name"):
+                label = str(row["release_name"])
+                if row.get("release_version"):
+                    label += f" V{row['release_version']}"
+                if label not in release_labels:
+                    release_labels.append(label)
+            for jira_id in row.get("jira_ids") or []:
+                if jira_id not in jira_ids:
+                    jira_ids.append(jira_id)
+            if row.get("test_baseline") and row["test_baseline"] not in test_names:
+                test_names.append(row["test_baseline"])
+
+        if raw & {"jira", "jiras"}:
+            message = (
+                "Captured JIRA evidence: " + ", ".join(jira_ids)
+                if jira_ids else
+                "Matching history was found, but no JIRA is captured for it."
+            )
+        elif raw & {"release", "version", "when", "first", "latest", "last"}:
+            message = (
+                "Captured release history: " + ", ".join(release_labels)
+                if release_labels else
+                "Matching evidence was found, but no release/version is captured for it."
+            )
+        elif raw & {"tested", "testing", "baseline", "executed", "covered"}:
+            message = (
+                "Captured testing history: " + ", ".join(test_names)
+                if test_names else
+                "Matching history was found, but no testing baseline is captured for it."
+            )
+        else:
+            message = f"{len(rows)} captured historical trace(s) found."
+
+        return {
+            "is_historical_query": True,
+            "status": "FOUND",
+            "message": message,
+            "releases": release_labels,
+            "jira_ids": jira_ids,
+            "test_baselines": test_names,
+            "timeline": rows,
+        }
+
+
+    def _filter_historical_evidence(self, ranked_items, query: str, understanding: dict):
+        """Ground historical answers in both domain and business-subject evidence.
+
+        Retrieval is intentionally broad; this step is stricter.  A candidate
+        must respect an explicit domain (employee/student/customer) and must
+        contain evidence for the requested business subject.  Generic words
+        such as eligibility/classification/validation are not enough by
+        themselves.
+        """
+        if not ranked_items:
+            return ranked_items
+
+        raw_tokens = set(self._token_list(query))
+        intent_tokens = self._meaningful_tokens(
+            " ".join(str(v) for v in (understanding.get("intents") or []))
+        )
+
+        historical_words = {
+            "release", "history", "historical", "tested", "testing",
+            "baseline", "version", "executed", "covered", "jira", "jiras",
+        }
+        is_historical = bool(raw_tokens & historical_words) or bool(
+            set(intent_tokens) & historical_words
+        )
+
+        # We also validate "where was X changed?" style history questions.
+        change_history = bool(raw_tokens & {"change", "changed", "where"})
+        if not (is_historical or change_history):
+            return ranked_items
+
+        # Explicit business domain is a hard constraint.  This prevents
+        # "employee promotion" from returning a Student promotion baseline.
+        domain_words = {"employee", "student", "customer"}
+        requested_domains = raw_tokens & domain_words
+
+        # These words describe the question shape rather than the business
+        # subject.  They must never be the only evidence that makes a result pass.
+        generic_subject_words = {
+            "employee", "student", "customer", "person", "persons",
+            "release", "history", "historical", "tested", "testing",
+            "baseline", "version", "executed", "covered", "jira", "jiras",
+            "scenario", "change", "changed", "where", "which", "what",
+            "eligibility", "eligible", "classification", "validation",
+            "calculation", "amount",
+        }
+
+        # Use the user's literal wording as the grounding contract. LLM-expanded
+        # concepts are excellent for retrieval, but they must not manufacture
+        # evidence during verification.
+        subject_tokens = self._meaningful_tokens(query) - generic_subject_words
+
+        # Release-only questions (e.g. "Which JIRAs are covered by September
+        # 2026 V1?") intentionally have no business subject.
+        release_only = not subject_tokens
+
+        supported = []
+        for item in ranked_items:
+            doc = item[4]
+            searchable_tokens = set(
+                self._token_list(
+                    doc.text + " " + json.dumps(doc.metadata, default=str)
+                )
+            )
+
+            if requested_domains and not (requested_domains & searchable_tokens):
+                continue
+
+            if not release_only:
+                lexical_subject_hits = subject_tokens & searchable_tokens
+
+                # A historical answer needs at least one concrete business term
+                # from the user's request.  This rejects scholarship/incentive/
+                # bonus false positives that matched only student/employee or a
+                # generic qualifier such as eligibility.
+                if not lexical_subject_hits:
+                    continue
+
+            # A question asking which release tested something cannot be
+            # answered by an operation that has no captured release/test evidence.
+            if is_historical and raw_tokens & {"release", "tested", "testing"}:
+                meta = doc.metadata or {}
+                has_release = bool(meta.get("release_name")) and (
+                    str(meta.get("release_name")).strip().lower() not in
+                    {"unknown release", "none", ""}
+                )
+                has_tests = bool(meta.get("test_baselines"))
+                if not (has_release and has_tests):
+                    continue
+
+            supported.append(item)
+
+        return supported
+
+    def _prefer_release_aggregate(self, ranked_items, query: str, understanding: dict):
+        if not ranked_items:
+            return ranked_items
+
+        raw = set(self._token_list(query))
+        release_scope_words = {
+            "release", "version", "executed", "covered", "jiras", "jira",
+        }
+        asks_release_scope = bool(raw & release_scope_words)
+        if not asks_release_scope:
+            return ranked_items
+
+        release_items = [
+            item for item in ranked_items
+            if str(item[4].metadata.get("document_type") or "") == "release"
+        ]
+        if not release_items:
+            return ranked_items
+
+        # If a release aggregate is present, it is the concise answer for
+        # release-wide coverage/execution questions.
+        release_items.sort(key=lambda x: x[0], reverse=True)
+        return release_items
+
 
     def _understand_query(self, query: str) -> dict:
         if not self.llm_service.is_configured():
@@ -398,6 +695,35 @@ class ScenarioRagRegistryService:
             "scenario_jira_id": scenario.jira_id,
         }
 
+    def _prefer_exact_test_baseline(self, selected, query):
+        """Prefer an individual test-baseline document when its identifier is
+        explicitly present in the user's query.
+
+        The aggregate scenario/release documents intentionally contain all
+        child JIRAs, so they are useful for broad questions but are too broad
+        for an exact baseline question such as EMPLOYEE_UPDATE.
+        """
+        if not selected:
+            return selected
+
+        q_compact = re.sub(r"[^a-z0-9]", "", str(query or "").lower())
+        exact_children = []
+
+        for item in selected:
+            doc = item[4]
+            if str(doc.metadata.get("document_type") or "") != "test_baseline":
+                continue
+
+            baseline = str(doc.metadata.get("relevant_test_baseline") or "").strip()
+            baseline_compact = re.sub(r"[^a-z0-9]", "", baseline.lower())
+            if baseline_compact and baseline_compact in q_compact:
+                exact_children.append(item)
+
+        # Exact named baseline is a deterministic scope constraint, not merely
+        # another ranking hint. Returning sibling/parent evidence here can
+        # attach unrelated JIRAs to the answer.
+        return exact_children if exact_children else selected
+
     def _exact_score(self, document, query, query_tokens):
         searchable = self._search_text(document.text + "\n" + json.dumps(document.metadata, default=str))
         query_norm = self._search_text(query)
@@ -433,29 +759,26 @@ class ScenarioRagRegistryService:
         if not tokens:
             return {d.document_id: 0.0 for d in documents}
 
-        corpus = [self._token_list(d.text + " " + json.dumps(d.metadata, default=str)) for d in documents]
-        n = len(corpus)
-        avgdl = sum(len(doc) for doc in corpus) / max(n, 1)
-        df = Counter()
-        for doc in corpus:
-            for token in set(doc):
-                df[token] += 1
+        corpus = [
+            self._token_list(
+                d.text + " " + json.dumps(d.metadata, default=str)
+            )
+            for d in documents
+        ]
 
-        scores = {}
-        k1, b = 1.5, 0.75
-        for d, doc_tokens in zip(documents, corpus):
-            tf = Counter(doc_tokens)
-            dl = len(doc_tokens)
-            score = 0.0
-            for term in tokens:
-                freq = tf.get(term, 0)
-                if not freq:
-                    continue
-                idf = math.log(1 + (n - df.get(term, 0) + 0.5) / (df.get(term, 0) + 0.5))
-                denom = freq + k1 * (1 - b + b * dl / max(avgdl, 1))
-                score += idf * ((freq * (k1 + 1)) / denom)
-            scores[d.document_id] = score
-        return scores
+        # rank-bm25 handles term frequency, IDF, and document-length normalization.
+        bm25 = BM25Okapi(
+            corpus,
+            k1=1.5,
+            b=0.75,
+        )
+
+        raw_scores = bm25.get_scores(tokens)
+
+        return {
+            document.document_id: float(score)
+            for document, score in zip(documents, raw_scores)
+        }
 
     def _build_vector_index(self, project_path, documents):
         if not documents:

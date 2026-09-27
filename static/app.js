@@ -824,6 +824,8 @@ function renderInvestigation(data) {
     for (const investigation of investigations) {
         const locations = investigation.likely_code_locations || [];
         const trace = investigation.trace?.trace || [];
+        const conclusion = investigation.conclusion || null;
+        const likelyDivergence = investigation.likely_divergence || conclusion?.likely_divergence || null;
         const difference = (investigation.differences || [])[0] || differences.find(d =>
             d.attribute === investigation.attribute ||
             String(d.path || "").endsWith("." + investigation.attribute) ||
@@ -840,7 +842,9 @@ function renderInvestigation(data) {
             locations,
             inputValue,
             expectedValue,
-            actualValue
+            actualValue,
+            conclusion,
+            likelyDivergence
         };
 
         html += `
@@ -851,23 +855,74 @@ function renderInvestigation(data) {
                         <h3>${escapeHtml(key)}</h3>
                     </div>
                     <div class="attribute-actions">
-                        <span class="tag">${locations.length} likely modification point${locations.length === 1 ? "" : "s"}</span>
+                        <span class="tag">${conclusion ? "1 likely root cause" : `${locations.length} likely modification point${locations.length === 1 ? "" : "s"}`}</span>
                         <button type="button" class="secondary-button" onclick="openDefectTraceModal('${escapeJsString(key)}')">Enlarge</button>
                     </div>
                 </div>
-                ${renderHorizontalDefectTrace(trace, locations, inputValue, expectedValue, actualValue, false)}
+                ${renderHorizontalDefectTrace(trace, locations, inputValue, expectedValue, actualValue, false, conclusion, likelyDivergence)}
         `;
 
-        if (locations.length > 0) {
-            html += `<details class="technical-details"><summary>Likely code locations</summary><div class="likely-location-list">`;
-            locations.slice(0, 8).forEach(location => {
+        if (locations.length > 0 || conclusion) {
+            html += `<details class="technical-details" open><summary>Likely Root Cause &amp; Code Locations</summary><div class="likely-location-list">`;
+
+            if (conclusion) {
+                const rootCauseName = conclusion.likely_divergence || likelyDivergence || "";
+                const rootCauseLine = conclusion.line_number;
+                const rootCauseCode = conclusion.code || "";
+                const rootCauseClass = String(rootCauseName).includes(".")
+                    ? String(rootCauseName).split(".").slice(0, -1).join(".")
+                    : "";
+                const rootCauseMethod = String(rootCauseName).includes(".")
+                    ? String(rootCauseName).split(".").pop()
+                    : String(rootCauseName);
+
                 html += `
-                    <div class="likely-location">
-                        <strong>${escapeHtml(location.class_name || "")}.${escapeHtml(location.method_name || "")}</strong>
-                        <span>${location.line_number ? `line ${location.line_number}` : ""}${location.usage_type ? ` · ${escapeHtml(location.usage_type)}` : ""}</span>
+                    <div class="likely-location root-cause-location">
+                        <div class="root-cause-main">
+                            <div class="root-cause-heading">
+                                <strong>${escapeHtml(rootCauseName || "Likely root cause")}</strong>
+                                <span class="root-cause-badge">ROOT CAUSE</span>
+                                <span class="root-cause-confidence">${escapeHtml(conclusion.confidence || "")} CONFIDENCE</span>
+                                <span class="root-cause-classification">${escapeHtml(conclusion.classification || "")}</span>
+                            </div>
+                            ${rootCauseCode ? `<code>${escapeHtml(rootCauseCode)}</code>` : ""}
+                            ${conclusion.summary ? `<div class="root-cause-summary">${escapeHtml(conclusion.summary)}</div>` : ""}
+                        </div>
+                        <span class="root-cause-line">${rootCauseLine ? `line ${rootCauseLine}` : ""}</span>
                     </div>
                 `;
-            });
+
+                const supportingLocations = locations.filter(location => {
+                    const locationName = `${location.class_name || ""}.${location.method_name || ""}`;
+                    if (rootCauseName && locationName === rootCauseName) return false;
+                    if (rootCauseClass && rootCauseMethod &&
+                        location.class_name === rootCauseClass &&
+                        location.method_name === rootCauseMethod) return false;
+                    return true;
+                });
+
+                if (supportingLocations.length > 0) {
+                    html += `<div class="supporting-evidence-label">Supporting code locations</div>`;
+                    supportingLocations.slice(0, 8).forEach(location => {
+                        html += `
+                            <div class="likely-location supporting-location">
+                                <strong>${escapeHtml(location.class_name || "")}.${escapeHtml(location.method_name || "")}</strong>
+                                <span>${location.line_number ? `line ${location.line_number}` : ""}${location.usage_type ? ` · ${escapeHtml(location.usage_type)}` : ""}</span>
+                            </div>
+                        `;
+                    });
+                }
+            } else {
+                locations.slice(0, 8).forEach(location => {
+                    html += `
+                        <div class="likely-location">
+                            <strong>${escapeHtml(location.class_name || "")}.${escapeHtml(location.method_name || "")}</strong>
+                            <span>${location.line_number ? `line ${location.line_number}` : ""}${location.usage_type ? ` · ${escapeHtml(location.usage_type)}` : ""}</span>
+                        </div>
+                    `;
+                });
+            }
+
             html += `</div></details>`;
         }
 
@@ -883,11 +938,14 @@ function renderInvestigation(data) {
     return html;
 }
 
-function renderHorizontalDefectTrace(trace, locations, inputValue, expectedValue, actualValue, largeView) {
+function renderHorizontalDefectTrace(trace, locations, inputValue, expectedValue, actualValue, largeView, conclusion = null, likelyDivergence = null) {
     const normalize = value => String(value || "")
         .replace(/\s+/g, "")
         .replace(/[()]/g, "")
         .toLowerCase();
+
+    const rootCauseName = String(conclusion?.likely_divergence || likelyDivergence || "");
+    const normalizedRootCause = normalize(rootCauseName);
 
     const likely = (locations || []).map(location => ({
         className: normalize(location.class_name),
@@ -915,12 +973,22 @@ function renderHorizontalDefectTrace(trace, locations, inputValue, expectedValue
             return false;
         });
 
+        const rootCauseMatch = Boolean(normalizedRootCause) && (
+            normalizedKey === normalizedRootCause ||
+            normalizedLabel.includes(normalizedRootCause) ||
+            (
+                normalizedRootCause.includes(normalizedClass) &&
+                (!normalizedMethod || normalizedRootCause.includes(normalizedMethod))
+            )
+        );
+
         return {
             ...step,
             class_name: className,
             method_name: methodName,
             label,
-            suspect: Boolean(step.direct_attribute_touch) || locationMatch
+            suspect: conclusion ? rootCauseMatch : (Boolean(step.direct_attribute_touch) || locationMatch),
+            supporting_touch: conclusion ? (Boolean(step.direct_attribute_touch) || locationMatch) && !rootCauseMatch : false
         };
     });
 
@@ -977,8 +1045,8 @@ function renderHorizontalDefectTrace(trace, locations, inputValue, expectedValue
     focused.forEach(step => {
         const label = step.label || `${step.class_name || ""}.${step.method_name || ""}` || "Flow step";
         nodes.push(`
-            <div class="defect-flow-node code-node ${step.suspect ? "suspect-node" : ""}">
-                <span>${step.suspect ? "Likely modification point" : "Code flow"}</span>
+            <div class="defect-flow-node code-node ${step.suspect ? "suspect-node root-cause-node" : (step.supporting_touch ? "supporting-touch-node" : "")}">
+                <span>${step.suspect ? "Likely root cause" : (step.supporting_touch ? "Supporting evidence" : "Code flow")}</span>
                 <strong>${escapeHtml(label)}</strong>
                 ${step.suspect ? '<b class="suspect-alert" aria-label="Likely issue">!</b>' : ''}
             </div>
@@ -1059,7 +1127,9 @@ function openDefectTraceModal(attribute) {
         current.inputValue,
         current.expectedValue,
         current.actualValue,
-        true
+        true,
+        current.conclusion,
+        current.likelyDivergence
     );
     modal.classList.add("open");
     modal.setAttribute("aria-hidden", "false");
@@ -1391,6 +1461,7 @@ async function saveMainBaseline() {
 let activeTestingBaselineScenarioId = null;
 let testingBaselineJiraIds = [];
 let testingBaselineVersionItems = [];
+let editingTestingBaselineId = null;
 
 function ensureTestingBaselineSelectors() {
     const modal = document.getElementById("testingBaselineModal");
@@ -1504,6 +1575,15 @@ function removeTestingBaselineJira(index) {
 
 
 async function openTestingBaselineModal(scenarioId) {
+    editingTestingBaselineId = null;
+    const editTitle = document.querySelector("#testingBaselineModal h2");
+    if (editTitle) editTitle.textContent = "Add Testing Baseline";
+    const editSaveButton = document.getElementById("saveTestingBaselineButton");
+    if (editSaveButton) editSaveButton.textContent = "Save Testing Baseline";
+    const editReleaseSelect = document.getElementById("testingBaselineReleaseSelect");
+    const editVersionSelect = document.getElementById("testingBaselineVersionSelect");
+    if (editReleaseSelect) editReleaseSelect.disabled = false;
+    if (editVersionSelect) editVersionSelect.disabled = false;
     const modal = document.getElementById("testingBaselineModal");
     const item = baselineOverviewData.find(x => Number(x.scenario_id) === Number(scenarioId));
     if (!modal || !item) return;
@@ -1618,6 +1698,7 @@ function closeTestingBaselineModal() {
     activeTestingBaselineScenarioId = null;
     testingBaselineJiraIds = [];
     testingBaselineVersionItems = [];
+    editingTestingBaselineId = null;
     renderTestingBaselineJiras();
 }
 
@@ -1676,11 +1757,15 @@ async function saveTestingBaseline() {
         };
 
         if (button) { button.disabled = true; button.textContent = "Saving..."; }
-        const response = await fetch(`/api/scenario-baselines/testing/${scenarioId}`, {
-            method: "POST",
-            headers: {"Content-Type": "application/json"},
-            body: JSON.stringify(body)
-        });
+        const editId = editingTestingBaselineId;
+        const response = await fetch(
+            editId ? `/api/scenario-baselines/testing/${scenarioId}/${editId}` : `/api/scenario-baselines/testing/${scenarioId}`,
+            {
+                method: editId ? "PUT" : "POST",
+                headers: {"Content-Type": "application/json"},
+                body: JSON.stringify(body)
+            }
+        );
         const data = await response.json();
         if (!response.ok) {
             const detail = data?.detail;
@@ -1786,7 +1871,82 @@ function renderSelectedTestingBaseline() {
         <div class="testing-history-field">
             <div class="testing-history-label">Expected DB Effect</div>
             <pre>${escapeHtml(baseline.expected_db_effect || "Nothing")}</pre>
+        </div>
+        <div style="margin-top:12px;">
+            <button class="secondary-button" type="button" onclick="editSelectedTestingBaseline()">✏ Edit Test Baseline</button>
         </div>`;
+}
+
+async function editSelectedTestingBaseline() {
+    const baseline = testingBaselineHistoryItems[Number(document.getElementById("testingBaselineHistorySelect")?.value)];
+    const scenarioId = activeTestingBaselineHistoryScenarioId;
+    if (!baseline || !scenarioId) return;
+
+    closeTestingBaselineHistoryModal(false);
+    await openTestingBaselineModal(scenarioId);
+    editingTestingBaselineId = Number(baseline.id);
+
+    const title = document.querySelector("#testingBaselineModal h2");
+    if (title) title.textContent = "Edit Testing Baseline";
+    const button = document.getElementById("saveTestingBaselineButton");
+    if (button) button.textContent = "Save Changes";
+
+    document.getElementById("testingBaselineName").value = baseline.baseline_name || "";
+    document.getElementById("testingBaselineRequest").value = prettyScenarioJson(baseline.request_json);
+    document.getElementById("testingBaselineExpected").value = prettyScenarioJson(baseline.expected_response_json);
+    document.getElementById("testingBaselineActual").value = prettyScenarioJson(baseline.actual_response_json);
+    document.getElementById("testingBaselineDbEffect").value = baseline.expected_db_effect || "";
+    testingBaselineJiraIds = Array.isArray(baseline.jira_ids) ? [...baseline.jira_ids] : [];
+    renderTestingBaselineJiras();
+}
+
+
+
+async function editTestingBaselineFromRelease(scenarioId, testBaselineId) {
+    try {
+        const response = await fetch(`/api/scenario-baselines/testing/${scenarioId}`);
+        const items = await response.json();
+        if (!response.ok) throw new Error(JSON.stringify(items));
+        const baseline = (Array.isArray(items) ? items : []).find(x => Number(x.id) === Number(testBaselineId));
+        if (!baseline) throw new Error("Test Baseline not found.");
+
+        await openTestingBaselineModal(scenarioId);
+        editingTestingBaselineId = Number(baseline.id);
+
+        const title = document.querySelector("#testingBaselineModal h2");
+        if (title) title.textContent = "Edit Testing Baseline";
+        const button = document.getElementById("saveTestingBaselineButton");
+        if (button) button.textContent = "Save Changes";
+
+        document.getElementById("testingBaselineName").value = baseline.baseline_name || "";
+        document.getElementById("testingBaselineRequest").value = prettyScenarioJson(baseline.request_json);
+        document.getElementById("testingBaselineExpected").value = prettyScenarioJson(baseline.expected_response_json);
+        document.getElementById("testingBaselineActual").value = prettyScenarioJson(baseline.actual_response_json);
+        document.getElementById("testingBaselineDbEffect").value = baseline.expected_db_effect || "";
+        testingBaselineJiraIds = Array.isArray(baseline.jira_ids) ? [...baseline.jira_ids] : [];
+        renderTestingBaselineJiras();
+
+        const releaseSelect = document.getElementById("testingBaselineReleaseSelect");
+        const versionSelect = document.getElementById("testingBaselineVersionSelect");
+        const selectedVersion = testingBaselineVersionItems.find(x =>
+            Number(x.id) === Number(baseline.baseline_id) ||
+            Number(x.baseline_version) === Number(baseline.code_baseline_version)
+        );
+        if (selectedVersion) {
+            if (releaseSelect) {
+                releaseSelect.value = selectedVersion.baseline_name || "Legacy";
+                onTestingBaselineReleaseChanged();
+            }
+            if (versionSelect) {
+                versionSelect.value = String(selectedVersion.id);
+                onTestingBaselineVersionChanged();
+            }
+        }
+        if (releaseSelect) releaseSelect.disabled = true;
+        if (versionSelect) versionSelect.disabled = true;
+    } catch (error) {
+        alert(error.message || "Could not open Test Baseline for editing.");
+    }
 }
 
 
@@ -1806,31 +1966,73 @@ async function loadBaselineHistory() {
     }
     container.innerHTML = "Loading baseline history...";
     try {
-        const response = await fetch(`/api/scenario-baselines/history/${scenarioId}`);
-        const data = await response.json();
-        if (!response.ok) throw new Error(JSON.stringify(data));
+        const [historyResponse, archiveResponse] = await Promise.all([
+            fetch(`/api/scenario-baselines/history/${scenarioId}`),
+            fetch(`/api/scenario-baselines/archive-status/${scenarioId}`)
+        ]);
+        const data = await historyResponse.json();
+        const archiveStatus = archiveResponse.ok ? await archiveResponse.json() : {};
+        if (!historyResponse.ok) throw new Error(JSON.stringify(data));
         if (!Array.isArray(data) || data.length === 0) {
             container.innerHTML = `<div class="warning">No baseline has been captured for this scenario yet.</div>`;
             return;
         }
+
+        const label = b => `${escapeHtml(b.baseline_name || "Main Baseline")} · V${b.release_version || b.baseline_version || 1}`;
+        const archiveAction = b => {
+            const archived = archiveStatus[String(b.id)];
+            return archived
+                ? `<span class="tag">ARCHIVED</span><span class="muted-text">Audit ${escapeHtml(String(archived.snapshot_hash || "").slice(0, 12))}…</span>`
+                : `<button class="secondary-button" type="button" onclick="archiveBaselineRelease(${Number(scenarioId)}, ${Number(b.id)})">Archive Release</button>`;
+        };
+
         const active = data.find(item => item.is_active) || data[0];
         const previous = data.filter(item => item.id !== active.id);
         container.innerHTML = `
             <div class="active-baseline-card">
-                <div><span class="muted-text">Current baseline</span><h3>${escapeHtml(active.baseline_name || "Main Baseline")} · V${active.baseline_version}</h3></div>
+                <div><span class="muted-text">Current baseline</span><h3>${label(active)}</h3></div>
                 <span class="tag">ACTIVE</span>
                 <div class="baseline-detail">${escapeHtml(active.http_method)} ${escapeHtml(active.endpoint)}</div>
                 <div class="baseline-detail">Flow: ${active.endpoint_flow ? "stored" : "not stored"}</div>
+                <div class="baseline-detail">${archiveAction(active)}</div>
             </div>
             ${previous.length ? `
                 <details class="technical-details">
                     <summary>Previous versions (${previous.length})</summary>
-                    ${previous.map(b => `<div class="history-row"><strong>V${b.baseline_version}</strong><span>${escapeHtml(b.http_method)} ${escapeHtml(b.endpoint)}</span><span>Flow: ${b.endpoint_flow ? "stored" : "not stored"}</span></div>`).join("")}
-                </details>
-            ` : `<div class="muted-box">No previous versions.</div>`}
-        `;
+                    ${previous.map(b => `<div class="history-row"><strong>${label(b)}</strong><span>${escapeHtml(b.http_method)} ${escapeHtml(b.endpoint)}</span>${archiveAction(b)}</div>`).join("")}
+                </details>` : `<div class="muted-box">No previous versions.</div>`}
+            <div style="margin-top:12px;"><button class="secondary-button" type="button" onclick="viewReleaseArchives(${Number(scenarioId)})">View Release Archive</button></div>
+            <div id="releaseArchiveResult" style="margin-top:10px;"></div>`;
     } catch (error) {
         container.innerHTML = renderError(error.message);
+    }
+}
+
+async function archiveBaselineRelease(scenarioId, baselineId) {
+    if (!confirm("Archive this release/version? Archived releases become read-only.")) return;
+    try {
+        const response = await fetch(`/api/scenario-baselines/archive/${scenarioId}/${baselineId}`, {method: "POST"});
+        const data = await response.json();
+        if (!response.ok) throw new Error(data?.detail || `HTTP ${response.status}`);
+        await loadBaselineHistory();
+    } catch (error) {
+        alert(error.message || "Could not archive release.");
+    }
+}
+
+async function viewReleaseArchives(scenarioId) {
+    const target = document.getElementById("releaseArchiveResult");
+    if (!target) return;
+    target.innerHTML = "Loading release archive...";
+    try {
+        const response = await fetch(`/api/scenario-baselines/archives/${scenarioId}`);
+        const items = await response.json();
+        if (!response.ok) throw new Error(JSON.stringify(items));
+        target.innerHTML = Array.isArray(items) && items.length
+            ? items.map(item => `<div class="history-row"><strong>${escapeHtml(item.baseline_name)} · V${item.release_version}</strong><span>Code V${item.code_baseline_version}</span><span>${item.archived_at ? escapeHtml(new Date(item.archived_at).toLocaleString()) : ""}</span><span class="muted-text">SHA-256 ${escapeHtml(String(item.snapshot_hash || "").slice(0, 16))}…</span></div>`).join("")
+            : `<div class="muted-box">No archived release versions yet.</div>`;
+    } catch (error) {
+        target.innerHTML = renderError(error.message);
     }
 }
 
@@ -1994,16 +2196,39 @@ function renderScenarioRagRegistryResults(data) {
 
     if (!results.length) {
         return `
-            <div class="muted-box">
-                No scenario registry match found for <strong>${escapeHtml(query)}</strong>.
-                Rebuild the index after adding scenarios, baselines or JIRAs.
+            <div class="muted-box scenario-rag-empty">
+                No captured scenario/release evidence found for <strong>${escapeHtml(query)}</strong>.
             </div>
         `;
     }
 
     const understanding = data.llm_understanding || {};
+    const historical = data.historical_answer || {};
+    const historicalPanel = historical.is_historical_query ? `
+        <div class="muted-box scenario-rag-historical-answer" style="margin:12px 0;">
+            <strong>Historical Answer</strong>
+            <div style="margin-top:6px;">${escapeHtml(historical.message || "No captured historical evidence found.")}</div>
+            ${(Array.isArray(historical.timeline) && historical.timeline.length) ? `
+                <details style="margin-top:8px;">
+                    <summary>View historical trace</summary>
+                    <div style="margin-top:8px;">
+                        ${historical.timeline.map(row => `
+                            <div class="jira-history-line" style="margin-bottom:6px;flex-wrap:wrap;">
+                                <strong>${escapeHtml(row.release_name || "No release")}${row.release_version ? ` V${escapeHtml(row.release_version)}` : ""}</strong>
+                                ${row.test_baseline ? `<span>→</span><span>${escapeHtml(row.test_baseline)}</span>` : ""}
+                                ${row.test_status ? `<span>→</span><span>${escapeHtml(row.test_status)}</span>` : ""}
+                                ${(Array.isArray(row.jira_ids) && row.jira_ids.length)
+                                    ? `<span>→</span>${row.jira_ids.map(id => `<span class="testing-jira-chip">${escapeHtml(id)}</span>`).join("")}`
+                                    : ""}
+                            </div>
+                        `).join("")}
+                    </div>
+                </details>
+            ` : ""}
+        </div>
+    ` : "";
     const llmPanel = understanding.enabled ? `
-        <div class="muted-box">
+        <div class="muted-box scenario-rag-understanding">
             <strong>LLM query understanding:</strong>
             ${understanding.used ? "Used" : "Fallback"}
             ${(understanding.attributes || []).length ? ` · Attributes: ${(understanding.attributes || []).map(escapeHtml).join(", ")}` : ""}
@@ -2011,13 +2236,17 @@ function renderScenarioRagRegistryResults(data) {
             ${understanding.reason ? ` · ${escapeHtml(understanding.reason)}` : ""}
         </div>
     ` : `
-        <div class="muted-box">
-            <strong>LLM query understanding:</strong> Not configured. Used local keyword search.
+        <div class="muted-box scenario-rag-understanding">
+            <strong>LLM query understanding:</strong> Not configured. Used local hybrid retrieval.
         </div>
     `;
 
     const cards = results.map(item => {
         const meta = item.metadata || {};
+        const isTest = meta.document_type === "test_baseline";
+        const title = isTest
+            ? (meta.relevant_test_baseline || meta.scenario_code || item.scenario_code || "")
+            : (meta.scenario_code || item.scenario_code || "");
         const release = meta.release_name
             ? `${meta.release_name}${meta.release_version ? ` V${meta.release_version}` : ""}`
             : "No release captured";
@@ -2029,50 +2258,60 @@ function renderScenarioRagRegistryResults(data) {
         const reasons = Array.isArray(item.reasons) ? item.reasons : [];
 
         return `
-            <div class="active-baseline-card">
-                <div>
-                    <span class="muted-text">Score ${Number(item.score || 0)}</span>
-                    <h3>${escapeHtml(
-                        meta.document_type === "test_baseline"
-                            ? (meta.relevant_test_baseline || meta.scenario_code || item.scenario_code || "")
-                            : (meta.scenario_code || item.scenario_code || "")
-                    )}</h3>
-                    ${meta.document_type === "test_baseline"
-                        ? `<div class="muted-text">Parent scenario: ${escapeHtml(meta.scenario_code || item.scenario_code || "")}</div>`
-                        : ""}
-                </div>
-                <span class="tag">${escapeHtml(release)}</span>
-                <div class="baseline-detail">${escapeHtml(meta.http_method || "")} ${escapeHtml(meta.endpoint || "")}</div>
-                <div class="baseline-detail">${escapeHtml(codeVersion)}</div>
-                <div class="baseline-detail">
-                    ${(jiras.length ? jiras : ["No JIRA"]).map(id => `<span class="testing-jira-chip">${escapeHtml(id)}</span>`).join("")}
-                </div>
-                ${tests.length ? `
-                    <div class="testing-history-field">
-                        <div class="testing-history-label">Testing baselines</div>
-                        ${tests.map(test => `
-                            <div class="jira-history-line">
-                                <strong>${escapeHtml(test.name || "Testing baseline")}</strong>
-                                <span>→</span>
-                                <span>${escapeHtml(test.status || "NOT_RUN")}</span>
-                                ${(Array.isArray(test.jira_ids) && test.jira_ids.length)
-                                    ? `<span>→</span>${test.jira_ids.map(id => `<span class="testing-jira-chip">${escapeHtml(id)}</span>`).join("")}`
-                                    : ""}
-                            </div>
-                        `).join("")}
+            <div class="active-baseline-card scenario-rag-card" style="display:grid;grid-template-columns:minmax(0,1.35fr) minmax(320px,.85fr);gap:18px;align-items:start;">
+                <div class="scenario-rag-main" style="min-width:0;">
+                    <div class="scenario-rag-title-row">
+                        <span class="muted-text">Score ${Number(item.score || 0)}</span>
+                        <h3 style="margin:.15rem 0;">${escapeHtml(title)}</h3>
+                        ${isTest ? `<div class="muted-text">Parent scenario: ${escapeHtml(meta.scenario_code || item.scenario_code || "")}</div>` : ""}
                     </div>
-                ` : ""}
-                ${reasons.length ? `<div class="muted-text">${reasons.map(escapeHtml).join(" · ")}</div>` : ""}
-                ${item.summary ? `<details class="muted-box"><summary>View matched evidence</summary><div>${escapeHtml(item.summary)}</div></details>` : ""}
+
+                    <div class="baseline-detail" style="margin-top:6px;">
+                        ${escapeHtml(meta.http_method || "")} ${escapeHtml(meta.endpoint || "")}
+                    </div>
+
+                    <div class="scenario-rag-jiras" style="margin-top:10px;">
+                        ${(jiras.length ? jiras : ["No JIRA"]).map(id => `<span class="testing-jira-chip">${escapeHtml(id)}</span>`).join("")}
+                    </div>
+                </div>
+
+                <div class="scenario-rag-side" style="min-width:0;">
+                    <div class="scenario-rag-release" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px;">
+                        <span class="tag">${escapeHtml(release)}</span>
+                        <span class="muted-text">${escapeHtml(codeVersion)}</span>
+                    </div>
+
+                    ${tests.length ? `
+                        <div class="testing-history-field" style="margin:0;">
+                            <div class="testing-history-label">Testing baselines</div>
+                            ${tests.map(test => `
+                                <div class="jira-history-line">
+                                    <strong>${escapeHtml(test.name || "Testing baseline")}</strong>
+                                    <span>→</span>
+                                    <span>${escapeHtml(test.status || "NOT_RUN")}</span>
+                                    ${(Array.isArray(test.jira_ids) && test.jira_ids.length)
+                                        ? `<span>→</span>${test.jira_ids.map(id => `<span class="testing-jira-chip">${escapeHtml(id)}</span>`).join("")}`
+                                        : ""}
+                                </div>
+                            `).join("")}
+                        </div>
+                    ` : `<div class="muted-text">No testing baseline captured.</div>`}
+                </div>
+
+                <div class="scenario-rag-footer" style="grid-column:1 / -1;border-top:1px solid rgba(0,0,0,.07);padding-top:10px;">
+                    ${reasons.length ? `<div class="muted-text" style="margin-bottom:8px;">${reasons.map(escapeHtml).join(" · ")}</div>` : ""}
+                    ${item.summary ? `<details class="muted-box" style="margin:0;"><summary>View matched evidence</summary><div>${escapeHtml(item.summary)}</div></details>` : ""}
+                </div>
             </div>
         `;
     }).join("");
 
     return `
-        <div class="jira-history-text-board">
+        <div class="jira-history-text-board scenario-rag-results">
             <h3>Scenario Registry Results</h3>
             <div class="muted-text">${Number(data.total_matches || results.length)} match(es) for ${escapeHtml(query)}</div>
             ${llmPanel}
+            ${historicalPanel}
             ${cards}
         </div>
     `;
@@ -2448,3 +2687,68 @@ function renderVersionComparison(data) {
         initCodeIntelligenceAccordions();
     }
 })();
+
+
+async function runScenarioRagEvaluation() {
+    const result = document.getElementById("scenarioRagRegistryResult");
+    if (!result) {
+        alert("Scenario RAG result panel was not found.");
+        return;
+    }
+    result.innerHTML = `<div class="muted-box">Running automated Scenario RAG evaluation...</div>`;
+    try {
+        const response = await fetch("/api/scenario-rag-registry/evaluate", {method: "POST"});
+        const raw = await response.text();
+        let data = {};
+        try {
+            data = raw ? JSON.parse(raw) : {};
+        } catch (_) {
+            if (!response.ok) {
+                throw new Error(raw || `HTTP ${response.status}`);
+            }
+            throw new Error("Evaluation endpoint returned an invalid response.");
+        }
+        if (!response.ok) {
+            const detail = data?.detail;
+            throw new Error(typeof detail === "object" ? JSON.stringify(detail) : (detail || `HTTP ${response.status}`));
+        }
+
+        const cases = Array.isArray(data.cases) ? data.cases : [];
+        result.innerHTML = `
+            <div class="scenario-rag-card">
+                <div class="scenario-rag-card-header">
+                    <div>
+                        <strong>Automated RAG Evaluation</strong>
+                        <div class="muted-text">Positive and negative regression checks using captured Scenario Registry evidence.</div>
+                    </div>
+                    <span class="tag">${escapeHtml(data.status || "")}</span>
+                </div>
+                <div style="display:flex;gap:18px;flex-wrap:wrap;margin:12px 0;">
+                    <div><strong>${Number(data.accuracy_percent || 0).toFixed(2)}%</strong><div class="muted-text">Accuracy</div></div>
+                    <div><strong>${data.passed || 0}</strong><div class="muted-text">Passed</div></div>
+                    <div><strong>${data.failed || 0}</strong><div class="muted-text">Failed</div></div>
+                    <div><strong>${data.total || 0}</strong><div class="muted-text">Total</div></div>
+                </div>
+                ${cases.map(item => `
+                    <div class="attribute-impact-row">
+                        <div style="display:flex;justify-content:space-between;gap:12px;">
+                            <strong>${escapeHtml(item.query || "")}</strong>
+                            <span class="tag">${item.passed ? "PASS" : "FAIL"}</span>
+                        </div>
+                        <div class="muted-text">
+                            ${escapeHtml(item.case_type || "")}
+                            ${item.expected_jira ? ` · Expected JIRA ${escapeHtml(item.expected_jira)}` : " · Expected NO EVIDENCE"}
+                            ${item.expected_test_baseline ? ` · ${escapeHtml(item.expected_test_baseline)}` : ""}
+                        </div>
+                        ${!item.passed && item.actual_evidence?.length ? `
+                            <details style="margin-top:6px;">
+                                <summary>Actual evidence</summary>
+                                <pre>${escapeHtml(JSON.stringify(item.actual_evidence, null, 2))}</pre>
+                            </details>` : ""}
+                    </div>
+                `).join("")}
+            </div>`;
+    } catch (error) {
+        result.innerHTML = renderError(error.message);
+    }
+}

@@ -1386,6 +1386,19 @@ class AttributeLineageService:
             )
         )
 
+        # A setter can contain a value-changing expression even when the
+        # attribute is accessed through a Java record accessor rather than a
+        # conventional getXxx() getter, for example:
+        #
+        # e.setPrimaryEmail(r.primaryEmail().toUpperCase());
+        #
+        # Detect the transformation before falling back to WRITE/MAPPING.
+        if has_setter and self._has_value_transformation(
+            line=line,
+            attribute_name=attribute_name
+        ):
+            return "VALUE_TRANSFORMED"
+
         if (
             has_setter
             and has_getter
@@ -1393,6 +1406,40 @@ class AttributeLineageService:
             return "MAPPING"
 
         if has_setter:
+            # Distinguish a normal request/entity mapping from a later
+            # constant/literal write. This preserves multiple writes to the
+            # same attribute so the investigation layer can detect OVERWRITE.
+            setter_argument_match = re.search(
+                rf"\.set{property_name}\s*\((.*)\)",
+                line,
+                re.IGNORECASE,
+            )
+
+            if setter_argument_match:
+                setter_argument = setter_argument_match.group(1).strip()
+
+                source_pattern = re.compile(
+                    rf"""
+                    (?:
+                        \.get{property_name}\s*\(\s*\)
+                        |
+                        \.{re.escape(attribute_name)}\s*\(\s*\)
+                        |
+                        \b{re.escape(attribute_name)}\b
+                    )
+                    """,
+                    re.VERBOSE | re.IGNORECASE,
+                )
+
+                if source_pattern.search(setter_argument):
+                    return "MAPPING"
+
+                # A setter whose value does not come from the investigated
+                # attribute is still a WRITE. When another mapping/write for
+                # the same attribute precedes it, Phase D can classify the
+                # later occurrence as an overwrite.
+                return "WRITE"
+
             return "WRITE"
 
         if has_getter:
@@ -1415,6 +1462,68 @@ class AttributeLineageService:
             return "RETURN"
 
         return "REFERENCE"
+
+    def _has_value_transformation(
+        self,
+        line: str,
+        attribute_name: str
+    ) -> bool:
+        """Detect common value-changing operations applied to an attribute.
+
+        Supports both JavaBean accessors such as getPrimaryEmail() and Java
+        record accessors such as primaryEmail().
+        """
+        capitalized = (
+            attribute_name[0].upper()
+            + attribute_name[1:]
+        )
+
+        source_pattern = re.compile(
+            rf"""
+            (?:
+                \.get{re.escape(capitalized)}\s*\(\s*\)
+                |
+                \.{re.escape(attribute_name)}\s*\(\s*\)
+                |
+                \b{re.escape(attribute_name)}\b
+            )
+            """,
+            re.VERBOSE | re.IGNORECASE
+        )
+
+        if not source_pattern.search(line):
+            return False
+
+        transformation_pattern = re.compile(
+            r"""
+            \.
+            (?:
+                toUpperCase
+                |
+                toLowerCase
+                |
+                trim
+                |
+                strip
+                |
+                replace
+                |
+                replaceAll
+                |
+                substring
+                |
+                concat
+                |
+                formatted
+            )
+            \s*\(
+            """,
+            re.VERBOSE | re.IGNORECASE
+        )
+
+        return bool(
+            transformation_pattern.search(line)
+        )
 
     def _classify_field_usage(
         self,

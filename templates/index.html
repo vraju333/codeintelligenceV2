@@ -5,7 +5,7 @@
 <meta charset="utf-8"/>
 <meta content="width=device-width, initial-scale=1.0" name="viewport"/>
 <title>CodeIntelligence</title>
-<link href="/static/style.css?v=jira-history-text-1" rel="stylesheet"/>
+<link href="/static/style.css?v=phase-d-root-cause-1" rel="stylesheet"/>
 <script type="module">
         import mermaid
             from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
@@ -23,7 +23,7 @@
 <link href="/static/regression-details.css?v=2" rel="stylesheet"/>
 <link href="/static/version-source-history.css?v=3-file-row-fix" rel="stylesheet"/>
 <link href="/static/release-intelligence.css?v=1" rel="stylesheet"/>
-<link href="/static/hackathon-dashboard.css?v=5" rel="stylesheet"/>
+<link href="/static/hackathon-dashboard.css?v=6" rel="stylesheet"/>
 <link href="/static/accordion-ui.css?v=hackathon-4-icons" rel="stylesheet"/></head>
 <body>
 <div class="page">
@@ -176,6 +176,7 @@ Example: Add employmentType attribute to Employee. Store it while creating an em
 <div class="form-row">
 <input id="scenarioRagQuery" placeholder="Ask: where was gpa changed, which scenarios covered it, and in which release?" type="text"/>
 <button onclick="searchScenarioRagRegistry()" type="button">Search Registry</button>
+<button class="secondary-button" type="button" onclick="runScenarioRagEvaluation()">Run RAG Evaluation</button>
 <button class="secondary-button" onclick="rebuildScenarioRagRegistry()" type="button">Rebuild Index</button>
 </div>
 <div class="result-area" id="scenarioRagRegistryResult">
@@ -286,15 +287,15 @@ Select a scenario to reuse its endpoint and test data, or continue manually belo
 <div aria-expanded="false" class="card-header accordion-header" data-accordion-title="Code Dashboard" role="button" tabindex="0">
 <div>
 <h2>Code Dashboard</h2>
-<p>Release readiness, scenario risk and changed-file impact.</p>
+<p>Release intelligence, regression recommendations, test-code evidence and coverage gaps.</p>
 </div>
 <button aria-label="Toggle Code Dashboard" class="accordion-toggle" tabindex="-1" type="button">›</button></div><div class="accordion-body">
 <div class="hackathon-actions">
-<button onclick="loadHackathonDashboard()" type="button">Load Code Dashboard</button>
+<button onclick="loadHackathonDashboard()" type="button">Load Release Intelligence</button>
 <input id="scenarioImpactFile" placeholder="Changed file/module, e.g. organization_schema.py"/>
 <button onclick="runScenarioImpactGraph()" type="button">Find Impacted Scenarios</button>
 </div>
-<div class="result-area" id="hackathonDashboardResult">Load the dashboard to see scenario risk and release readiness.</div>
+<div class="result-area" id="hackathonDashboardResult">Load release intelligence to see changed code, regression recommendations and test evidence.</div>
 <div class="result-area" id="scenarioImpactResult">Changed file impact appears here.</div>
 </div></section>
 
@@ -588,7 +589,7 @@ Loading operations that are not yet represented in Scenario Baselines...
 </details>
 </div>
 </div>
-<script src="/static/app.js?v=baseline-month-year-1"></script>
+<script src="/static/app.js?v=phase-d-root-cause-1"></script>
 <script src="/static/project-ui.js?v=jira-dropdown-1"></script>
 <script src="/static/flowchart-ui.js?v=3"></script>
 <script src="/static/jira-impact.js?v=3"></script>
@@ -596,6 +597,6 @@ Loading operations that are not yet represented in Scenario Baselines...
 <script src="/static/regression-details.js?v=2"></script>
 <script src="/static/version-source-history.js?v=7-show-changed-files"></script>
 <script src="/static/release-intelligence.js?v=3"></script>
-<script src="/static/hackathon-dashboard.js?v=5"></script>
+<script src="/static/hackathon-dashboard.js?v=6"></script>
 <script src="/static/accordion-ui.js?v=2"></script></body>
 </html>

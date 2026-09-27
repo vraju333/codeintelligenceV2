@@ -34,3 +34,16 @@
     .hackathon-kpi-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .hackathon-dashboard-table { display: block; overflow-x: auto; }
 }
+
+.phasec-kpis { grid-template-columns: repeat(auto-fit, minmax(135px, 1fr)); }
+.phasec-readiness, .phasec-item, .phasec-gap, .phasec-ok {
+    border: 1px solid #d8e1ea; border-radius: 8px; padding: 12px; margin: 10px 0;
+    background: #fff;
+}
+.phasec-title { font-weight: 700; margin-bottom: 4px; }
+.phasec-title .tag { margin-left: 8px; }
+.phasec-evidence { margin-top: 8px; }
+.phasec-action { margin-top: 8px; font-weight: 600; }
+.phasec-gap { border-left: 4px solid #b7791f; }
+.phasec-ok { border-left: 4px solid #2f855a; }
+.phasec-test-details { margin-top: 14px; }

@@ -9,6 +9,8 @@ from database import get_db
 from services.regression.regression_impact_service import (
     RegressionImpactService
 )
+from services.test_analysis.test_code_analysis_service import TestCodeAnalysisService
+from services.release_intelligence.release_intelligence_service import ReleaseIntelligenceService
 
 
 router = APIRouter(
@@ -54,3 +56,18 @@ def analyse_regression_impact(
             status_code=400,
             detail=str(exception)
         )
+
+@router.get("/test-analysis")
+def analyse_test_code():
+    try:
+        return TestCodeAnalysisService().analyse()
+    except RuntimeError as exception:
+        raise HTTPException(status_code=400, detail=str(exception))
+
+
+@router.get("/release-intelligence")
+def analyse_release_intelligence(db: Session = Depends(get_db)):
+    try:
+        return ReleaseIntelligenceService().analyse(db)
+    except RuntimeError as exception:
+        raise HTTPException(status_code=400, detail=str(exception))

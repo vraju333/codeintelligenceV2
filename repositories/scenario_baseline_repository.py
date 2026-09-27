@@ -1,7 +1,7 @@
 from sqlalchemy import desc
 from sqlalchemy.orm import Session
 
-from baseline_models import ScenarioBaseline, ScenarioBaselineSourceSnapshot, ScenarioTestBaseline
+from baseline_models import ScenarioBaseline, ScenarioBaselineSourceSnapshot, ScenarioTestBaseline, ScenarioReleaseArchive
 
 
 class ScenarioBaselineRepository:
@@ -170,3 +170,31 @@ class ScenarioBaselineRepository:
         db.commit()
         db.refresh(baseline)
         return baseline
+
+    def find_test_baseline_by_id(self, db: Session, scenario_id: int, test_baseline_id: int):
+        return db.query(ScenarioTestBaseline).filter(
+            ScenarioTestBaseline.scenario_id == scenario_id,
+            ScenarioTestBaseline.id == test_baseline_id
+        ).first()
+
+    def update_test_baseline(self, db: Session, baseline: ScenarioTestBaseline):
+        db.add(baseline)
+        db.commit()
+        db.refresh(baseline)
+        return baseline
+
+    def find_release_archive(self, db: Session, baseline_id: int):
+        return db.query(ScenarioReleaseArchive).filter(
+            ScenarioReleaseArchive.baseline_id == baseline_id
+        ).first()
+
+    def find_release_archives_for_scenario(self, db: Session, scenario_id: int):
+        return db.query(ScenarioReleaseArchive).filter(
+            ScenarioReleaseArchive.scenario_id == scenario_id
+        ).order_by(desc(ScenarioReleaseArchive.archived_at), desc(ScenarioReleaseArchive.id)).all()
+
+    def create_release_archive(self, db: Session, archive: ScenarioReleaseArchive):
+        db.add(archive)
+        db.commit()
+        db.refresh(archive)
+        return archive

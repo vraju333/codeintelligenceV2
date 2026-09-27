@@ -227,3 +227,18 @@ class ScenarioTestBaseline(Base):
         default=datetime.utcnow,
         nullable=False,
     )
+
+
+class ScenarioReleaseArchive(Base):
+    """Immutable audit snapshot of one ScenarioBaseline release/version."""
+    __tablename__ = "scenario_release_archives"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    scenario_id: Mapped[int] = mapped_column(Integer, ForeignKey("scenarios.id"), nullable=False, index=True)
+    baseline_id: Mapped[int] = mapped_column(Integer, ForeignKey("scenario_baselines.id"), nullable=False, unique=True, index=True)
+    baseline_name: Mapped[str] = mapped_column(String(150), nullable=False, index=True)
+    release_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    code_baseline_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    snapshot_json: Mapped[dict] = mapped_column(JSON, nullable=False)
+    snapshot_hash: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    archived_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)

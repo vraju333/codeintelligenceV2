@@ -155,6 +155,22 @@ function renderRegression(data) {
     return html;
 }
 
+function renderScenarioTraceability(scenario) {
+    const tests = scenario.test_baselines || [];
+    const jiras = scenario.jira_ids || [];
+    if (!tests.length && !jiras.length) return "";
+
+    return `
+        <details class="regression-traceability" style="margin-top:10px;">
+            <summary><strong>Traceability details</strong></summary>
+            <div style="margin-top:8px;">
+                ${tests.length ? `<div><strong>Test baseline:</strong> ${tests.map(x => `${escapeHtml(x.test_scenario || "")}${x.status ? ` (${escapeHtml(x.status)})` : ""}`).join(", ")}</div>` : ""}
+                ${jiras.length ? `<div><strong>JIRA:</strong> ${jiras.map(x => escapeHtml(x)).join(", ")}</div>` : ""}
+            </div>
+        </details>
+    `;
+}
+
 function renderImpactGroup(title, scenarios, cssClass, emptyText) {
     let html = `<div class="impact-group"><div class="impact-group-header"><h3>${escapeHtml(title)}</h3><span class="tag">${scenarios.length}</span></div>`;
     if (scenarios.length === 0) {
@@ -187,6 +203,7 @@ function renderImpactGroup(title, scenarios, cssClass, emptyText) {
                 ` : (scenario.impact_status !== "UNAFFECTED" && scenario.impact_status !== "NO_BASELINE" ? `
                     <div class="muted-text regression-why-empty">Stored baseline intersects the changed class, but an ordered method path is unavailable for this older flow.</div>
                 ` : "")}
+                ${renderScenarioTraceability(scenario)}
             </div>
         `;
     }

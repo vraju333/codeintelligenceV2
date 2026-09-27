@@ -5,6 +5,7 @@
 
 let versionHistoryState = {scenarioId: null, scenarioCode: "", scenarioLabel: "", versions: [], tests: []};
 let latestBaselineReport = null;
+let versionHistoryArchiveStatus = {};
 
 function renderBaselineLineDiff(diff) {
     if (!diff) return '<p class="muted-text">Line-level evidence is unavailable.</p>';
@@ -171,6 +172,7 @@ async function loadBaselineHistory() {
         `;
         const releaseSelect = document.getElementById("historyReleaseSelect");
         if (releaseSelect) releaseSelect.value = defaultRelease;
+        await refreshReleaseArchiveStatus(versionHistoryState.scenarioId);
         renderSelectedReleaseHistory();
 
         if (versionHistoryState.versions.length >= 2) {
@@ -180,6 +182,32 @@ async function loadBaselineHistory() {
         }
     } catch (error) {
         container.innerHTML = renderError(error.message);
+    }
+}
+
+
+async function refreshReleaseArchiveStatus(scenarioId) {
+    try {
+        const response = await fetch(`/api/scenario-baselines/archive-status/${scenarioId}`);
+        versionHistoryArchiveStatus = response.ok ? await response.json() : {};
+    } catch (_) {
+        versionHistoryArchiveStatus = {};
+    }
+}
+
+async function archiveReleaseFromHistory(scenarioId, baselineId) {
+    if (!confirm("Archive this release/version? It will become a read-only historical snapshot.")) return;
+    try {
+        const response = await fetch(`/api/scenario-baselines/archive/${scenarioId}/${baselineId}`, {method: "POST"});
+        const data = await response.json();
+        if (!response.ok) {
+            const detail = data?.detail;
+            throw new Error(typeof detail === "object" ? (detail.message || JSON.stringify(detail)) : (detail || `HTTP ${response.status}`));
+        }
+        await refreshReleaseArchiveStatus(scenarioId);
+        renderSelectedReleaseHistory();
+    } catch (error) {
+        alert(error.message || "Could not archive release.");
     }
 }
 
@@ -201,6 +229,11 @@ function renderSelectedReleaseHistory() {
                 </div>
                 <div class="baseline-detail">${escapeHtml(v.http_method)} ${escapeHtml(v.endpoint)}</div>
                 <div class="baseline-detail">Captured: ${v.created_at ? escapeHtml(new Date(v.created_at).toLocaleString()) : "-"}</div>
+                <div class="baseline-detail" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+                    ${versionHistoryArchiveStatus[String(v.id)]
+                        ? `<span class="tag">ARCHIVED 🔒</span><span class="muted-text">Audit ${escapeHtml(String(versionHistoryArchiveStatus[String(v.id)].snapshot_hash || "").slice(0, 12))}…</span>`
+                        : `<button class="secondary-button" type="button" onclick="archiveReleaseFromHistory(${Number(versionHistoryState.scenarioId)}, ${Number(v.id)})">Archive Release</button>`}
+                </div>
                 <div class="testing-version-tests">
                     <strong>Test Scenarios (${tests.length})</strong>
                     ${tests.length ? tests.map(t => `
@@ -211,6 +244,11 @@ function renderSelectedReleaseHistory() {
                             </div>
                             <div class="testing-jira-list">
                                 ${(Array.isArray(t.jira_ids) && t.jira_ids.length) ? t.jira_ids.map(id => `<span class="testing-jira-chip">${escapeHtml(id)}</span>`).join("") : `<span class="muted-text">No JIRA</span>`}
+                            </div>
+                            <div style="margin-top:8px;">
+                                ${versionHistoryArchiveStatus[String(v.id)]
+                                    ? `<span class="muted-text">Read-only</span>`
+                                    : `<button class="secondary-button" type="button" onclick="editTestingBaselineFromRelease(${Number(versionHistoryState.scenarioId)}, ${Number(t.id)})">✏ Edit</button>`}
                             </div>
                         </div>`).join("") : `<div class="muted-box">No test scenarios saved under ${escapeHtml(release)} V${vhReleaseVersion(v)}.</div>`}
                 </div>

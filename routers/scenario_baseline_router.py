@@ -142,6 +142,33 @@ def get_testing_baselines(
     return service.get_test_baselines(db, scenario_id)
 
 
+@router.put("/testing/{scenario_id}/{test_baseline_id}")
+def update_testing_baseline(
+    scenario_id: int, test_baseline_id: int,
+    request: CreateTestingBaselineRequest, db: Session = Depends(get_db)
+):
+    return service.update_test_baseline(
+        db, scenario_id, test_baseline_id, request.baseline_name,
+        request.request_json, request.expected_response, request.actual_response,
+        request.expected_db_effect, request.jira_ids
+    )
+
+
+@router.post("/archive/{scenario_id}/{baseline_id}")
+def archive_release(scenario_id: int, baseline_id: int, db: Session = Depends(get_db)):
+    return service.archive_release(db, scenario_id, baseline_id)
+
+
+@router.get("/archives/{scenario_id}")
+def get_release_archives(scenario_id: int, db: Session = Depends(get_db)):
+    return service.get_release_archives(db, scenario_id)
+
+
+@router.get("/archive-status/{scenario_id}")
+def get_release_archive_status(scenario_id: int, db: Session = Depends(get_db)):
+    return service.get_release_archive_status(db, scenario_id)
+
+
 @router.get("/jira-coverage/{jira_id}")
 def get_jira_coverage(
     jira_id: str,

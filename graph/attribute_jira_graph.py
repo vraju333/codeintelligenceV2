@@ -37,74 +37,83 @@ class AttributeJiraGraph:
 
         def merge_node(state: AttributeJiraState):
             result = dict(state.get("code_result") or {})
-            scenarios = result.get("affected_scenarios") or []
-            scenario_codes = {
-                str(item.get("scenario_code") or "").lower()
-                for item in scenarios
-                if item.get("scenario_code")
+            attribute = str(result.get("attribute") or state["query"]).strip()
+
+            def tokens(value: str) -> set[str]:
+                text = __import__("re").sub(
+                    r"([a-z0-9])([A-Z])", r"\\1 \\2", str(value or "")
+                )
+                text = text.replace("_", " ").replace("-", " ")
+                return {
+                    token.lower()
+                    for token in __import__("re").findall(r"[A-Za-z0-9]+", text)
+                    if len(token) >= 2
+                }
+
+            attribute_tokens = tokens(attribute)
+
+            # A JIRA can also qualify through an already-grounded historical
+            # test baseline. This preserves explicit baseline -> JIRA linkage.
+            linked_jira_ids = {
+                str(jira_id).strip().upper()
+                for item in (result.get("historical_traceability") or [])
+                for jira_id in (item.get("jira_ids") or [])
+                if str(jira_id).strip()
             }
-            impacted_classes = {
-                str(item).lower()
-                for item in result.get("impacted_classes") or []
-            }
-            attribute = str(result.get("attribute") or state["query"]).lower()
 
             related = []
             active_project = str(__import__("config").settings.JAVA_PROJECT_PATH or "").lower()
+
             for jira in state.get("jira_results") or []:
                 jira_project = str(jira.get("project_path") or "").lower()
-                # Attribute impact is project-scoped. Never mix JIRAs saved for
-                # another selected Java project into the result.
                 if jira_project and active_project and jira_project != active_project:
                     continue
 
+                jira_id = str(jira.get("jira_id") or "").strip().upper()
                 haystack = " ".join([
                     jira.get("title") or "",
                     jira.get("requirement") or "",
-                ]).lower()
+                ])
+                jira_tokens = tokens(haystack)
+                direct_attribute_match = bool(
+                    attribute_tokens and attribute_tokens.issubset(jira_tokens)
+                )
+                linked_test_match = bool(jira_id and jira_id in linked_jira_ids)
+
+                # Semantic similarity by itself is search evidence, not impact
+                # evidence. Do not show a JIRA here unless the attribute is
+                # explicit or a qualifying test baseline links it.
+                if not direct_attribute_match and not linked_test_match:
+                    continue
 
                 reasons = []
-                if attribute and attribute in haystack:
-                    reasons.append(f"Requirement directly mentions attribute '{result.get('attribute') or state['query']}'")
-
-                matched_classes = sorted(
-                    original for original in result.get("impacted_classes") or []
-                    if str(original).lower() in haystack
-                )
-                if matched_classes:
-                    reasons.append("Requirement mentions impacted class/domain: " + ", ".join(matched_classes[:4]))
-
-                matched_scenarios = sorted(
-                    code for code in scenario_codes if code and code in haystack
-                )
-                if matched_scenarios:
-                    reasons.append("Requirement mentions affected scenario: " + ", ".join(matched_scenarios[:3]))
-
-                # Do not display every top-k RAG result. Keep only JIRAs with
-                # concrete evidence (attribute/class/scenario) or a genuinely
-                # close semantic distance. FAISS L2 distance: lower is closer.
-                semantic_score = jira.get("similarity_score")
-                strong_semantic = semantic_score is not None and float(semantic_score) <= 0.85
-                if not reasons and strong_semantic:
-                    reasons.append("Strong semantic match from local JIRA RAG")
-                if not reasons:
-                    continue
+                relationship = "DIRECT_ATTRIBUTE_MATCH"
+                if direct_attribute_match:
+                    reasons.append(
+                        f"Requirement directly mentions attribute '{attribute}'"
+                    )
+                elif linked_test_match:
+                    relationship = "LINKED_TEST_BASELINE"
+                    reasons.append(
+                        "Linked through an attribute-grounded test baseline"
+                    )
 
                 related.append({
                     **jira,
-                    "relationship": "DIRECT_ATTRIBUTE_MATCH" if attribute in haystack else "SEMANTIC_RELATED",
+                    "relationship": relationship,
                     "reasons": reasons,
                 })
 
-            # Direct matches first; semantic-only evidence after that.
             related.sort(key=lambda item: (
                 0 if item.get("relationship") == "DIRECT_ATTRIBUTE_MATCH" else 1,
-                float(item.get("similarity_score") or 999),
+                str(item.get("jira_id") or ""),
             ))
             result["related_jiras"] = related[:6]
             result["analysis_basis"] = {
                 **(result.get("analysis_basis") or {}),
                 "jira_rag_used": True,
+                "jira_rag_role": "CANDIDATE_RETRIEVAL_ONLY",
+                "jira_impact_requires_grounding": True,
                 "orchestration": "LANGGRAPH_PARALLEL",
             }
             return {"final_result": result}

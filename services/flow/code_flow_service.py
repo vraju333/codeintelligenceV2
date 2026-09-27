@@ -284,8 +284,322 @@ class CodeFlowService:
             "method_name": method_name,
             "found": True,
             **self._method_metadata(trace_class, method_name),
+            "branches": self._extract_branches(trace_class, method_body),
+            "data_flow": self._extract_data_flow(trace_class, method_name, method_body),
             "calls": child_calls
         }
+
+    def _extract_data_flow(
+        self,
+        current_class: str,
+        method_name: str,
+        method_body: str
+    ) -> list[dict]:
+        """Extract lightweight Java value propagation across local assignments and calls.
+
+        Example:
+            double score = request.gpa();
+            evaluatePromotion(score);
+
+        produces request.gpa -> score -> evaluatePromotion.studentGpa.
+        This is static evidence only; application code is never executed.
+        """
+        aliases: dict[str, list[str]] = {}
+        evidence: list[dict] = []
+        seen = set()
+
+        def add(kind, source, target, **extra):
+            source = (source or "").strip()
+            target = (target or "").strip()
+            if not source or not target:
+                return
+            key = (kind, source, target, extra.get("target_class"), extra.get("target_method"),
+                   extra.get("parameter_name"), extra.get("argument_index"))
+            if key in seen:
+                return
+            seen.add(key)
+            evidence.append({
+                "type": kind,
+                "source": source,
+                "target": target,
+                **extra
+            })
+
+        # Local assignment propagation: Type x = expression; or x = expression;
+        assignment_pattern = re.compile(
+            r"(?:\b[\w.$<>\[\],?]+\s+)?(?P<target>[a-zA-Z_]\w*)\s*=\s*(?P<source>[^;]+);"
+        )
+        for match in assignment_pattern.finditer(method_body):
+            target = match.group("target")
+            source = " ".join(match.group("source").split())
+            if source.startswith(("new ", "return ", "throw ")):
+                continue
+            origins = self._java_value_origins(source)
+            if origins:
+                aliases[target] = origins
+                for origin in origins:
+                    add("ASSIGNMENT", origin, target)
+
+        # Call argument -> target method parameter propagation.
+        for call in self._extract_call_arguments(current_class, method_body):
+            target_class = call["class_name"]
+            target_method = call["method_name"]
+            params = self._method_metadata(target_class, target_method).get("input_parameters") or []
+            for index, argument in enumerate(call["arguments"]):
+                if index >= len(params):
+                    break
+                param_name = str(params[index].get("name") or "").strip()
+                if not param_name:
+                    continue
+                origins = []
+                for origin in self._java_value_origins(argument):
+                    origins.extend(aliases.get(origin, [origin]))
+                if not origins and argument in aliases:
+                    origins = aliases[argument]
+                for origin in dict.fromkeys(origins):
+                    add(
+                        "METHOD_ARGUMENT",
+                        origin,
+                        param_name,
+                        target_class=target_class,
+                        target_method=target_method,
+                        parameter_name=param_name,
+                        argument=argument.strip(),
+                        argument_index=index,
+                    )
+
+        return evidence
+
+    def _java_value_origins(self, expression: str) -> list[str]:
+        """Return attribute/variable references that can carry a value."""
+        result = []
+
+        # JavaBean accessors: student.getGpa() -> gpa
+        for _, name in re.findall(
+            r"\b(?:\w+\.)*(get|is)([A-Z][A-Za-z0-9_]*)\s*\(", expression
+        ):
+            value = name[0].lower() + name[1:]
+            if value not in result:
+                result.append(value)
+
+        # Record/accessor style: request.gpa() -> gpa
+        for name in re.findall(r"\b\w+\.([a-z][A-Za-z0-9_]*)\s*\(", expression):
+            if name not in {"equals", "isEmpty", "nonNull", "isNull"} and name not in result:
+                result.append(name)
+
+        # Simple variable used as an argument/expression.
+        cleaned = expression.strip()
+        if re.fullmatch(r"[a-zA-Z_]\w*", cleaned) and cleaned not in result:
+            result.append(cleaned)
+
+        return result
+
+    def _extract_call_arguments(self, current_class: str, method_body: str) -> list[dict]:
+        """Resolve project calls and retain their argument expressions."""
+        fields = self._fields_for_class(current_class)
+        result = []
+
+        pattern = re.compile(
+            r"(?:(?P<object>\b[a-zA-Z_]\w*)\s*\.\s*)?"
+            r"(?P<method>[a-zA-Z_]\w*)\s*\("
+        )
+        ignored = {
+            "if", "for", "while", "switch", "catch", "return", "throw",
+            "new", "super", "this", "synchronized", "try"
+        }
+
+        for match in pattern.finditer(method_body):
+            method = match.group("method")
+            obj = match.group("object")
+            if method in ignored or self._looks_like_constructor(method):
+                continue
+
+            target_class = None
+            if obj == "this" or obj is None:
+                if self._method_exists(current_class, method):
+                    target_class = current_class
+            elif obj in fields:
+                target_class = self._clean_type(fields[obj])
+
+            if not target_class:
+                continue
+
+            close = self._find_matching_delimiter(
+                method_body, match.end() - 1, "(", ")"
+            )
+            if close == -1:
+                continue
+
+            arguments = self._split_call_arguments(
+                method_body[match.end():close]
+            )
+            result.append({
+                "class_name": target_class,
+                "method_name": method,
+                "arguments": arguments,
+            })
+
+        return result
+
+    @staticmethod
+    def _split_call_arguments(raw: str) -> list[str]:
+        if not raw.strip():
+            return []
+        result, current = [], []
+        paren = angle = square = brace = 0
+        in_string = False
+        escape = False
+
+        for char in raw:
+            if char == "\\" and not escape:
+                escape = True
+                current.append(char)
+                continue
+            if char == '"' and not escape:
+                in_string = not in_string
+            escape = False
+
+            if not in_string:
+                if char == "(": paren += 1
+                elif char == ")": paren = max(0, paren - 1)
+                elif char == "<": angle += 1
+                elif char == ">": angle = max(0, angle - 1)
+                elif char == "[": square += 1
+                elif char == "]": square = max(0, square - 1)
+                elif char == "{": brace += 1
+                elif char == "}": brace = max(0, brace - 1)
+                elif char == "," and paren == angle == square == brace == 0:
+                    result.append("".join(current).strip())
+                    current = []
+                    continue
+            current.append(char)
+
+        if current:
+            result.append("".join(current).strip())
+        return result
+
+    def _extract_branches(self, current_class: str, method_body: str) -> list[dict]:
+        branches = []
+        index = 0
+        while index < len(method_body):
+            match = re.search(r"\bif\s*\(", method_body[index:])
+            if not match:
+                break
+            start = index + match.start()
+            cond_open = method_body.find("(", start)
+            cond_close = self._find_matching_delimiter(method_body, cond_open, "(", ")")
+            if cond_close == -1:
+                index = start + 2
+                continue
+            condition = " ".join(method_body[cond_open + 1:cond_close].split())
+            body_open = self._skip_to_branch_body(method_body, cond_close + 1)
+            if body_open == -1:
+                index = cond_close + 1
+                continue
+            body_close = self._find_matching_brace(method_body, body_open)
+            if body_close == -1:
+                index = body_open + 1
+                continue
+            branches.append(self._branch_record(
+                current_class, "IF", condition, method_body[body_open + 1:body_close]
+            ))
+            cursor = body_close + 1
+            while cursor < len(method_body):
+                cursor = self._skip_whitespace(method_body, cursor)
+                em = re.match(r"else\b", method_body[cursor:])
+                if not em:
+                    break
+                cursor += em.end()
+                cursor = self._skip_whitespace(method_body, cursor)
+                if re.match(r"if\b", method_body[cursor:]):
+                    co = method_body.find("(", cursor)
+                    cc = self._find_matching_delimiter(method_body, co, "(", ")")
+                    if cc == -1: break
+                    condition = " ".join(method_body[co + 1:cc].split())
+                    bo = self._skip_to_branch_body(method_body, cc + 1)
+                    if bo == -1: break
+                    bc = self._find_matching_brace(method_body, bo)
+                    if bc == -1: break
+                    branches.append(self._branch_record(
+                        current_class, "ELSE_IF", condition, method_body[bo + 1:bc]
+                    ))
+                    cursor = bc + 1
+                    continue
+                bo = self._skip_to_branch_body(method_body, cursor)
+                if bo == -1: break
+                bc = self._find_matching_brace(method_body, bo)
+                if bc == -1: break
+                branches.append(self._branch_record(
+                    current_class, "ELSE", "otherwise", method_body[bo + 1:bc]
+                ))
+                cursor = bc + 1
+                break
+            index = max(cursor, body_close + 1)
+        return branches
+
+    def _branch_record(self, current_class, branch_type, condition, branch_body):
+        return {
+            "branch_type": branch_type,
+            "condition": condition,
+            "attributes": self._condition_attributes(condition),
+            "calls": [
+                {"class_name": cls, "method_name": method}
+                for cls, method in self._extract_calls(current_class, branch_body)
+            ],
+        }
+
+    def _condition_attributes(self, condition: str) -> list[str]:
+        attributes = []
+        # JavaBean accessor: s.getGpa() / s.isActive()
+        for _, name in re.findall(
+            r"\b(?:\w+\.)*(get|is)([A-Z][A-Za-z0-9_]*)\s*\(", condition
+        ):
+            value = name[0].lower() + name[1:]
+            if value not in attributes:
+                attributes.append(value)
+        # Java record/accessor style: r.gpa()
+        for name in re.findall(r"\b\w+\.([a-z][A-Za-z0-9_]*)\s*\(", condition):
+            if name not in {"equals", "isEmpty", "nonNull", "isNull"} and name not in attributes:
+                attributes.append(name)
+        # Direct field access: r.gpa
+        for name in re.findall(r"\b\w+\.([a-zA-Z_]\w*)\b", condition):
+            if name not in {"equals", "isEmpty", "nonNull", "isNull"} and name not in attributes:
+                attributes.append(name)
+        return attributes
+
+    def _find_matching_delimiter(self, content, opening, open_char, close_char):
+        if opening < 0:
+            return -1
+        depth = 0
+        in_string = False
+        escape = False
+        for index in range(opening, len(content)):
+            char = content[index]
+            if char == "\\" and not escape:
+                escape = True
+                continue
+            if char == '"' and not escape:
+                in_string = not in_string
+            escape = False
+            if in_string:
+                continue
+            if char == open_char:
+                depth += 1
+            elif char == close_char:
+                depth -= 1
+                if depth == 0:
+                    return index
+        return -1
+
+    @staticmethod
+    def _skip_whitespace(content, index):
+        while index < len(content) and content[index].isspace():
+            index += 1
+        return index
+
+    def _skip_to_branch_body(self, content, index):
+        index = self._skip_whitespace(content, index)
+        return index if index < len(content) and content[index] == "{" else -1
 
     def _extract_class_name(
         self,

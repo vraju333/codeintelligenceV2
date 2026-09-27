@@ -4,6 +4,10 @@ from services.flow.scenario_attribute_trace_service import (
     ScenarioAttributeTraceService
 )
 
+from services.investigation.value_flow_investigation_service import (
+    ValueFlowInvestigationService,
+)
+
 
 class DefectComparisonService:
 
@@ -11,6 +15,10 @@ class DefectComparisonService:
 
         self.trace_service = (
             ScenarioAttributeTraceService()
+        )
+
+        self.value_flow_service = (
+            ValueFlowInvestigationService()
         )
 
     # =========================================================
@@ -22,7 +30,8 @@ class DefectComparisonService:
         http_method: str,
         endpoint: str,
         expected: Any,
-        actual: Any
+        actual: Any,
+        input_context: Any = None
     ) -> dict:
 
         http_method = (
@@ -84,7 +93,8 @@ class DefectComparisonService:
                             )
                             == attribute
                         )
-                    ]
+                    ],
+                    input_context=input_context
                 )
             )
 
@@ -503,7 +513,8 @@ class DefectComparisonService:
         http_method: str,
         endpoint: str,
         attribute: str,
-        related_differences: list[dict]
+        related_differences: list[dict],
+        input_context: Any = None
     ) -> dict:
 
         try:
@@ -522,6 +533,19 @@ class DefectComparisonService:
                 )
             )
 
+            # =================================================
+            # PHASE D - DETERMINISTIC VALUE-FLOW INVESTIGATION
+            # =================================================
+
+            value_flow = (
+                self.value_flow_service.analyze(
+                    attribute_name=attribute,
+                    trace=trace_result,
+                    differences=related_differences,
+                    input_context=input_context
+                )
+            )
+
             return {
                 "attribute":
                     attribute,
@@ -536,9 +560,23 @@ class DefectComparisonService:
                     likely_locations,
 
                 "trace":
-                    trace_result[
-                        "trace"
-                    ]
+                    trace_result.get(
+                        "trace",
+                        []
+                    ),
+
+                "value_flow":
+                    value_flow,
+
+                "likely_divergence":
+                    value_flow.get(
+                        "likely_divergence"
+                    ),
+
+                "conclusion":
+                    value_flow.get(
+                        "conclusion"
+                    )
             }
 
         except Exception as exception:
@@ -560,7 +598,16 @@ class DefectComparisonService:
                     [],
 
                 "trace":
-                    []
+                    [],
+
+                "value_flow":
+                    {},
+
+                "likely_divergence":
+                    None,
+
+                "conclusion":
+                    None
             }
 
     # =========================================================

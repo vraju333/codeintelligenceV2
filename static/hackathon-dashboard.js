@@ -2,110 +2,73 @@ async function loadHackathonDashboard() {
     const result = document.getElementById("hackathonDashboardResult");
     if (!result) return;
     clearCodeDashboardOutputs("dashboard");
-    result.innerHTML = "Loading dashboard...";
+    result.innerHTML = "Loading release intelligence...";
     try {
-        const [overviewResponse, scenarioResponse] = await Promise.all([
-            fetch("/api/scenario-baselines/overview"),
-            fetch("/api/scenarios/active-project")
-        ]);
-        const overview = overviewResponse.ok ? await overviewResponse.json() : [];
-        const scenarios = scenarioResponse.ok ? await scenarioResponse.json() : [];
-        const rows = buildHackathonDashboardRows(Array.isArray(overview) ? overview : [], Array.isArray(scenarios) ? scenarios : []);
-        window.codeDashboardRows = rows;
-        result.innerHTML = renderHackathonDashboard(rows);
+        const response = await fetch("/api/regression/release-intelligence");
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.detail || "Unable to load release intelligence");
+        window.releaseIntelligence = data;
+        window.codeDashboardRows = (data.regression_recommendations || []).map(item => ({
+            scenario_id: item.scenario_id,
+            scenario_code: item.scenario_code || "",
+            scenario_name: "",
+            endpoint: `${item.http_method || ""} ${item.endpoint || ""}`.trim(),
+            latest_version: (item.test_baselines || [])[0]?.code_baseline_version
+                ? `V${(item.test_baselines || [])[0].code_baseline_version}` : "—",
+            action: item.recommended_action || ""
+        }));
+        result.innerHTML = renderReleaseIntelligence(data);
     } catch (error) {
         result.innerHTML = `<div class="jira-impact-error">${escapeHackathon(String(error.message || error))}</div>`;
     }
 }
 
-function buildHackathonDashboardRows(overview, scenarios) {
-    const scenarioById = new Map(scenarios.map(item => [String(item.id), item]));
-    const rows = overview.map(item => {
-        const scenario = scenarioById.get(String(item.scenario_id)) || {};
-        const tests = collectHackathonTests(item);
-        const failed = tests.filter(test => String(test.status || "").toUpperCase() === "FAIL").length;
-        const notRun = tests.filter(test => !["PASS", "FAIL"].includes(String(test.status || "").toUpperCase())).length;
-        const jiras = [...new Set(tests.flatMap(test => Array.isArray(test.jira_ids) ? test.jira_ids : []))];
-        const latest = latestHackathonVersion(item);
-        const hasActiveBaseline = Boolean(item.baseline_captured || item.active_baseline_id || latest);
-        const risk = failed > 0 ? "HIGH" : notRun > 0 ? "MEDIUM" : latest ? "LOW" : "UNKNOWN";
-        const action = failed > 0
-            ? "Review failed test data and changed files"
-            : notRun > 0
-                ? "Run or capture missing test baseline"
-                : hasActiveBaseline
-                    ? "Ready for release review"
-                    : "Create first baseline";
-        return {
-            scenario_id: item.scenario_id || scenario.id,
-            scenario_code: item.scenario_code || scenario.scenario_code || "",
-            scenario_name: item.scenario_name || scenario.scenario_name || "",
-            endpoint: `${item.http_method || scenario.http_method || ""} ${item.endpoint || scenario.endpoint || ""}`.trim(),
-            latest_version: latest
-                ? `${latest.baseline_name || "Release"} V${latest.release_version || latest.baseline_version || 1}`
-                : item.active_baseline_id
-                    ? `${item.active_baseline_name || "Release"} V${item.active_release_version || item.active_baseline_version || 1}`
-                    : "No baseline",
-            changed_files: Number(latest?.changed_source_files || item.changed_source_files || 0),
-            failed_tests: failed,
-            risk: failed > 0 ? "HIGH" : notRun > 0 ? "MEDIUM" : hasActiveBaseline ? "LOW" : "UNKNOWN",
-            jiras,
-            action,
-        };
-    });
-    return rows.sort((a, b) => riskRank(b.risk) - riskRank(a.risk) || a.scenario_code.localeCompare(b.scenario_code));
-}
+function renderReleaseIntelligence(data) {
+    const s = data.summary || {};
+    const recommendations = data.regression_recommendations || [];
+    const gaps = data.coverage_gaps || [];
+    const testInfo = data.test_code_analysis || {};
+    const recHtml = recommendations.length ? recommendations.map(item => {
+        const baselines = item.test_baselines || [];
+        const autoTests = item.automated_test_evidence || [];
+        return `<div class="phasec-item">
+            <div class="phasec-title">${escapeHackathon(item.scenario_code || "Scenario")}
+                <span class="tag">${escapeHackathon(item.impact_status || "")}</span>
+            </div>
+            <div class="muted-text">${escapeHackathon(item.http_method || "")} ${escapeHackathon(item.endpoint || "")}</div>
+            ${(item.reasons || []).map(x => `<div>• ${escapeHackathon(x)}</div>`).join("")}
+            <div class="phasec-evidence">
+                <strong>Captured baselines:</strong> ${baselines.length}
+                &nbsp; · &nbsp; <strong>JUnit/static evidence:</strong> ${autoTests.length}
+            </div>
+            ${autoTests.slice(0, 4).map(t => `<div class="muted-text">Test: ${escapeHackathon(t.test_class)}.${escapeHackathon(t.test_method)} · assertions ${Number(t.assertion_count || 0)}</div>`).join("")}
+            <div class="phasec-action">${escapeHackathon(item.recommended_action || "")}</div>
+        </div>`;
+    }).join("") : `<div class="muted-text">No affected scenarios detected from the current Git changes.</div>`;
 
-function collectHackathonTests(item) {
-    const tests = [];
-    for (const release of item.releases || []) {
-        for (const version of release.versions || []) {
-            tests.push(...(version.tests || []));
-        }
-    }
-    tests.push(...(item.test_baselines || []));
-    return tests;
-}
+    const gapHtml = gaps.length ? gaps.map(g => `<div class="phasec-gap">
+        <strong>${escapeHackathon(g.scenario_code || "")}</strong> · ${escapeHackathon(g.gap_type || "")}
+        <div class="muted-text">${escapeHackathon(g.detail || "")}</div>
+    </div>`).join("") : `<div class="phasec-ok">No evidence gaps detected for the currently affected scenarios.</div>`;
 
-function latestHackathonVersion(item) {
-    const versions = [];
-    for (const release of item.releases || []) {
-        for (const version of release.versions || []) versions.push({...version, baseline_name: release.release});
-    }
-    return versions.sort((a, b) => Number(b.internal_version || b.baseline_version || 0) - Number(a.internal_version || a.baseline_version || 0))[0];
-}
-
-function riskRank(risk) {
-    return {HIGH: 3, MEDIUM: 2, LOW: 1, UNKNOWN: 0}[String(risk || "").toUpperCase()] || 0;
-}
-
-function renderHackathonDashboard(rows) {
-    const total = rows.length;
-    const high = rows.filter(row => row.risk === "HIGH").length;
-    const medium = rows.filter(row => row.risk === "MEDIUM").length;
-    const failed = rows.reduce((sum, row) => sum + row.failed_tests, 0);
-    const table = rows.length ? rows.map(row => `
-        <tr>
-            <td><strong>${escapeHackathon(row.scenario_code)}</strong><div class="muted-text">${escapeHackathon(row.scenario_name)}</div></td>
-            <td>${escapeHackathon(row.latest_version)}</td>
-            <td>${Number(row.changed_files || 0)}</td>
-            <td>${Number(row.failed_tests || 0)}</td>
-            <td><span class="tag risk-${escapeHackathon(row.risk.toLowerCase())}">${escapeHackathon(row.risk)}</span></td>
-            <td>${row.jiras.length ? row.jiras.map(id => `<span class="testing-jira-chip">${escapeHackathon(id)}</span>`).join("") : `<span class="muted-text">None</span>`}</td>
-            <td>${escapeHackathon(row.action)}</td>
-        </tr>
-    `).join("") : `<tr><td colspan="7">No scenario baselines found yet.</td></tr>`;
     return `
-        <div class="hackathon-kpi-grid">
-            <div><span>Total scenarios</span><strong>${total}</strong></div>
-            <div><span>High risk</span><strong>${high}</strong></div>
-            <div><span>Medium risk</span><strong>${medium}</strong></div>
-            <div><span>Failed tests</span><strong>${failed}</strong></div>
+        <div class="hackathon-kpi-grid phasec-kpis">
+            <div><span>Changed files</span><strong>${Number(s.changed_files || 0)}</strong></div>
+            <div><span>Changed methods</span><strong>${Number(s.changed_methods || 0)}</strong></div>
+            <div><span>Affected scenarios</span><strong>${Number(s.affected_scenarios || 0)}</strong></div>
+            <div><span>Coverage gaps</span><strong>${Number(s.coverage_gaps || 0)}</strong></div>
+            <div><span>Failed baselines</span><strong>${Number(s.failed_test_baselines || 0)}</strong></div>
+            <div><span>JUnit tests found</span><strong>${Number(s.junit_test_methods_discovered || 0)}</strong></div>
         </div>
-        <table class="hackathon-dashboard-table">
-            <thead><tr><th>Scenario</th><th>Latest version</th><th>Files</th><th>Failed</th><th>Risk</th><th>JIRAs</th><th>Action needed</th></tr></thead>
-            <tbody>${table}</tbody>
-        </table>
+        <div class="phasec-readiness"><strong>Release evidence:</strong> ${escapeHackathon(data.release_readiness?.message || "")}
+            <div class="muted-text">${escapeHackathon(data.release_readiness?.note || "")}</div>
+        </div>
+        <h3>Regression Recommendations</h3>${recHtml}
+        <h3>Coverage Gaps</h3>${gapHtml}
+        <details class="phasec-test-details"><summary>Test Code Analysis</summary>
+            <div>Test files: <strong>${Number(testInfo.test_files || 0)}</strong> · Test methods: <strong>${Number(testInfo.test_methods || 0)}</strong></div>
+            <div class="muted-text">${escapeHackathon(testInfo.limitations || "")}</div>
+        </details>
     `;
 }
 

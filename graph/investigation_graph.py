@@ -5,6 +5,7 @@ from services.defect.defect_comparison_service import DefectComparisonService
 from services.flow.endpoint_flow_service import EndpointFlowService
 from services.flow.scenario_attribute_trace_service import ScenarioAttributeTraceService
 from services.rag.rag_service import RagService
+from services.investigation.value_flow_investigation_service import ValueFlowInvestigationService
 
 
 class InvestigationGraph:
@@ -14,6 +15,7 @@ class InvestigationGraph:
         self.endpoint_flow_service = EndpointFlowService()
         self.attribute_trace_service = ScenarioAttributeTraceService()
         self.rag_service = RagService()
+        self.value_flow_service = ValueFlowInvestigationService()
 
         self.graph = self._build_graph()
 
@@ -39,6 +41,11 @@ class InvestigationGraph:
         builder.add_node(
             "attribute_trace",
             self._attribute_trace_node
+        )
+
+        builder.add_node(
+            "value_flow_analysis",
+            self._value_flow_analysis_node
         )
 
         builder.add_node(
@@ -69,6 +76,11 @@ class InvestigationGraph:
 
         builder.add_edge(
             "attribute_trace",
+            "value_flow_analysis"
+        )
+
+        builder.add_edge(
+            "value_flow_analysis",
             "build_result"
         )
 
@@ -229,6 +241,50 @@ class InvestigationGraph:
 
         return locations
 
+    def _value_flow_analysis_node(
+        self,
+        state: InvestigationState
+    ) -> dict:
+
+        findings = {}
+
+        for attribute in state.get(
+            "affected_attributes",
+            []
+        ):
+            trace = state.get(
+                "attribute_traces",
+                {}
+            ).get(
+                attribute,
+                {}
+            )
+
+            differences = [
+                difference
+                for difference in state.get(
+                    "differences",
+                    []
+                )
+                if difference.get(
+                    "attribute"
+                ) == attribute
+            ]
+
+            findings[attribute] = (
+                self.value_flow_service.analyze(
+                    attribute_name=attribute,
+                    trace=trace,
+                    differences=differences,
+                    input_context=state.get("input")
+                )
+            )
+
+        return {
+            "value_flow_findings": findings
+        }
+
+
     def _build_result_node(
         self,
         state: InvestigationState
@@ -285,6 +341,38 @@ class InvestigationGraph:
                         ).get(
                             attribute,
                             {}
+                        )
+,
+
+                    "value_flow":
+                        state.get(
+                            "value_flow_findings",
+                            {}
+                        ).get(
+                            attribute,
+                            {}
+                        ),
+
+                    "likely_divergence":
+                        state.get(
+                            "value_flow_findings",
+                            {}
+                        ).get(
+                            attribute,
+                            {}
+                        ).get(
+                            "likely_divergence"
+                        ),
+
+                    "conclusion":
+                        state.get(
+                            "value_flow_findings",
+                            {}
+                        ).get(
+                            attribute,
+                            {}
+                        ).get(
+                            "conclusion"
                         )
                 }
             )

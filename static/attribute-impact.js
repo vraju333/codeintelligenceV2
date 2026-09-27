@@ -26,6 +26,7 @@ function renderAttributeImpact(data) {
     const scenarios = data.affected_scenarios || [];
     const confidence = data.confidence || {};
     const relatedJiras = data.related_jiras || [];
+    const history = data.historical_traceability || [];
 
     const layerHtml = layers.length ? layers.map(layer => `
         <div class="attribute-layer-card">
@@ -46,6 +47,17 @@ function renderAttributeImpact(data) {
             <span class="tag">${escapeHtml(endpoint.relevance || "FLOW")}</span>
             ${(endpoint.matched_methods || []).length ? `<div class="attribute-evidence">Direct methods: ${endpoint.matched_methods.map(escapeHtml).join(", ")}</div>` : ""}
             ${(endpoint.matched_classes || []).length ? `<div class="attribute-evidence">Classes: ${endpoint.matched_classes.map(escapeHtml).join(", ")}</div>` : ""}
+            ${(endpoint.branch_evidence || []).length ? `
+                <div class="attribute-branch-evidence">
+                    ${(endpoint.branch_evidence || []).map(branch => `
+                        <div class="attribute-evidence">
+                            <strong>${escapeHtml(branch.branch_type || "IF")}:</strong>
+                            ${escapeHtml(branch.condition || "")}
+                            ${branch.class_name && branch.method_name ? ` · ${escapeHtml(branch.class_name)}.${escapeHtml(branch.method_name)}` : ""}
+                        </div>
+                    `).join("")}
+                </div>
+            ` : ""}
             ${(endpoint.dependency_path || []).length ? `
                 <div class="dependency-path-inline">
                     ${(endpoint.dependency_path || []).map(step => `<span>${escapeHtml(step)}</span>`).join(`<b>→</b>`)}
@@ -76,6 +88,26 @@ function renderAttributeImpact(data) {
         </div>
     `).join("") : `<div class="muted-box">No registered scenario intersects this attribute yet.</div>`;
 
+    const historyHtml = history.length ? history.map(item => {
+        const jiraIds = item.jira_ids || [];
+        const jiraDetails = item.jiras || [];
+        const releaseVersion = item.release_version ? `V${item.release_version}` : "";
+        const codeVersion = item.code_baseline_version ? `V${item.code_baseline_version}` : "";
+        return `
+            <div class="attribute-impact-row">
+                <div>
+                    <strong>${escapeHtml(item.scenario_code || "")}</strong>
+                    <div class="muted-text">${escapeHtml(item.http_method || "")} ${escapeHtml(item.endpoint || "")}</div>
+                </div>
+                <div class="attribute-evidence"><strong>Test baseline:</strong> ${escapeHtml(item.test_baseline || "No test baseline")}${item.test_status ? ` · ${escapeHtml(item.test_status)}` : ""}</div>
+                <div class="attribute-evidence"><strong>Release:</strong> ${escapeHtml(item.release || "Legacy")} ${escapeHtml(releaseVersion)}</div>
+                <div class="attribute-evidence"><strong>Code baseline:</strong> ${escapeHtml(codeVersion || "—")}</div>
+                <div class="attribute-evidence"><strong>JIRA:</strong> ${jiraIds.length ? jiraIds.map(escapeHtml).join(", ") : "—"}</div>
+                ${jiraDetails.filter(j => j && j.title).map(j => `<div class="muted-text">${escapeHtml(j.jira_id || "")} · ${escapeHtml(j.title || "")}</div>`).join("")}
+            </div>
+        `;
+    }).join("") : `<div class="muted-box">No captured release/test baseline is traceable to this attribute yet.</div>`;
+
     return `
         <div class="attribute-impact-summary">
             <div><span>Attribute</span><strong>${escapeHtml(data.attribute || "")}</strong></div>
@@ -99,6 +131,11 @@ function renderAttributeImpact(data) {
                 <h3>Affected scenarios</h3>
                 ${scenarioHtml}
             </div>
+        </div>
+
+        <div class="attribute-impact-section">
+            <h3>Historical Traceability</h3>
+            ${historyHtml}
         </div>
 
         <div class="attribute-impact-section">

@@ -21,6 +21,9 @@ class InvestigationState(TypedDict, total=False):
 
     likely_code_locations: dict[str, list[dict]]
 
+    # Phase D - deterministic value-flow analysis results
+    value_flow_findings: dict[str, dict]
+
     status: str
 
     final_result: dict

@@ -112,7 +112,7 @@
     "scenario_id": 6,
     "scenario_code": "UPDATE_DATA",
     "title": "UPDATE_DATA \u00b7 September 2026 V1",
-    "text": "Release baseline for UPDATE_DATA\nEndpoint PUT /api/persons/{id}\nRelease September 2026 V1\nCode baseline V1\nTest baselines EMPLOYEE_UPDATE, STUDENT_UPDATE\nJIRAs EMP-201, STUD-101",
+    "text": "Release baseline for UPDATE_DATA\nEndpoint PUT /api/persons/{id}\nRelease September 2026 V1\nCode baseline V1\nTest baselines STUDENT_BAKCUP_UPDATE, EMPLOYEE_EMIAL_UPDATE, STUDENT_EMAIL_UPDATE, EMPLOYEE_UPDATE, STUDENT_UPDATE\nJIRAs EMP-201, EMP-202, STUD-101, STUD-202",
     "metadata": {
       "scenario_id": 6,
       "scenario_code": "UPDATE_DATA",
@@ -127,9 +127,35 @@
       "is_active": true,
       "jira_ids": [
         "EMP-201",
-        "STUD-101"
+        "EMP-202",
+        "STUD-101",
+        "STUD-202"
       ],
       "test_baselines": [
+        {
+          "name": "STUDENT_BAKCUP_UPDATE",
+          "status": "PASS",
+          "jira_ids": [
+            "STUD-202"
+          ],
+          "created_at": "2026-09-23T00:38:28.666304"
+        },
+        {
+          "name": "EMPLOYEE_EMIAL_UPDATE",
+          "status": "PASS",
+          "jira_ids": [
+            "EMP-202"
+          ],
+          "created_at": "2026-09-23T00:37:53.791359"
+        },
+        {
+          "name": "STUDENT_EMAIL_UPDATE",
+          "status": "PASS",
+          "jira_ids": [
+            "EMP-202"
+          ],
+          "created_at": "2026-09-23T00:37:28.609115"
+        },
         {
           "name": "EMPLOYEE_UPDATE",
           "status": "PASS",
@@ -145,6 +171,108 @@
             "STUD-101"
           ],
           "created_at": "2026-09-22T12:25:08.908968"
+        }
+      ]
+    }
+  },
+  {
+    "document_id": "scenario:6:test:5:release:1",
+    "scenario_id": 6,
+    "scenario_code": "UPDATE_DATA",
+    "title": "STUDENT_BAKCUP_UPDATE \u00b7 September 2026 V1",
+    "text": "Test baseline STUDENT_BAKCUP_UPDATE\nParent scenario UPDATE_DATA\nEndpoint PUT /api/persons/{id}\nRelease September 2026 V1\nStatus PASS\nJIRA STUD-202\nJIRA title Student Backup Email Support\nJIRA requirement Add backupEmail for Student.\nThe backup email should be stored and returned when\nstudent details are retrieved or updated.\n\nDomain: Student\nAttribute: backupEmail\nRequest {'test': 'test'}\nExpected response {'test': 'test'}\nActual response {'test': 'test'}",
+    "metadata": {
+      "scenario_id": 6,
+      "scenario_code": "UPDATE_DATA",
+      "scenario_name": "Update Data",
+      "http_method": "PUT",
+      "endpoint": "/api/persons/{id}",
+      "scenario_jira_id": null,
+      "document_type": "test_baseline",
+      "release_name": "September 2026",
+      "release_version": 1,
+      "code_baseline_version": 1,
+      "jira_ids": [
+        "STUD-202"
+      ],
+      "relevant_test_baseline": "STUDENT_BAKCUP_UPDATE",
+      "test_status": "PASS",
+      "test_baselines": [
+        {
+          "name": "STUDENT_BAKCUP_UPDATE",
+          "status": "PASS",
+          "jira_ids": [
+            "STUD-202"
+          ],
+          "created_at": "2026-09-23T00:38:28.666304"
+        }
+      ]
+    }
+  },
+  {
+    "document_id": "scenario:6:test:4:release:1",
+    "scenario_id": 6,
+    "scenario_code": "UPDATE_DATA",
+    "title": "EMPLOYEE_EMIAL_UPDATE \u00b7 September 2026 V1",
+    "text": "Test baseline EMPLOYEE_EMIAL_UPDATE\nParent scenario UPDATE_DATA\nEndpoint PUT /api/persons/{id}\nRelease September 2026 V1\nStatus PASS\nJIRA EMP-202\nJIRA title Employee Backup Email Support\nJIRA requirement Add backupEmail for Employee.\nThe backup email should be stored and returned when\nemployee details are retrieved or updated.\n\nDomain: Employee\nAttribute: backupEmail\nRequest {'test': 'test'}\nExpected response {'test': 'test'}\nActual response {'test': 'test'}",
+    "metadata": {
+      "scenario_id": 6,
+      "scenario_code": "UPDATE_DATA",
+      "scenario_name": "Update Data",
+      "http_method": "PUT",
+      "endpoint": "/api/persons/{id}",
+      "scenario_jira_id": null,
+      "document_type": "test_baseline",
+      "release_name": "September 2026",
+      "release_version": 1,
+      "code_baseline_version": 1,
+      "jira_ids": [
+        "EMP-202"
+      ],
+      "relevant_test_baseline": "EMPLOYEE_EMIAL_UPDATE",
+      "test_status": "PASS",
+      "test_baselines": [
+        {
+          "name": "EMPLOYEE_EMIAL_UPDATE",
+          "status": "PASS",
+          "jira_ids": [
+            "EMP-202"
+          ],
+          "created_at": "2026-09-23T00:37:53.791359"
+        }
+      ]
+    }
+  },
+  {
+    "document_id": "scenario:6:test:3:release:1",
+    "scenario_id": 6,
+    "scenario_code": "UPDATE_DATA",
+    "title": "STUDENT_EMAIL_UPDATE \u00b7 September 2026 V1",
+    "text": "Test baseline STUDENT_EMAIL_UPDATE\nParent scenario UPDATE_DATA\nEndpoint PUT /api/persons/{id}\nRelease September 2026 V1\nStatus PASS\nJIRA EMP-202\nJIRA title Employee Backup Email Support\nJIRA requirement Add backupEmail for Employee.\nThe backup email should be stored and returned when\nemployee details are retrieved or updated.\n\nDomain: Employee\nAttribute: backupEmail\nRequest {'test': 'test'}\nExpected response {'test': 'test'}\nActual response {'test': 'test'}",
+    "metadata": {
+      "scenario_id": 6,
+      "scenario_code": "UPDATE_DATA",
+      "scenario_name": "Update Data",
+      "http_method": "PUT",
+      "endpoint": "/api/persons/{id}",
+      "scenario_jira_id": null,
+      "document_type": "test_baseline",
+      "release_name": "September 2026",
+      "release_version": 1,
+      "code_baseline_version": 1,
+      "jira_ids": [
+        "EMP-202"
+      ],
+      "relevant_test_baseline": "STUDENT_EMAIL_UPDATE",
+      "test_status": "PASS",
+      "test_baselines": [
+        {
+          "name": "STUDENT_EMAIL_UPDATE",
+          "status": "PASS",
+          "jira_ids": [
+            "EMP-202"
+          ],
+          "created_at": "2026-09-23T00:37:28.609115"
         }
       ]
     }

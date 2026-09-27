@@ -65,6 +65,13 @@ class GitDiffService:
                 changed_methods=methods
             )
 
+            changed_symbols = self._build_changed_symbols(
+                class_name=Path(relative_path).stem,
+                changed_methods=methods,
+                source_changes=source_changes["changes"],
+                raw_diff=source_changes["raw_diff"],
+            )
+
             results.append(
                 {
                     "file_path": relative_path,
@@ -78,6 +85,7 @@ class GitDiffService:
                         changed_lines
                     ),
                     "changed_methods": methods,
+                    "changed_symbols": changed_symbols,
                     "source_changes": source_changes["changes"],
                     "raw_diff": source_changes["raw_diff"]
                 }
@@ -95,6 +103,82 @@ class GitDiffService:
             ),
             "changed_files": results
         }
+
+    def _build_changed_symbols(
+        self,
+        class_name: str,
+        changed_methods: list[dict],
+        source_changes: list[dict],
+        raw_diff: str,
+    ) -> list[dict]:
+        """Normalize Git evidence into class/method/attribute symbols."""
+        symbols = []
+        seen = set()
+
+        def add(symbol_type: str, symbol: str, **extra):
+            value = str(symbol or "").strip()
+            if not value:
+                return
+            key = (symbol_type, value)
+            if key in seen:
+                return
+            seen.add(key)
+            symbols.append({
+                "symbol_type": symbol_type,
+                "symbol": value,
+                "class_name": class_name,
+                **extra,
+            })
+
+        add("CLASS", class_name)
+
+        for method in changed_methods or []:
+            name = method.get("method_name")
+            if name:
+                add(
+                    "METHOD",
+                    f"{class_name}.{name}",
+                    method_name=name,
+                    changed_lines=method.get("changed_lines") or [],
+                )
+
+        for change in source_changes or []:
+            if str(change.get("change_type") or "").startswith("FIELD_"):
+                add(
+                    "ATTRIBUTE",
+                    str(change.get("symbol") or ""),
+                    change_type=change.get("change_type"),
+                    line_number=change.get("line_number"),
+                )
+
+        # Attribute references changed inside method bodies:
+        # getGpa()/isActive(), record-style gpa(), and object.gpa.
+        changed_text = "\n".join(
+            line[1:]
+            for line in (raw_diff or "").splitlines()
+            if line.startswith(("+", "-"))
+            and not line.startswith(("+++", "---"))
+        )
+        for _, name in re.findall(
+            r"\b(?:\w+\.)*(get|is)([A-Z][A-Za-z0-9_]*)\s*\(",
+            changed_text,
+        ):
+            add("ATTRIBUTE", name[0].lower() + name[1:])
+
+        ignored_calls = {
+            "equals", "isEmpty", "nonNull", "isNull",
+            "println", "print", "printf", "format",
+            "toString", "hashCode", "valueOf",
+        }
+        for name in re.findall(
+            r"\b\w+\.([a-z][A-Za-z0-9_]*)\s*\(",
+            changed_text,
+        ):
+            if name in ignored_calls or re.match(r"^(get|is)[A-Z]", name):
+                continue
+            add("ATTRIBUTE", name)
+
+        return symbols
 
     def _validate_git_repository(self):
 

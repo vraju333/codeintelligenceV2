@@ -1478,12 +1478,23 @@ class ScenarioAttributeTraceService:
             ):
                 continue
 
+            line_number = occurrence.get("line_number")
+            code = occurrence.get("code")
+
+            # AttributeLineageService can sometimes return only a compact
+            # occurrence snippet. For defect investigation we need the real
+            # Java source statement so transformations such as
+            # r.primaryEmail().toUpperCase() are visible to the classifier.
+            source_code = self._source_code_for_occurrence(
+                class_name=class_name,
+                line_number=line_number,
+                fallback=code,
+            )
+
             result.append(
                 {
                     "line_number":
-                        occurrence.get(
-                            "line_number"
-                        ),
+                        line_number,
 
                     "usage_type":
                         occurrence.get(
@@ -1491,13 +1502,69 @@ class ScenarioAttributeTraceService:
                         ),
 
                     "code":
-                        occurrence.get(
-                            "code"
-                        )
+                        source_code
                 }
             )
 
         return result
+
+    def _source_code_for_occurrence(
+        self,
+        class_name: str | None,
+        line_number,
+        fallback: str | None = None,
+    ) -> str | None:
+        """Return the complete Java statement around an occurrence line.
+
+        Lineage occurrences are intentionally compact. Investigation needs the
+        actual source statement so value-changing calls such as toUpperCase(),
+        trim(), replace(), etc. remain visible to the root-cause classifier.
+        """
+        if not class_name or not line_number:
+            return fallback
+
+        content = self.class_contents.get(class_name)
+        if not content:
+            return fallback
+
+        lines = content.splitlines()
+
+        try:
+            index = int(line_number) - 1
+        except (TypeError, ValueError):
+            return fallback
+
+        if index < 0 or index >= len(lines):
+            return fallback
+
+        statement_parts = []
+        paren_depth = 0
+        started = False
+
+        # The occurrence normally points at the relevant source line. Continue
+        # forward until the Java statement/condition is structurally complete.
+        for current_index in range(index, min(len(lines), index + 12)):
+            part = lines[current_index].strip()
+            if not part:
+                continue
+
+            statement_parts.append(part)
+            started = True
+
+            # Ignore parentheses inside quoted strings when estimating whether
+            # a multiline invocation has completed.
+            structural = re.sub(r'"(?:\\.|[^"\\])*"', '""', part)
+            paren_depth += structural.count("(") - structural.count(")")
+
+            if paren_depth <= 0 and (
+                ";" in structural
+                or structural.endswith("{")
+                or structural.endswith("}")
+            ):
+                break
+
+        statement = " ".join(statement_parts).strip() if started else ""
+        return statement or fallback
 
     # =========================================================
     # TYPE HELPERS

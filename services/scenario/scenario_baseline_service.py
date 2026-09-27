@@ -1,4 +1,5 @@
 import json
+import hashlib
 import difflib
 import re
 import subprocess
@@ -11,7 +12,7 @@ from fastapi import HTTPException
 from config import settings
 from sqlalchemy.orm import Session
 
-from baseline_models import ScenarioBaseline, ScenarioBaselineSourceSnapshot, ScenarioTestBaseline
+from baseline_models import ScenarioBaseline, ScenarioBaselineSourceSnapshot, ScenarioTestBaseline, ScenarioReleaseArchive
 from repositories.scenario_baseline_repository import (
     ScenarioBaselineRepository
 )
@@ -357,6 +358,120 @@ class ScenarioBaselineService:
             baseline_id=target_code_baseline.id
         )
         return self.baseline_repository.create_test_baseline(db, record)
+
+    def update_test_baseline(
+        self, db: Session, scenario_id: int, test_baseline_id: int,
+        baseline_name: str, request_json: Any = None,
+        expected_response: Any = None, actual_response: Any = None,
+        expected_db_effect: str | None = None, jira_ids: list[str] | None = None
+    ):
+        scenario = self.scenario_repository.find_by_id(db, scenario_id)
+        if not scenario:
+            raise HTTPException(status_code=404, detail="Scenario not found")
+
+        record = self.baseline_repository.find_test_baseline_by_id(db, scenario_id, test_baseline_id)
+        if not record:
+            raise HTTPException(status_code=404, detail="Test Baseline not found")
+
+        if record.baseline_id and self.baseline_repository.find_release_archive(db, record.baseline_id):
+            raise HTTPException(status_code=409, detail="Archived release versions are read-only")
+
+        name = str(baseline_name or "").strip()
+        if not name:
+            raise HTTPException(status_code=400, detail="Testing baseline name is required")
+
+        duplicate = self.baseline_repository.find_test_baseline_by_name(
+            db, scenario_id, name, record.code_baseline_version
+        )
+        if duplicate and int(duplicate.id) != int(record.id):
+            raise HTTPException(status_code=409, detail=f"Test Scenario '{name}' already exists for the selected version")
+
+        expected = self._normalize_json(expected_response)
+        actual = self._normalize_json(actual_response)
+        status = "NOT_RUN" if actual_response is None else ("PASS" if expected == actual else "FAIL")
+
+        record.baseline_name = name
+        record.request_json = self._normalize_json(request_json)
+        record.expected_response_json = expected
+        record.actual_response_json = actual
+        record.expected_db_effect = expected_db_effect or scenario.expected_db_effect
+        record.jira_ids = self._normalize_jira_ids(jira_ids)
+        record.status = status
+        return self.baseline_repository.update_test_baseline(db, record)
+
+    def archive_release(self, db: Session, scenario_id: int, baseline_id: int):
+        scenario = self.scenario_repository.find_by_id(db, scenario_id)
+        if not scenario:
+            raise HTTPException(status_code=404, detail="Scenario not found")
+        baseline = self.baseline_repository.find_by_id(db, scenario_id, baseline_id)
+        if not baseline:
+            raise HTTPException(status_code=404, detail="Release baseline not found")
+        if self.baseline_repository.find_release_archive(db, baseline.id):
+            raise HTTPException(status_code=409, detail="This release/version is already archived")
+
+        tests = self.baseline_repository.find_test_baselines_for_code_version(
+            db, scenario_id, int(baseline.baseline_version)
+        )
+        source = self.baseline_repository.find_source_snapshot(db, baseline.id)
+        snapshot = {
+            "scenario": {
+                "id": scenario.id, "scenario_code": scenario.scenario_code,
+                "scenario_name": scenario.scenario_name,
+                "http_method": scenario.http_method, "endpoint": scenario.endpoint
+            },
+            "release": {
+                "baseline_id": baseline.id, "baseline_name": baseline.baseline_name,
+                "release_version": int(baseline.release_version or 1),
+                "code_baseline_version": int(baseline.baseline_version or 1),
+                "expected_response_json": baseline.expected_response_json,
+                "successful_response_json": baseline.successful_response_json,
+                "expected_db_effect": baseline.expected_db_effect,
+                "involved_classes": baseline.involved_classes,
+                "endpoint_flow": baseline.endpoint_flow,
+                "created_at": baseline.created_at.isoformat() if baseline.created_at else None
+            },
+            "test_baselines": [{
+                "id": x.id, "baseline_name": x.baseline_name,
+                "request_json": x.request_json,
+                "expected_response_json": x.expected_response_json,
+                "actual_response_json": x.actual_response_json,
+                "expected_db_effect": x.expected_db_effect,
+                "jira_ids": list(x.jira_ids or []), "status": x.status,
+                "created_at": x.created_at.isoformat() if x.created_at else None
+            } for x in tests],
+            "source_snapshot": source.source_snapshot if source else None,
+            "source_changes": source.source_changes if source else None,
+            "git_diff": source.git_diff if source else None
+        }
+        canonical = json.dumps(snapshot, sort_keys=True, separators=(",", ":"), default=str)
+        archive = ScenarioReleaseArchive(
+            scenario_id=scenario_id, baseline_id=baseline.id,
+            baseline_name=str(baseline.baseline_name or "Legacy"),
+            release_version=int(baseline.release_version or 1),
+            code_baseline_version=int(baseline.baseline_version or 1),
+            snapshot_json=snapshot,
+            snapshot_hash=hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+        )
+        return self.baseline_repository.create_release_archive(db, archive)
+
+    def get_release_archives(self, db: Session, scenario_id: int):
+        if not self.scenario_repository.find_by_id(db, scenario_id):
+            raise HTTPException(status_code=404, detail="Scenario not found")
+        return [{
+            "id": x.id, "scenario_id": x.scenario_id, "baseline_id": x.baseline_id,
+            "baseline_name": x.baseline_name, "release_version": x.release_version,
+            "code_baseline_version": x.code_baseline_version,
+            "snapshot_hash": x.snapshot_hash,
+            "archived_at": x.archived_at.isoformat() if x.archived_at else None,
+            "snapshot": x.snapshot_json
+        } for x in self.baseline_repository.find_release_archives_for_scenario(db, scenario_id)]
+
+    def get_release_archive_status(self, db: Session, scenario_id: int):
+        return {str(x.baseline_id): {
+            "archived": True, "archive_id": x.id,
+            "archived_at": x.archived_at.isoformat() if x.archived_at else None,
+            "snapshot_hash": x.snapshot_hash
+        } for x in self.baseline_repository.find_release_archives_for_scenario(db, scenario_id)}
 
     @staticmethod
     def _normalize_jira_ids(jira_ids: list[str] | None) -> list[str]:
