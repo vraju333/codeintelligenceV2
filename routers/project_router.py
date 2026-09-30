@@ -24,6 +24,59 @@ def get_projects():
     return service.list_projects()
 
 
+
+
+@router.post("/browse")
+def browse_project_folder():
+    """
+    Local-UAT helper: opens the operating system folder chooser on the same
+    desktop where the FastAPI process is running. No project is registered
+    until /register is called.
+    """
+    try:
+        import tkinter as tk
+        from tkinter import filedialog
+
+        root = tk.Tk()
+        root.withdraw()
+        root.attributes("-topmost", True)
+        try:
+            selected = filedialog.askdirectory(
+                title="Select Java Project Folder",
+                mustexist=True,
+            )
+        finally:
+            root.destroy()
+
+        if not selected:
+            return {"status": "CANCELLED", "project_path": None}
+
+        path = __import__("pathlib").Path(selected)
+        java_files = list(path.rglob("*.java"))
+        if not java_files:
+            raise HTTPException(
+                status_code=400,
+                detail="The selected folder does not contain any Java source files."
+            )
+
+        return {
+            "status": "SELECTED",
+            "project_path": str(path.resolve()),
+            "project_name": path.name,
+            "java_files": len(java_files),
+        }
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=(
+                "Folder picker could not be opened. "
+                "Use Enter Path Manually instead. Details: " + str(exc)
+            ),
+        )
+
+
 @router.post("/register")
 def register_project(request: ProjectPathRequest, db: Session = Depends(get_db)):
     try:

@@ -13,3 +13,6 @@ faiss-cpu
 langgraph
 openpyxl
 rank-bm25
+neo4j>=5.28.0
+python-multipart>=0.0.20
+pypdf>=5.0.0

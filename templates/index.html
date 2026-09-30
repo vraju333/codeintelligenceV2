@@ -16,7 +16,7 @@
 
         window.mermaid = mermaid;
     </script>
-<link href="/static/project-ui.css?v=3" rel="stylesheet"/>
+<link href="/static/project-ui.css?v=4" rel="stylesheet"/>
 <link href="/static/flowchart-ui.css?v=3" rel="stylesheet"/>
 <link href="/static/jira-impact.css?v=2" rel="stylesheet"/>
 <link href="/static/attribute-impact.css?v=1" rel="stylesheet"/>
@@ -24,7 +24,8 @@
 <link href="/static/version-source-history.css?v=3-file-row-fix" rel="stylesheet"/>
 <link href="/static/release-intelligence.css?v=1" rel="stylesheet"/>
 <link href="/static/hackathon-dashboard.css?v=6" rel="stylesheet"/>
-<link href="/static/accordion-ui.css?v=hackathon-4-icons" rel="stylesheet"/></head>
+<link href="/static/accordion-ui.css?v=hackathon-4-icons" rel="stylesheet"/><link rel="stylesheet" href="/static/phase-e.css?v=4"/>
+</head>
 <body>
 <div class="page">
 <header class="header">
@@ -121,13 +122,14 @@ Example: Add employmentType attribute to Employee. Store it while creating an em
 <section class="card accordion-card is-collapsed" id="attributeImpactCard">
 <div aria-expanded="false" class="card-header accordion-header" data-accordion-title="Attribute Impact Analysis" role="button" tabindex="0">
 <div>
-<h2>Attribute Impact Analysis</h2>
-<p>Trace one Java attribute across models, mappers, services, endpoints and registered scenarios.</p>
+<h2>Attribute Analysis</h2>
+<p>One view for attribute impact, scenarios, baselines, JIRAs and cross-project Knowledge Graph relationships.</p>
 </div>
 <button aria-label="Toggle Attribute Impact Analysis" class="accordion-toggle" tabindex="-1" type="button">›</button></div><div class="accordion-body">
 <div class="attribute-impact-form">
 <input id="attributeImpactInput" placeholder="Attribute — e.g. primaryContact, employmentType, gpa" type="text"/>
 <button onclick="analyseAttributeImpact()" type="button">Analyze Attribute</button>
+<button class="secondary-button" onclick="rebuildAttributeKnowledgeGraph()" type="button">Rebuild Knowledge Graph</button>
 </div>
 <div class="result-area" id="attributeImpactResult">
                 Enter an attribute to see its project-wide blast radius.
@@ -322,6 +324,7 @@ Select a JIRA to see covered baselines.
 </div></section>
 <!-- SCENARIO REGISTRY -->
 <!-- ====================================================== -->
+<!-- Cross-Project Intelligence is consolidated into Attribute Analysis. -->
 <section class="card accordion-card is-collapsed" id="scenario-registry">
 <div aria-expanded="false" class="card-header accordion-header" data-accordion-title="Scenario Registry" role="button" tabindex="0">
 <div>
@@ -590,7 +593,7 @@ Loading operations that are not yet represented in Scenario Baselines...
 </div>
 </div>
 <script src="/static/app.js?v=phase-d-root-cause-1"></script>
-<script src="/static/project-ui.js?v=jira-dropdown-1"></script>
+<script src="/static/project-ui.js?v=folder-picker-1"></script>
 <script src="/static/flowchart-ui.js?v=3"></script>
 <script src="/static/jira-impact.js?v=3"></script>
 <script src="/static/attribute-impact.js?v=2"></script>
@@ -598,5 +601,30 @@ Loading operations that are not yet represented in Scenario Baselines...
 <script src="/static/version-source-history.js?v=7-show-changed-files"></script>
 <script src="/static/release-intelligence.js?v=3"></script>
 <script src="/static/hackathon-dashboard.js?v=6"></script>
-<script src="/static/accordion-ui.js?v=2"></script></body>
+<script src="/static/accordion-ui.js?v=2"></script><script src="/static/phase-e.js?v=4"></script>
+
+<div class="add-project-modal" id="addProjectModal" hidden>
+  <div class="add-project-dialog" role="dialog" aria-modal="true" aria-labelledby="addProjectTitle">
+    <div class="add-project-dialog-header">
+      <h3 id="addProjectTitle">Add Java Project</h3>
+      <button class="add-project-close" type="button" onclick="closeAddProjectModal()" aria-label="Close">×</button>
+    </div>
+    <div class="add-project-dialog-body">
+      <label for="addProjectPathInput">Java project folder</label>
+      <div class="add-project-path-row">
+        <input id="addProjectPathInput" type="text" placeholder="D:\AIlearning\employee-onboarding-service"/>
+        <button id="browseProjectButton" type="button" onclick="browseProjectFolder()">Browse Folder</button>
+      </div>
+      <div class="add-project-message" id="addProjectMessage">
+        Browse for a local Java project or enter its folder path manually.
+      </div>
+    </div>
+    <div class="add-project-dialog-actions">
+      <button class="secondary-button" type="button" onclick="closeAddProjectModal()">Cancel</button>
+      <button id="confirmAddProjectButton" type="button" onclick="confirmAddProject()">Add &amp; Index Project</button>
+    </div>
+  </div>
+</div>
+
+</body>
 </html>

@@ -26,6 +26,11 @@ class Settings:
 
     JAVA_PROJECT_PATH = os.getenv("JAVA_PROJECT_PATH")
     AUTO_PROJECT_INITIALIZATION = os.getenv("AUTO_PROJECT_INITIALIZATION", "true").lower() == "true"
+    NEO4J_ENABLED = os.getenv("NEO4J_ENABLED", "false").lower() == "true"
+    NEO4J_URI = os.getenv("NEO4J_URI", "bolt://localhost:7687")
+    NEO4J_USERNAME = os.getenv("NEO4J_USERNAME", "neo4j")
+    NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD", "")
+    NEO4J_DATABASE = os.getenv("NEO4J_DATABASE", "neo4j")
 
     # Jira requirement understanding only. Java source code is never sent to the LLM.
     JIRA_LLM_ENABLED = os.getenv("JIRA_LLM_ENABLED", "true").lower() == "true"

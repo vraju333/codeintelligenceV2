@@ -1,0 +1,20 @@
+[
+  {
+    "document_id": "scenario:12",
+    "scenario_id": 12,
+    "scenario_code": "CREATE_DATA_API_EMPLOYEES",
+    "title": "CREATE_DATA_API_EMPLOYEES \u00b7 Operation",
+    "text": "Operation scenario CREATE_DATA_API_EMPLOYEES\nCreate Data\nAuto-discovered operation scenario for POST /api/employees.\nEndpoint POST /api/employees",
+    "metadata": {
+      "scenario_id": 12,
+      "scenario_code": "CREATE_DATA_API_EMPLOYEES",
+      "scenario_name": "Create Data",
+      "http_method": "POST",
+      "endpoint": "/api/employees",
+      "scenario_jira_id": null,
+      "document_type": "scenario",
+      "jira_ids": [],
+      "test_baselines": []
+    }
+  }
+]

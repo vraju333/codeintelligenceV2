@@ -163,15 +163,74 @@ async function switchProject() {
     }
 }
 
-async function addProject() {
-    const path = prompt("Enter the Java project folder path:");
-    if (!path?.trim()) return;
+function addProject() {
+    const modal = document.getElementById("addProjectModal");
+    const input = document.getElementById("addProjectPathInput");
+    const message = document.getElementById("addProjectMessage");
+    if (input) input.value = "";
+    if (message) message.textContent = "Browse for a local Java project or enter its folder path manually.";
+    if (modal) modal.hidden = false;
+}
 
-    const button = document.querySelector('button[onclick="addProject()"]');
+function closeAddProjectModal() {
+    const modal = document.getElementById("addProjectModal");
+    if (modal) modal.hidden = true;
+}
+
+async function browseProjectFolder() {
+    const browseButton = document.getElementById("browseProjectButton");
+    const input = document.getElementById("addProjectPathInput");
+    const message = document.getElementById("addProjectMessage");
+
+    if (browseButton) {
+        browseButton.disabled = true;
+        browseButton.textContent = "Opening folder picker...";
+    }
+    if (message) message.textContent = "Select the Java project folder in the Windows dialog.";
+
+    try {
+        const response = await fetch("/api/projects/browse", {method: "POST"});
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.detail || JSON.stringify(data));
+
+        if (data.status === "CANCELLED") {
+            if (message) message.textContent = "Folder selection cancelled.";
+            return;
+        }
+
+        if (input) input.value = data.project_path || "";
+        if (message) {
+            message.textContent =
+                `${data.project_name} selected · ${data.java_files} Java file(s). Click Add & Index Project.`;
+        }
+    } catch (error) {
+        if (message) {
+            message.textContent = `Browse failed: ${error.message} You can still enter the path manually.`;
+        }
+    } finally {
+        if (browseButton) {
+            browseButton.disabled = false;
+            browseButton.textContent = "Browse Folder";
+        }
+    }
+}
+
+async function confirmAddProject() {
+    const input = document.getElementById("addProjectPathInput");
+    const path = input?.value?.trim();
+    const button = document.getElementById("confirmAddProjectButton");
+    const message = document.getElementById("addProjectMessage");
+
+    if (!path) {
+        if (message) message.textContent = "Select a folder or enter a Java project path.";
+        return;
+    }
+
     if (button) {
         button.disabled = true;
         button.textContent = "Indexing...";
     }
+    if (message) message.textContent = "Registering, scanning and indexing the selected Java project.";
 
     resetProjectDrivenUi("Indexing new project...");
 
@@ -179,7 +238,7 @@ async function addProject() {
         const response = await fetch("/api/projects/register", {
             method: "POST",
             headers: {"Content-Type": "application/json"},
-            body: JSON.stringify({project_path: path.trim()})
+            body: JSON.stringify({project_path: path})
         });
         const data = await response.json();
         if (!response.ok) throw new Error(data.detail || JSON.stringify(data));
@@ -204,25 +263,25 @@ async function addProject() {
         await loadScenarios(1);
         await loadDefectScenarioOptions();
         if (typeof loadBaselineOverview === "function") await loadBaselineOverview();
-
         if (typeof loadTestingBaselineJiraOptions === "function") await loadTestingBaselineJiraOptions();
         if (typeof loadJiraHistoryBoard === "function") await loadJiraHistoryBoard();
         if (typeof rebuildScenarioRagRegistry === "function") await rebuildScenarioRagRegistry();
+        if (typeof analyseRegression === "function") await analyseRegression();
 
-        // Regression Impact is project-specific. Re-run it after the project
-        // switch completes so results from the previous repository never remain.
-        if (typeof analyseRegression === "function") {
-            await analyseRegression();
-        }
+        closeAddProjectModal();
+
+        // Refresh Phase E's available-project checkboxes immediately.
+        if (typeof loadPhaseEProjects === "function") await loadPhaseEProjects();
     } catch (error) {
-        alert(`Could not add/index project: ${error.message}`);
+        if (message) message.textContent = `Could not add/index project: ${error.message}`;
     } finally {
         if (button) {
             button.disabled = false;
-            button.textContent = "Add Project";
+            button.textContent = "Add & Index Project";
         }
     }
 }
+
 
 
 function toggleDefectManualMode() {

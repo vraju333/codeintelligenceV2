@@ -1,0 +1,20 @@
+[
+  {
+    "document_id": "scenario:13",
+    "scenario_id": 13,
+    "scenario_code": "GET_DATA_API_ORGANIZATIONS_ORGANIZATIONCODE",
+    "title": "GET_DATA_API_ORGANIZATIONS_ORGANIZATIONCODE \u00b7 Operation",
+    "text": "Operation scenario GET_DATA_API_ORGANIZATIONS_ORGANIZATIONCODE\nGet Data\nAuto-discovered operation scenario for GET /api/organizations/{organizationCode}.\nEndpoint GET /api/organizations/{organizationCode}",
+    "metadata": {
+      "scenario_id": 13,
+      "scenario_code": "GET_DATA_API_ORGANIZATIONS_ORGANIZATIONCODE",
+      "scenario_name": "Get Data",
+      "http_method": "GET",
+      "endpoint": "/api/organizations/{organizationCode}",
+      "scenario_jira_id": null,
+      "document_type": "scenario",
+      "jira_ids": [],
+      "test_baselines": []
+    }
+  }
+]

@@ -11,16 +11,16 @@ async function analyseAttributeImpact() {
     container.innerHTML = "Analysing attribute impact across the active Java project...";
 
     try {
-        const response = await fetch(`/api/attribute-lineage/impact?attribute=${encodeURIComponent(attribute)}`);
+        const response = await fetch(`/api/knowledge/attribute?attribute=${encodeURIComponent(attribute)}`);
         const data = await response.json();
         if (!response.ok) throw new Error(JSON.stringify(data));
-        container.innerHTML = renderAttributeImpact(data);
+        container.innerHTML = renderUnifiedAttributeKnowledge(data);
     } catch (error) {
         container.innerHTML = renderError(error.message);
     }
 }
 
-function renderAttributeImpact(data) {
+function renderAttributeImpactCore(data) {
     const layers = data.layers || [];
     const endpoints = data.affected_endpoints || [];
     const scenarios = data.affected_scenarios || [];
@@ -145,4 +145,84 @@ function renderAttributeImpact(data) {
 
         <div class="muted-text attribute-local-note">LangGraph parallel analysis · local Java analysis + local JIRA RAG · no external LLM required.</div>
     `;
+}
+
+
+function renderUnifiedAttributeKnowledge(payload) {
+    const local = payload.attribute_impact || {};
+    const graph = payload.knowledge_graph || {};
+    const projects = graph.projects || [];
+    const matches = graph.direct_matches || [];
+    const impacted = graph.impacted_nodes || [];
+    const relationships = graph.relationships || [];
+
+    const byProject = {};
+    impacted.forEach(node => {
+        const project = node.project || "Unknown";
+        (byProject[project] ||= []).push(node);
+    });
+
+    const projectHtml = projects.length ? Object.entries(byProject).map(([project, nodes]) => {
+        const useful = nodes.filter(n => n.type !== "PROJECT").slice(0, 8);
+        return `<div class="attribute-layer-card">
+            <div class="attribute-layer-role">PROJECT</div>
+            <div class="attribute-class-name">${escapeHtml(project)}</div>
+            <div class="muted-text">${nodes.length} connected graph nodes</div>
+            ${useful.map(n => `<div class="attribute-evidence">${escapeHtml(n.type)} · ${escapeHtml(n.name)}</div>`).join("")}
+        </div>`;
+    }).join("") : `<div class="muted-box">${graph.status === "GRAPH_NOT_BUILT" ? "Build the Knowledge Graph to see cross-project impact." : "No cross-project graph evidence for this attribute."}</div>`;
+
+    const nodeById = new Map(impacted.map(n => [n.id, n]));
+    const cross = relationships.filter(r => r.type === "DEPENDS_ON_PROJECT");
+    const crossHtml = cross.length ? cross.map(r => {
+        const source = nodeById.get(r.source);
+        const target = nodeById.get(r.target);
+        return `<div class="attribute-impact-row">
+            <strong>${escapeHtml(source?.name || source?.project || r.source)}</strong>
+            <span class="tag">DEPENDS ON</span>
+            <strong>${escapeHtml(target?.name || target?.project || r.target)}</strong>
+            ${r.properties?.evidence ? `<div class="attribute-evidence">Evidence: ${escapeHtml(r.properties.evidence)}</div>` : ""}
+        </div>`;
+    }).join("") : `<div class="muted-box">No deterministic cross-project dependency is connected to this attribute.</div>`;
+
+    return `
+        <div class="attribute-impact-summary">
+            <div><span>Graph Projects</span><strong>${projects.length}</strong></div>
+            <div><span>Direct Graph Matches</span><strong>${matches.length}</strong></div>
+            <div><span>Connected Nodes</span><strong>${impacted.length}</strong></div>
+            <div><span>Cross-Project Links</span><strong>${graph.cross_project_relationship_count || 0}</strong></div>
+        </div>
+        ${renderAttributeImpactCore(local)}
+        <div class="attribute-impact-section">
+            <h3>Cross-Project Knowledge Graph</h3>
+            <div class="muted-text">Attribute Impact and Cross-Project Intelligence are consolidated here. The graph is built from deterministic code evidence and mirrored to Neo4j when enabled.</div>
+            <div class="attribute-layer-grid" style="margin-top:12px">${projectHtml}</div>
+        </div>
+        <div class="attribute-impact-section">
+            <h3>Cross-Project Dependencies</h3>
+            ${crossHtml}
+        </div>`;
+}
+
+async function rebuildAttributeKnowledgeGraph() {
+    const container = document.getElementById("attributeImpactResult");
+    try {
+        const projectsResponse = await fetch("/api/cross-project/projects");
+        const projectsData = await projectsResponse.json();
+        if (!projectsResponse.ok) throw new Error(projectsData.detail || JSON.stringify(projectsData));
+        const projects = (projectsData.projects || []).map(p => p.name);
+        if (!projects.length) throw new Error("No registered Java projects were found.");
+
+        container.innerHTML = `Building Knowledge Graph for ${projects.length} registered Java project(s)...`;
+        const response = await fetch("/api/cross-project/sync", {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({projects})
+        });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.detail || JSON.stringify(data));
+        container.innerHTML = `<div class="muted-box"><strong>Knowledge Graph ready.</strong> ${data.projects} project(s), ${data.nodes} nodes, ${data.relationships} relationships, ${data.cross_project_relationships} cross-project links. Neo4j: ${escapeHtml(data.neo4j?.status || "UNKNOWN")}. Now analyze an attribute.</div>`;
+    } catch (error) {
+        container.innerHTML = renderError(error.message);
+    }
 }

@@ -37,3 +37,18 @@ class JiraKnowledge(Base):
     project_path = Column(Text, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+class KnowledgeDocument(Base):
+    """Engineering knowledge ingested from architecture/API/release/test sources."""
+    __tablename__ = "knowledge_documents"
+
+    id = Column(Integer, primary_key=True, index=True)
+    source_type = Column(String(50), nullable=False, index=True)
+    title = Column(String(300), nullable=False)
+    content = Column(Text, nullable=False)
+    project_path = Column(Text, nullable=False, index=True)
+    source_ref = Column(String(500), nullable=True)
+    metadata_json = Column(Text, nullable=True)
+    status = Column(String(30), nullable=False, default="ACTIVE")
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

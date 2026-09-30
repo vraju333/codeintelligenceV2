@@ -2728,6 +2728,16 @@ async function runScenarioRagEvaluation() {
                     <div><strong>${data.passed || 0}</strong><div class="muted-text">Passed</div></div>
                     <div><strong>${data.failed || 0}</strong><div class="muted-text">Failed</div></div>
                     <div><strong>${data.total || 0}</strong><div class="muted-text">Total</div></div>
+                    <div><strong>${data.positive?.total || 0}</strong><div class="muted-text">Positive Tests</div></div>
+                    <div><strong>${data.negative?.total || 0}</strong><div class="muted-text">Negative Tests</div></div>
+                </div>
+                <div style="display:flex;gap:18px;flex-wrap:wrap;margin:12px 0;padding:10px 0;border-top:1px solid #d9e2ef;border-bottom:1px solid #d9e2ef;">
+                    <div><strong>${(Number(data.precision_at_k || 0) * 100).toFixed(2)}%</strong><div class="muted-text">Precision@${data.top_k || 8}</div></div>
+                    <div><strong>${(Number(data.recall_at_k || 0) * 100).toFixed(2)}%</strong><div class="muted-text">Recall@${data.top_k || 8}</div></div>
+                    <div><strong>${Number(data.mrr || 0).toFixed(4)}</strong><div class="muted-text">MRR</div></div>
+                    <div><strong>${Number(data.hit_at_k_percent || 0).toFixed(2)}%</strong><div class="muted-text">Hit@${data.top_k || 8}</div></div>
+                    <div><strong>${data.irrelevant_result_count || 0}</strong><div class="muted-text">Irrelevant Results</div></div>
+                    <div><strong>${Number(data.average_latency_ms || 0).toFixed(2)} ms</strong><div class="muted-text">Avg Latency</div></div>
                 </div>
                 ${cases.map(item => `
                     <div class="attribute-impact-row">
@@ -2739,6 +2749,10 @@ async function runScenarioRagEvaluation() {
                             ${escapeHtml(item.case_type || "")}
                             ${item.expected_jira ? ` · Expected JIRA ${escapeHtml(item.expected_jira)}` : " · Expected NO EVIDENCE"}
                             ${item.expected_test_baseline ? ` · ${escapeHtml(item.expected_test_baseline)}` : ""}
+                        </div>
+                        <div class="muted-text" style="margin-top:4px;">
+                            ${item.case_type === "POSITIVE" ? `P@${data.top_k || 8}: ${(Number(item.precision_at_k || 0) * 100).toFixed(1)}% · R@${data.top_k || 8}: ${(Number(item.recall_at_k || 0) * 100).toFixed(1)}% · RR: ${Number(item.reciprocal_rank || 0).toFixed(3)} · ` : ""}
+                            Irrelevant: ${item.irrelevant_result_count || 0} · Latency: ${Number(item.latency_ms || 0).toFixed(2)} ms
                         </div>
                         ${!item.passed && item.actual_evidence?.length ? `
                             <details style="margin-top:6px;">
