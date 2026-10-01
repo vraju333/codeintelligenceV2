@@ -14,12 +14,13 @@ from sqlalchemy.orm import Session
 
 from config import settings
 from db_models import KnowledgeDocument
+from services.knowledge.common_entity_extractor import CommonKnowledgeEntityExtractor
 
 
 class KnowledgeIngestionService:
     """Ingest engineering documents into DB + semantic RAG + Neo4j relationships."""
 
-    ALLOWED_TYPES = {"ARCHITECTURE", "API", "RELEASE", "TEST_REPORT", "JIRA"}
+    ALLOWED_TYPES = {"ARCHITECTURE", "API", "RELEASE", "TEST", "TEST_REPORT", "REQUIREMENT", "JIRA", "CODE_CHANGE"}
 
     def __init__(self):
         self.embeddings = HuggingFaceEmbeddings(
@@ -30,6 +31,7 @@ class KnowledgeIngestionService:
         )
         self.index_root = Path("knowledge_rag_indexes")
         self._vectors: dict[str, FAISS] = {}
+        self.entity_extractor = CommonKnowledgeEntityExtractor()
 
     def _project_path(self) -> str:
         value = (
@@ -63,7 +65,7 @@ class KnowledgeIngestionService:
             raise ValueError("content is required")
 
         project_path = self._project_path()
-        extracted = self._extract_metadata(content)
+        extracted = self.entity_extractor.extract(content, source_type)
         combined_metadata = dict(metadata or {})
         combined_metadata["extracted"] = extracted
 
@@ -110,7 +112,19 @@ class KnowledgeIngestionService:
             .all()
         )
         docs: list[Document] = []
+        # Rebuild is also the migration path when extraction rules improve.
+        # Re-extract canonical entities from the stored source text, persist the
+        # refreshed metadata, and re-sync Neo4j before rebuilding FAISS.
         for row in rows:
+            extracted = self.entity_extractor.extract(row.content, row.source_type)
+            try:
+                metadata = json.loads(row.metadata_json or "{}")
+            except Exception:
+                metadata = {}
+            metadata["extracted"] = extracted
+            row.metadata_json = json.dumps(metadata, ensure_ascii=False)
+            self._sync_document_to_neo4j(row, extracted)
+
             chunks = self.splitter.split_text(row.content)
             total_chunks = len(chunks)
             for i, chunk in enumerate(chunks):
@@ -128,8 +142,14 @@ class KnowledgeIngestionService:
                         "title": row.title,
                         "project_path": row.project_path,
                         "source_ref": row.source_ref or "",
+                        # Canonical common entities are serialized so FAISS metadata
+                        # remains portable while preserving cross-source lineage.
+                        "entities_json": json.dumps(self._metadata_entities(row), ensure_ascii=False),
                     },
                 ))
+
+        # Persist refreshed extraction metadata as one transaction.
+        db.commit()
 
         key = self._project_key(project_path)
         folder = self.index_root / key
@@ -169,6 +189,7 @@ class KnowledgeIngestionService:
                 "source_type": doc.metadata.get("source_type"),
                 "source_ref": doc.metadata.get("source_ref"),
                 "project_path": doc.metadata.get("project_path"),
+                "entities": self._decode_entities(doc.metadata.get("entities_json")),
                 "text": doc.page_content,
                 "distance": float(distance),
             })
@@ -188,13 +209,21 @@ class KnowledgeIngestionService:
             return None
 
     @staticmethod
-    def _extract_metadata(content: str) -> dict:
-        jira_ids = sorted(set(re.findall(r"\b[A-Z][A-Z0-9]+-\d+\b", content)))
-        endpoints = sorted(set(re.findall(r"(?<!\w)/(?:api/)?[A-Za-z0-9_{}./:-]+", content)))
-        http_methods = sorted(set(x.upper() for x in re.findall(
-            r"\b(GET|POST|PUT|PATCH|DELETE)\b", content, re.I
-        )))
-        return {"jira_ids": jira_ids, "endpoints": endpoints[:50], "http_methods": http_methods}
+    def _decode_entities(value: Any) -> dict:
+        if isinstance(value, dict):
+            return value
+        try:
+            return json.loads(value or "{}")
+        except Exception:
+            return {}
+
+    @staticmethod
+    def _metadata_entities(row: KnowledgeDocument) -> dict:
+        try:
+            metadata = json.loads(row.metadata_json or "{}")
+        except Exception:
+            metadata = {}
+        return metadata.get("extracted") or {}
 
     def _sync_document_to_neo4j(self, row: KnowledgeDocument, extracted: dict) -> dict:
         if not getattr(settings, "NEO4J_ENABLED", False):
@@ -208,6 +237,16 @@ class KnowledgeIngestionService:
             doc_id = f"knowledge:{row.id}"
             project_name = Path(row.project_path).name or row.project_path
             with driver.session(database=settings.NEO4J_DATABASE) as session:
+                # Re-sync must represent the current extraction exactly.  Remove
+                # document-owned knowledge edges first so stale entities from older
+                # extraction rules (for example a file path without .java) are not
+                # retained after /rebuild. BELONGS_TO is recreated below as well.
+                session.run(
+                    "MATCH (d:CodeIntelligence:KnowledgeDocument {id:$id}) "
+                    "OPTIONAL MATCH (d)-[r:MENTIONS|DESCRIBES_RELEASE|BELONGS_TO]->() "
+                    "DELETE r",
+                    id=doc_id,
+                )
                 session.run(
                     "MERGE (d:CodeIntelligence:KnowledgeDocument {id:$id}) "
                     "SET d.type='KNOWLEDGE_DOCUMENT', d.name=$title, d.project=$project, "
@@ -239,6 +278,57 @@ class KnowledgeIngestionService:
                         id=f"endpoint:{project_name}:{endpoint}", name=endpoint,
                         project=project_name, doc=doc_id,
                     )
+
+                common_entity_specs = {
+                    "attributes": "ATTRIBUTE",
+                    "scenarios": "SCENARIO",
+                    "classes": "CLASS",
+                    "methods": "METHOD",
+                    "tests": "TEST",
+                    "commits": "COMMIT",
+                    "files": "FILE",
+                }
+                for field, entity_type in common_entity_specs.items():
+                    for value in extracted.get(field, []):
+                        entity_id = f"{entity_type.lower()}:{project_name}:{value}"
+                        session.run(
+                            "MERGE (e:CodeIntelligence:KnowledgeEntity {id:$id}) "
+                            "SET e.type=$type, e.name=$name, e.project=$project "
+                            "WITH e MATCH (d:CodeIntelligence:KnowledgeDocument {id:$doc}) "
+                            "MERGE (d)-[:MENTIONS]->(e)",
+                            id=entity_id, type=entity_type, name=value,
+                            project=project_name, doc=doc_id,
+                        )
+
+                # Release-specific graph knowledge.  The document relationship
+                # records provenance; JIRA -> RELEASED_IN is created only for
+                # RELEASE source documents, where the document itself is the
+                # evidence for that association.
+                for release_name in extracted.get("release_names", []):
+                    release_id = f"release:{project_name}:{release_name}"
+                    session.run(
+                        "MERGE (r:CodeIntelligence:KnowledgeEntity {id:$id}) "
+                        "SET r.type='RELEASE', r.name=$name, r.project=$project "
+                        "WITH r MATCH (d:CodeIntelligence:KnowledgeDocument {id:$doc}) "
+                        "MERGE (d)-[:DESCRIBES_RELEASE]->(r)",
+                        id=release_id, name=release_name, project=project_name, doc=doc_id,
+                    )
+                    if row.source_type == "RELEASE":
+                        for jira in extracted.get("jira_ids", []):
+                            session.run(
+                                "MATCH (j:CodeIntelligence:KnowledgeEntity {id:$jira_id}) "
+                                "MATCH (r:CodeIntelligence:KnowledgeEntity {id:$release_id}) "
+                                "MERGE (j)-[:RELEASED_IN]->(r)",
+                                jira_id=f"jira:{jira}", release_id=release_id,
+                            )
+
+                # Delete only knowledge entities that became completely orphaned.
+                # Shared canonical entities still referenced by any document or
+                # relationship are preserved.
+                session.run(
+                    "MATCH (e:CodeIntelligence:KnowledgeEntity) "
+                    "WHERE NOT (e)--() DELETE e"
+                )
             driver.close()
             return {"enabled": True, "status": "SYNCED", "document_node": doc_id}
         except Exception as exc:

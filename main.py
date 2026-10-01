@@ -196,6 +196,8 @@ from routers.scenario_rag_registry_router import router as scenario_rag_registry
 from routers.cross_project_router import router as cross_project_router
 from routers.knowledge_graph_router import router as knowledge_graph_router
 from routers.knowledge_ingestion_router import router as knowledge_ingestion_router
+from routers.unified_knowledge_search_router import router as unified_knowledge_search_router
+from routers.knowledge_agent_router import router as knowledge_agent_router
 logger = logging.getLogger(__name__)
 
 app = FastAPI(
@@ -236,6 +238,8 @@ app.include_router(scenario_rag_registry_router)
 app.include_router(cross_project_router)
 app.include_router(knowledge_graph_router)
 app.include_router(knowledge_ingestion_router)
+app.include_router(unified_knowledge_search_router)
+app.include_router(knowledge_agent_router)
 
 app.include_router(
     scenario_router
