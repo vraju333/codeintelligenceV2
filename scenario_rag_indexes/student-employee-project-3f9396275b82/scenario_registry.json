@@ -222,7 +222,7 @@
     "scenario_id": 6,
     "scenario_code": "UPDATE_DATA",
     "title": "STUDENT_BAKCUP_UPDATE \u00b7 September 2026 V1",
-    "text": "Test baseline STUDENT_BAKCUP_UPDATE\nParent scenario UPDATE_DATA\nEndpoint PUT /api/persons/{id}\nRelease September 2026 V1\nStatus PASS\nJIRA STUD-202\nJIRA title Student Backup Email Support\nJIRA requirement Add backupEmail for Student.\nThe backup email should be stored and returned when\nstudent details are retrieved or updated.\n\nDomain: Student\nAttribute: backupEmail\nRequest {'test': 'test'}\nExpected response {'test': 'test'}\nActual response {'test': 'test'}",
+    "text": "Test baseline STUDENT_BAKCUP_UPDATE\nParent scenario UPDATE_DATA\nEndpoint PUT /api/persons/{id}\nRelease September 2026 V1\nStatus PASS\nJIRA STUD-202\nJIRA title Add Country to Student Address\nJIRA requirement Add a new attribute named country of type String to Address.\n\nThe country value must be stored as part of the student's address information\nand returned when the student's address is retrieved.\n\nAdding or updating country must not unintentionally modify the existing\naddress fields or unrelated student information.\nRequest {'test': 'test'}\nExpected response {'test': 'test'}\nActual response {'test': 'test'}",
     "metadata": {
       "scenario_id": 6,
       "scenario_code": "UPDATE_DATA",

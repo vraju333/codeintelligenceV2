@@ -8,7 +8,7 @@ from pathlib import Path
 class FileTextExtractor:
     """Extract plain text from supported knowledge-base upload formats."""
 
-    SUPPORTED_EXTENSIONS = {".txt", ".md", ".json", ".pdf"}
+    SUPPORTED_EXTENSIONS = {".txt", ".md", ".json", ".pdf", ".docx"}
 
     def extract(self, filename: str, content: bytes) -> str:
         suffix = Path(filename or "").suffix.lower()
@@ -26,6 +26,8 @@ class FileTextExtractor:
             return self._extract_json(content)
         if suffix == ".pdf":
             return self._extract_pdf(content)
+        if suffix == ".docx":
+            return self._extract_docx(content)
         raise ValueError(f"Unsupported file type: {suffix}")
 
     @staticmethod
@@ -46,6 +48,37 @@ class FileTextExtractor:
         except json.JSONDecodeError as exc:
             raise ValueError(f"Invalid JSON file: {exc.msg}") from exc
         return json.dumps(value, ensure_ascii=False, indent=2)
+
+
+    @staticmethod
+    def _extract_docx(content: bytes) -> str:
+        try:
+            from docx import Document
+        except ImportError as exc:
+            raise ValueError("DOCX support requires the python-docx package") from exc
+
+        try:
+            document = Document(BytesIO(content))
+            blocks = []
+            for paragraph in document.paragraphs:
+                text = paragraph.text.strip()
+                if text:
+                    blocks.append(text)
+
+            # Include table content because business requirements frequently
+            # carry attributes, rules, and acceptance criteria in tables.
+            for table in document.tables:
+                for row in table.rows:
+                    cells = [cell.text.strip() for cell in row.cells]
+                    if any(cells):
+                        blocks.append(" | ".join(cells))
+        except Exception as exc:
+            raise ValueError(f"Unable to read DOCX: {exc}") from exc
+
+        text = "\n".join(blocks).strip()
+        if not text:
+            raise ValueError("No extractable text found in DOCX")
+        return text
 
     @staticmethod
     def _extract_pdf(content: bytes) -> str:

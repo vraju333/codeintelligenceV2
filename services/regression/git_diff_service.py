@@ -362,6 +362,110 @@ class GitDiffService:
         return "\n\n".join(parts)
 
 
+    def _get_head_file_content(self, relative_path: str) -> str:
+        """Return the committed HEAD version of a file, or empty text for a new file."""
+        result = subprocess.run(
+            ["git", "show", f"HEAD:{relative_path}"],
+            cwd=self.git_root,
+            capture_output=True,
+            text=True,
+        )
+        return result.stdout if result.returncode == 0 else ""
+
+    def _extract_declared_fields(self, content: str) -> dict[str, dict]:
+        """Extract Java class fields from complete source, excluding methods/locals."""
+        field_pattern = re.compile(
+            r"""
+            ^\s*
+            (?P<visibility>public|protected|private)\s+
+            (?:(?:static)\s+)?
+            (?:(?:final)\s+)?
+            (?P<type>[A-Za-z_][\w<>\[\],.? ]*)\s+
+            (?P<name>[A-Za-z_]\w*)\s*
+            (?:=[^;]+)?;
+            \s*$
+            """,
+            re.VERBOSE,
+        )
+        fields = {}
+        brace_depth = 0
+        for line_number, line in enumerate((content or "").splitlines(), start=1):
+            # Class fields are normally at depth 1. Checking before updating the
+            # depth also handles declarations immediately after the class opener.
+            match = field_pattern.match(line)
+            if match and brace_depth <= 1:
+                fields[match.group("name")] = {
+                    "name": match.group("name"),
+                    "data_type": " ".join(match.group("type").split()),
+                    "visibility": match.group("visibility"),
+                    "line_number": line_number,
+                    "text": line.strip(),
+                }
+            brace_depth += line.count("{") - line.count("}")
+        return fields
+
+    def _is_business_attribute_candidate(self, relative_path: str) -> bool:
+        """Identify model/data files whose fields are useful requirement-search hints."""
+        path = str(relative_path or "").replace("\\\\", "/").lower()
+        if "/src/test/" in f"/{path}" or path.startswith("src/test/"):
+            return False
+        role_segments = (
+            "/entity/", "/model/", "/domain/", "/dto/",
+            "/request/", "/response/", "/schema/",
+        )
+        return any(segment in f"/{path}" for segment in role_segments)
+
+    def _semantic_field_changes(self, relative_path: str, file_path: Path) -> list[dict]:
+        """Compare complete HEAD/current declarations so unchanged fields are never reported."""
+        before = self._extract_declared_fields(self._get_head_file_content(relative_path))
+        after_content = file_path.read_text(encoding="utf-8") if file_path.exists() else ""
+        after = self._extract_declared_fields(after_content)
+        candidate = self._is_business_attribute_candidate(relative_path)
+        changes = []
+
+        for name in sorted(after.keys() - before.keys()):
+            item = after[name]
+            changes.append({
+                "change_type": "FIELD_ADDED",
+                "label": "Added field",
+                "symbol": name,
+                "data_type": item["data_type"],
+                "line_number": item["line_number"],
+                "added_text": item["text"],
+                "removed_text": None,
+                "business_attribute_candidate": candidate,
+            })
+
+        for name in sorted(before.keys() - after.keys()):
+            item = before[name]
+            changes.append({
+                "change_type": "FIELD_REMOVED",
+                "label": "Removed field",
+                "symbol": name,
+                "data_type": item["data_type"],
+                "line_number": item["line_number"],
+                "added_text": None,
+                "removed_text": item["text"],
+                "business_attribute_candidate": candidate,
+            })
+
+        for name in sorted(before.keys() & after.keys()):
+            old = before[name]
+            new = after[name]
+            if (old["data_type"], old["visibility"]) == (new["data_type"], new["visibility"]):
+                continue
+            changes.append({
+                "change_type": "FIELD_MODIFIED",
+                "label": "Modified field",
+                "symbol": name,
+                "data_type": new["data_type"],
+                "line_number": new["line_number"],
+                "added_text": new["text"],
+                "removed_text": old["text"],
+                "business_attribute_candidate": candidate,
+            })
+        return changes
+
     def _analyse_source_changes(
         self,
         relative_path: str,
@@ -638,6 +742,15 @@ class GitDiffService:
                         )
                     }
                 )
+
+        # Replace diff-line field guesses with a declaration-level HEAD/current comparison.
+        # This prevents unchanged fields that merely moved/reformatted from becoming
+        # false FIELD_MODIFIED signals.
+        changes = [
+            change for change in changes
+            if not str(change.get("change_type") or "").startswith("FIELD_")
+        ]
+        changes.extend(self._semantic_field_changes(relative_path, file_path))
 
         for method in changed_methods or []:
 

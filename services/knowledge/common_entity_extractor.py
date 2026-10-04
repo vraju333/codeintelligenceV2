@@ -72,6 +72,69 @@ class CommonKnowledgeEntityExtractor:
                     values.append(value)
         return values
 
+    @staticmethod
+    def _without_out_of_scope(content: str) -> str:
+        """Remove Out of Scope sections from natural-language entity discovery.
+
+        Explicit labels are still parsed from the full document. This helper is
+        used only for inferred requirement prose so excluded concepts do not
+        become impacted engineering entities.
+        """
+        heading = re.compile(
+            r"(?im)^\s*(?:\d+[.)]?\s*)?out\s+of\s+scope\s*$"
+        )
+        match = heading.search(content)
+        if not match:
+            return content
+
+        start = match.start()
+        tail = content[match.end():]
+        next_heading = re.search(
+            r"(?im)^\s*\d+[.)]?\s+[A-Z][^\r\n]{1,100}\s*$", tail
+        )
+        end = match.end() + (next_heading.start() if next_heading else len(tail))
+        return content[:start] + "\n" + content[end:]
+
+    @classmethod
+    def _requirement_prose_entities(cls, content: str) -> tuple[list[str], list[str]]:
+        """Extract explicit class/attribute statements from business prose.
+
+        This remains deterministic/offline: it recognizes strong grammatical
+        forms instead of guessing arbitrary nouns as code entities.
+        """
+        active = cls._without_out_of_scope(content)
+        attributes: list[str] = []
+        classes: list[str] = []
+
+        # Example: "Add a new Student attribute named temporaryLocation."
+        for owner, attribute in re.findall(
+            r"(?i)\b(?:add|create|introduce|support)\s+(?:a\s+)?(?:new\s+)?"
+            r"([A-Z][A-Za-z0-9_$]*)\s+(?:attribute|field|property)\s+"
+            r"(?:named|called)\s+([A-Za-z_$][\w$]*)\b",
+            active,
+        ):
+            classes.append(owner)
+            attributes.append(attribute)
+
+        # Example: "temporaryLocation belongs to the Student."
+        for attribute, owner in re.findall(
+            r"\b([a-z_$][A-Za-z0-9_$]*)\s+belongs\s+to\s+(?:the\s+)?"
+            r"([A-Z][A-Za-z0-9_$]*)\b",
+            active,
+        ):
+            attributes.append(attribute)
+            classes.append(owner)
+
+        # Example: "new attribute named temporaryLocation" when the owning
+        # class is not repeated in the same sentence.
+        attributes.extend(re.findall(
+            r"(?i)\b(?:new\s+)?(?:attribute|field|property)\s+"
+            r"(?:named|called)\s+([A-Za-z_$][\w$]*)\b",
+            active,
+        ))
+
+        return cls._unique(attributes, 100), cls._unique(classes, 100)
+
     def extract(self, content: str, source_type: str) -> dict[str, Any]:
         source_type = str(source_type or "").strip().upper()
         content = str(content or "")
@@ -114,6 +177,14 @@ class CommonKnowledgeEntityExtractor:
             content, r"commit(?:\s+(?:id|sha|hash))?|git\s+commit"
         ))
         files = self._unique(self._file_values(content), 200)
+
+        # Business requirements are often written as prose rather than
+        # "Attribute: x" / "Class: Y" labels. Infer only strong, explicit
+        # grammatical forms and ignore Out of Scope prose.
+        if source_type in {"REQUIREMENT", "JIRA"}:
+            prose_attributes, prose_classes = self._requirement_prose_entities(content)
+            attributes += prose_attributes
+            classes += prose_classes
 
         # Recognize common code identifiers when they are unambiguous in prose.
         classes += self._unique(re.findall(

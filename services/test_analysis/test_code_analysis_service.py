@@ -23,6 +23,12 @@ class TestCodeAnalysisService:
     VARIABLE_DECL = re.compile(
         r"\b([A-Z][A-Za-z0-9_]*(?:<[^;=()]+>)?)\s+([a-zA-Z_]\w*)\s*(?:=|;|,|\))"
     )
+    NEW_ASSIGNMENT = re.compile(
+        r"\b(?:var\s+)?([a-zA-Z_]\w*)\s*=\s*new\s+([A-Z][A-Za-z0-9_]*)\s*\("
+    )
+    TYPED_NEW_ASSIGNMENT = re.compile(
+        r"\b([A-Z][A-Za-z0-9_]*)\s+([a-zA-Z_]\w*)\s*=\s*new\s+([A-Z][A-Za-z0-9_]*)\s*\("
+    )
 
     def analyse(self) -> dict:
         project = Path(settings.JAVA_PROJECT_PATH).resolve()
@@ -72,7 +78,7 @@ class TestCodeAnalysisService:
             #
             # Example: a GPA promotion-controller test must not count as
             # UPDATE_DATA evidence merely because both scenarios mention GPA.
-            if matched_calls:
+            if matched_calls or matched_classes:
                 result.append({
                     "test_class": test["test_class"],
                     "test_method": test["test_method"],
@@ -80,9 +86,61 @@ class TestCodeAnalysisService:
                     "matched_calls": matched_calls,
                     "matched_classes": matched_classes,
                     "matched_attributes": matched_attrs,
+                    "evidence_basis": (
+                        "FLOW_METHOD_MATCH" if matched_calls else "FLOW_CLASS_MATCH"
+                    ),
                     "assertion_count": test["assertion_count"],
                 })
         return result[:30]
+
+
+    def evidence_for_changed_components(
+        self,
+        changed_classes: list[str],
+        changed_attributes: list[str],
+        analysis: dict,
+    ) -> list[dict]:
+        """Return static JUnit evidence for production components changed in Git.
+
+        This is intentionally labelled COMPONENT evidence. It proves that a test
+        invokes a changed production class/method and touches a changed business
+        attribute; it does not claim endpoint/runtime coverage.
+        """
+        classes = {str(x or "").strip() for x in (changed_classes or []) if x}
+        attrs = {self._norm(x) for x in (changed_attributes or []) if x}
+        result = []
+        seen = set()
+
+        for test in analysis.get("tests", []):
+            calls = set(test.get("production_calls") or [])
+            matched_calls = sorted(
+                c for c in calls
+                if "." in c and c.split(".", 1)[0] in classes
+            )
+            if not matched_calls:
+                continue
+
+            test_attrs = {self._norm(x) for x in (test.get("attributes") or []) if x}
+            matched_attrs = sorted(x for x in test_attrs if x and x in attrs)
+            if attrs and not matched_attrs:
+                continue
+
+            key = (test.get("test_class"), test.get("test_method"), tuple(matched_calls))
+            if key in seen:
+                continue
+            seen.add(key)
+            result.append({
+                "test_class": test.get("test_class"),
+                "test_method": test.get("test_method"),
+                "file": test.get("file"),
+                "matched_calls": matched_calls,
+                "matched_classes": sorted({c.split(".", 1)[0] for c in matched_calls}),
+                "matched_attributes": matched_attrs,
+                "evidence_basis": "CURRENT_GIT_COMPONENT_AND_ATTRIBUTE_MATCH",
+                "evidence_scope": "COMPONENT_STATIC_JUNIT",
+                "assertion_count": test.get("assertion_count", 0),
+            })
+        return result[:50]
 
     def _test_files(self, project: Path) -> list[Path]:
         roots = [
@@ -118,8 +176,16 @@ class TestCodeAnalysisService:
             body = self._balanced_body(text, match.end() - 1)
 
             variable_types = {}
-            for declared_type, variable_name in self.VARIABLE_DECL.findall(body):
+            # Resolve both method-local variables and mapper/service fields declared
+            # at class level. This is important for common JUnit styles such as
+            # `private final AddressMapper mapper = new AddressMapper()` and
+            # `var mapper = new AddressMapper()`.
+            for declared_type, variable_name in self.VARIABLE_DECL.findall(text):
                 variable_types[variable_name] = declared_type.split("<", 1)[0].strip()
+            for variable_name, constructed_type in self.NEW_ASSIGNMENT.findall(text):
+                variable_types[variable_name] = constructed_type
+            for declared_type, variable_name, constructed_type in self.TYPED_NEW_ASSIGNMENT.findall(text):
+                variable_types[variable_name] = constructed_type or declared_type
 
             calls = []
             raw_calls = []

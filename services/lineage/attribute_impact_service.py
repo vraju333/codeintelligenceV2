@@ -68,10 +68,19 @@ class AttributeImpactService:
                 continue
 
             score = len(matched_classes) * 3 + len(matched_methods) * 5
-            if matched_methods:
+
+            # Initial classification. A second pass below separates methods that
+            # are merely reused by many endpoint flows (for example a common
+            # response mapper) from genuine direct/transitive attribute impact.
+            controller_method = ".".join(
+                part for part in (endpoint.get("class_name"), endpoint.get("method_name")) if part
+            )
+            if controller_method and controller_method in direct_methods:
                 relevance = "DIRECT"
+            elif matched_methods:
+                relevance = "TRANSITIVE"
             else:
-                relevance = "CLASS_FLOW"
+                relevance = "SHARED_FLOW"
 
             endpoints.append({
                 "http_method": http_method,
@@ -96,9 +105,29 @@ class AttributeImpactService:
                 ),
             })
 
+        # A direct attribute method that occurs in several unrelated endpoint
+        # flows is normally a shared component (e.g. StudentMapper.toResponse),
+        # not proof that every one of those endpoints directly changes the
+        # attribute. Downgrade those paths to SHARED_FLOW while retaining the
+        # evidence for regression analysis.
+        method_usage = defaultdict(set)
+        for item in endpoints:
+            endpoint_key = (item["http_method"], item["endpoint"])
+            for method in item.get("matched_methods") or []:
+                method_usage[method].add(endpoint_key)
+
+        for item in endpoints:
+            if item["relevance"] != "TRANSITIVE":
+                continue
+            matched = item.get("matched_methods") or []
+            if matched and all(len(method_usage[m]) > 1 for m in matched):
+                item["relevance"] = "SHARED_FLOW"
+                item["score"] = max(1, item["score"] - 4)
+
+        relevance_rank = {"DIRECT": 0, "TRANSITIVE": 1, "SHARED_FLOW": 2}
         endpoints.sort(
             key=lambda item: (
-                0 if item["relevance"] == "DIRECT" else 1,
+                relevance_rank.get(item["relevance"], 9),
                 -item["score"],
                 item["endpoint"],
                 item["http_method"],
@@ -128,6 +157,11 @@ class AttributeImpactService:
 
             matched = sorted(involved.intersection(impacted_classes))
             endpoint_match = key in endpoint_keys
+            endpoint_impact = next(
+                (item for item in endpoints if (item["http_method"], item["endpoint"]) == key),
+                None,
+            )
+            endpoint_relevance = (endpoint_impact or {}).get("relevance")
             text_match = self._scenario_text_matches(
                 scenario, attribute_name, impacted_classes
             )
@@ -166,8 +200,28 @@ class AttributeImpactService:
                 score += 6
                 reasons.append("Scenario text mentions the attribute or related class")
             if endpoint_match:
-                score += 4
-                reasons.append("Scenario uses an attribute-affected endpoint")
+                endpoint_points = {"DIRECT": 8, "TRANSITIVE": 5, "SHARED_FLOW": 2}.get(endpoint_relevance, 2)
+                score += endpoint_points
+                if endpoint_relevance == "DIRECT":
+                    reasons.append("Scenario uses an endpoint that directly reads/writes/checks the attribute")
+                elif endpoint_relevance == "TRANSITIVE":
+                    reasons.append("Scenario reaches attribute logic transitively through the execution flow")
+                else:
+                    reasons.append("Scenario shares a component/response flow that contains attribute handling")
+
+            # Code/static-analysis evidence owns the impact classification.
+            # Historical JIRA/baseline evidence and scenario text can strengthen
+            # traceability/confidence, but must not upgrade SHARED_FLOW to DIRECT.
+            if endpoint_relevance in {"DIRECT", "TRANSITIVE", "SHARED_FLOW"}:
+                scenario_relevance = endpoint_relevance
+            elif matched:
+                # Class-only evidence without a proven endpoint path is useful for
+                # regression analysis, but is not enough to claim direct impact.
+                scenario_relevance = "TRANSITIVE"
+            else:
+                # Historical/text-only evidence remains visible without claiming
+                # that current source code directly depends on the attribute.
+                scenario_relevance = "SHARED_FLOW"
 
             scenarios.append({
                 "id": scenario.id,
@@ -176,12 +230,18 @@ class AttributeImpactService:
                 "http_method": scenario.http_method,
                 "endpoint": scenario.endpoint,
                 "score": score,
+                "relevance": scenario_relevance,
                 "matched_classes": matched,
                 "reasons": reasons,
                 "release_history": release_history,
             })
 
-        scenarios.sort(key=lambda item: (-item["score"], item["scenario_code"]))
+        scenario_rank = {"DIRECT": 0, "TRANSITIVE": 1, "SHARED_FLOW": 2}
+        scenarios.sort(key=lambda item: (
+            scenario_rank.get(item.get("relevance"), 9),
+            -item["score"],
+            item["scenario_code"],
+        ))
 
         self._attach_shared_component_scenarios(
             shared_component_impact=shared_component_impact,
