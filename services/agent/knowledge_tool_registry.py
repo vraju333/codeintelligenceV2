@@ -13,8 +13,11 @@ from services.knowledge.knowledge_ingestion_service import KnowledgeIngestionSer
 from services.knowledge.unified_knowledge_search_service import UnifiedKnowledgeSearchService
 from services.lineage.attribute_impact_service import AttributeImpactService
 from services.regression.git_diff_service import GitDiffService
+from services.jira.jira_live_client import jira_live_client
 from services.test_analysis.test_code_analysis_service import TestCodeAnalysisService
 from baseline_models import ScenarioBaseline, ScenarioTestBaseline, ScenarioReleaseArchive
+from db_models import KnowledgeDocument
+from services.cross_project.engineering_knowledge_graph_service import EngineeringKnowledgeGraphService
 
 
 class KnowledgeToolRegistry:
@@ -28,6 +31,17 @@ class KnowledgeToolRegistry:
 
     def tools(self) -> list[StructuredTool]:
         return [
+            StructuredTool.from_function(
+                func=self.live_jira_issue,
+                name="live_jira_issue",
+                description=(
+                    "Retrieve the authoritative CURRENT issue directly from Live Jira by issue key "
+                    "(for example KAN-4). Use whenever the user explicitly says live Jira/current Jira "
+                    "or asks to analyze a Jira issue against current source code. This is the source of "
+                    "truth for the live requirement text; do not substitute Git, RAG or historical Jira "
+                    "documents for this tool."
+                ),
+            ),
             StructuredTool.from_function(
                 func=self.rag_search,
                 name="rag_search",
@@ -97,6 +111,16 @@ class KnowledgeToolRegistry:
                 ),
             ),
             StructuredTool.from_function(
+                func=self.attribute_test_evidence,
+                name="attribute_test_evidence",
+                description=(
+                    "Find test evidence for a business attribute independently of release/test baselines. "
+                    "Returns matching static JUnit source evidence plus ingested JUnit TEST_REPORT runtime "
+                    "PASS/FAIL evidence for affected scenarios. Use when the user asks which tests cover, "
+                    "validate, exercise, or provide evidence for an attribute."
+                ),
+            ),
+            StructuredTool.from_function(
                 func=self.baseline_history,
                 name="baseline_history",
                 description=(
@@ -123,6 +147,26 @@ class KnowledgeToolRegistry:
                 ),
             ),
         ]
+
+    def live_jira_issue(self, issue_key: str) -> str:
+        """Retrieve one issue directly from the configured Live Jira instance."""
+        issue_key = str(issue_key or "").strip().upper()
+        if not issue_key:
+            raise ValueError("issue_key is required")
+        issue = jira_live_client.get_issue(issue_key)
+        return json.dumps(
+            {
+                "source": "LIVE_JIRA",
+                "authoritative": True,
+                "issue": issue,
+                "evidence_rule": (
+                    "This payload is the authoritative live requirement for this analysis. "
+                    "Current Git evidence must be evaluated separately and must not be treated "
+                    "as implementation evidence for this Jira unless it explicitly matches the requirement."
+                ),
+            },
+            default=str,
+        )
 
     def git_change_analysis(self) -> str:
         """Return clean, normalized current Git changes without sending raw source code to the LLM."""
@@ -282,8 +326,18 @@ class KnowledgeToolRegistry:
         return json.dumps(result, default=str)
 
     def graph_search(self, entity: str) -> str:
-        """Find knowledge documents and entities connected to an exact engineering entity."""
-        direct = self.extractor.extract(str(entity or ""), "REQUIREMENT")
+        """Traverse the Phase 5 engineering graph, then attach document evidence."""
+        value = str(entity or "").strip()
+        if not value:
+            raise ValueError("entity is required")
+
+        engineering_graph = None
+        try:
+            engineering_graph = EngineeringKnowledgeGraphService().impact(value)
+        except Exception as exc:
+            engineering_graph = {"status": "UNAVAILABLE", "error": str(exc)}
+
+        direct = self.extractor.extract(value, "REQUIREMENT")
         seeds = {field: [] for field in self.unified.ENTITY_FIELDS}
         self.unified._merge_entities(seeds, direct)
 
@@ -300,7 +354,7 @@ class KnowledgeToolRegistry:
         rows = self.unified._project_rows(self.db)
         ids = set(graph.get("document_ids") or [])
         evidence = [self.unified._evidence(row) for row in rows if row.id in ids]
-        return json.dumps({"entity": entity, "graph": graph, "evidence": evidence}, default=str)
+        return json.dumps({"entity": entity, "engineering_graph": engineering_graph, "document_graph": graph, "evidence": evidence}, default=str)
 
     def unified_knowledge_search(self, query: str, top_k: int = 5) -> str:
         """Search all connected knowledge and return consolidated evidence."""
@@ -437,50 +491,155 @@ class KnowledgeToolRegistry:
         }
         return json.dumps(payload, default=str)
 
-    def git_sdlc_traceability(self) -> str:
-        """Build evidence-only SDLC lineage for the current Git working tree."""
+    @staticmethod
+    def _normalise_junit_class(value: str | None) -> str:
+        """Return a comparable Java test-class name (FQCN and simple names match)."""
+        text = str(value or "").strip()
+        return text.rsplit(".", 1)[-1].strip().lower()
+
+    @staticmethod
+    def _normalise_junit_method(value: str | None) -> str:
+        """Normalise Gradle/Surefire testcase names to the source-method name.
+
+        Gradle commonly writes `methodName()` while static source analysis returns
+        `methodName`. Parameterized reports can also append `(args)` or `[index]`.
+        """
+        text = str(value or "").strip()
+        if not text:
+            return ""
+        # Remove a trailing invocation/parameter display: foo(), foo(String), etc.
+        if "(" in text:
+            text = text.split("(", 1)[0].strip()
+        # JUnit parameterized display names may be foo[1].
+        if "[" in text:
+            text = text.split("[", 1)[0].strip()
+        return text.lower()
+
+    def _runtime_junit_evidence(self, static_evidence: list[dict]) -> list[dict]:
+        """Correlate static JUnit evidence with ingested runtime TEST_REPORTs.
+
+        Matching is deliberately evidence-only, but tolerant of the naming differences
+        between Java source (`shouldWork`) and Gradle/Surefire XML (`shouldWork()`).
+        Newest matching report wins for each static class+method pair.
+        """
+        if not static_evidence:
+            return []
+
+        project_path = str(getattr(__import__("config").settings, "JAVA_PROJECT_PATH", "") or "").strip()
+        query = (
+            self.db.query(KnowledgeDocument)
+            .filter(KnowledgeDocument.source_type == "TEST_REPORT")
+            .filter(KnowledgeDocument.status == "ACTIVE")
+        )
+        if project_path:
+            # Windows paths are case-insensitive in practice; avoid losing valid evidence
+            # because config/report casing or a trailing slash differs.
+            normal_project = project_path.rstrip("\\/").lower()
+            reports = query.order_by(
+                KnowledgeDocument.created_at.desc(), KnowledgeDocument.id.desc()
+            ).all()
+            reports = [
+                r for r in reports
+                if str(r.project_path or "").rstrip("\\/").lower() == normal_project
+            ]
+        else:
+            reports = query.order_by(
+                KnowledgeDocument.created_at.desc(), KnowledgeDocument.id.desc()
+            ).all()
+
+        wanted: dict[tuple[str, str], dict] = {}
+        for evidence in static_evidence:
+            method = self._normalise_junit_method(evidence.get("test_method"))
+            if not method:
+                continue
+            clazz = self._normalise_junit_class(evidence.get("test_class"))
+            wanted[(clazz, method)] = evidence
+
+        found: dict[tuple[str, str], dict] = {}
+        for report in reports:
+            content = str(report.content or "")
+            current_test = current_class = current_status = None
+
+            def flush() -> None:
+                if not current_test or not current_status:
+                    return
+                report_method = self._normalise_junit_method(current_test)
+                report_class = self._normalise_junit_class(current_class)
+                candidates = [
+                    key for key in wanted
+                    if key[1] == report_method
+                    and (not report_class or not key[0] or key[0] == report_class)
+                ]
+                for key in candidates:
+                    if key in found:
+                        continue  # reports are newest-first
+                    static = wanted[key]
+                    found[key] = {
+                        "test_class": str(static.get("test_class") or current_class or ""),
+                        "test_method": str(static.get("test_method") or current_test or ""),
+                        "status": str(current_status).upper(),
+                        "source_type": "TEST_REPORT",
+                        "report_id": report.id,
+                        "report_title": report.title,
+                        "source_ref": report.source_ref,
+                        "coverage_classification": static.get("coverage_classification"),
+                        "evidence_scope": "SCENARIO_RUNTIME_JUNIT",
+                    }
+
+            for raw_line in content.splitlines():
+                line = raw_line.strip()
+                if line.startswith("Test: "):
+                    flush()
+                    current_test = line[6:].strip()
+                    current_class = None
+                    current_status = None
+                elif line.startswith("Class: "):
+                    current_class = line[7:].strip()
+                elif line.startswith("Qualified Test Class: "):
+                    current_class = line[len("Qualified Test Class: "):].strip()
+                elif line.startswith("Qualified Test Class "):
+                    # Backward compatible with reports ingested before the colon fix.
+                    current_class = line[len("Qualified Test Class "):].strip()
+                elif line.startswith("Result: "):
+                    current_status = line[8:].strip().upper()
+            flush()
+
+        return list(found.values())
+
+    def git_sdlc_traceability(self, jira_id: str | None = None) -> str:
+        """Build evidence-only SDLC lineage for the current Git working tree.
+
+        When jira_id is supplied, captured test/release baselines are classified as
+        CURRENT_JIRA only when the test baseline explicitly contains that Jira ID.
+        Older baselines for the same scenario remain available as historical evidence
+        but never satisfy current-Jira baseline readiness.
+        """
         requirement = json.loads(self.git_requirement_correlation())
         scenario_impact = json.loads(self.git_scenario_impact())
         git_changes = requirement.get("git_changes") or {}
         impacted = scenario_impact.get("impacted_scenarios") or []
-        confirmed_jiras = {
-            str(x or "").strip().upper()
-            for x in (requirement.get("confirmed_jiras") or []) if x
-        }
 
         test_scanner = TestCodeAnalysisService()
         test_analysis = test_scanner.analyse()
-        changed_classes = git_changes.get("changed_classes") or []
-        changed_attributes = git_changes.get("changed_attributes") or []
-
-        # Component evidence is intentionally global. It proves that a current-Git
-        # changed production component/attribute has a static JUnit, but it must
-        # never be copied into every scenario or treated as endpoint-flow coverage.
-        component_junit_evidence = test_scanner.evidence_for_changed_components(
-            changed_classes, changed_attributes, test_analysis
-        )
-
         scenario_lineage = []
-        all_flow_test_evidence = []
-        current_test_baselines = []
-        historical_test_baselines = []
-        current_release_baselines = []
-        historical_release_baselines = []
+        all_test_evidence = []
+        all_test_baselines = []
+        all_releases = []
         gaps = []
+        requested_jira = str(jira_id or "").strip().upper() or None
 
         for scenario in impacted:
             scenario_id = scenario.get("id")
             if scenario_id is None:
                 continue
 
-            # Only executable-flow matches are scenario-level JUnit evidence.
-            flow_junit_evidence = test_scanner.evidence_for_scenario(scenario, test_analysis)
-            for evidence in flow_junit_evidence:
+            junit_evidence = test_scanner.evidence_for_scenario(scenario, test_analysis)
+            runtime_junit_evidence = self._runtime_junit_evidence(junit_evidence)
+            for evidence in junit_evidence:
                 tagged = dict(evidence)
-                tagged["evidence_scope"] = "SCENARIO_FLOW_STATIC_JUNIT"
                 tagged["scenario_id"] = scenario_id
                 tagged["scenario_code"] = scenario.get("scenario_code")
-                all_flow_test_evidence.append(tagged)
+                all_test_evidence.append(tagged)
 
             baselines = (
                 self.db.query(ScenarioBaseline)
@@ -502,7 +661,6 @@ class KnowledgeToolRegistry:
             )
 
             release_rows = []
-            release_by_id = {}
             for baseline in baselines:
                 release = {
                     "baseline_id": baseline.id,
@@ -514,17 +672,15 @@ class KnowledgeToolRegistry:
                     "archived": any(a.baseline_id == baseline.id for a in archives),
                 }
                 release_rows.append(release)
-                release_by_id[baseline.id] = release
+                all_releases.append({"scenario_code": scenario.get("scenario_code"), **release})
 
-            current_rows = []
-            historical_rows = []
-            current_release_ids = set()
+            test_rows = []
+            current_jira_test_rows = []
+            historical_test_rows = []
+            current_jira_baseline_ids = set()
             for test in test_baselines:
-                test_jiras = {
-                    str(x or "").strip().upper()
-                    for x in (test.jira_ids or []) if x
-                }
-                is_current = bool(confirmed_jiras and (test_jiras & confirmed_jiras))
+                jira_ids = [str(x).strip().upper() for x in (test.jira_ids or []) if str(x).strip()]
+                matches_requested_jira = bool(requested_jira and requested_jira in jira_ids)
                 row = {
                     "test_baseline_id": test.id,
                     "name": test.baseline_name,
@@ -533,42 +689,38 @@ class KnowledgeToolRegistry:
                     "baseline_id": test.baseline_id,
                     "code_baseline_version": test.code_baseline_version,
                     "created_at": test.created_at,
-                    "evidence_scope": "CURRENT_CHANGE" if is_current else "HISTORICAL_CONTEXT",
+                    "evidence_scope": (
+                        "CURRENT_JIRA_BASELINE" if matches_requested_jira
+                        else "HISTORICAL_SCENARIO_BASELINE" if requested_jira
+                        else "SCENARIO_BASELINE"
+                    ),
                 }
-                tagged = {"scenario_code": scenario.get("scenario_code"), **row}
-                if is_current:
-                    current_rows.append(row)
-                    current_test_baselines.append(tagged)
+                test_rows.append(row)
+                all_test_baselines.append({"scenario_code": scenario.get("scenario_code"), **row})
+                if matches_requested_jira:
+                    current_jira_test_rows.append(row)
                     if test.baseline_id is not None:
-                        current_release_ids.add(test.baseline_id)
-                else:
-                    historical_rows.append(row)
-                    historical_test_baselines.append(tagged)
+                        current_jira_baseline_ids.add(test.baseline_id)
+                elif requested_jira:
+                    historical_test_rows.append(row)
 
-            scenario_current_releases = []
-            scenario_historical_releases = []
-            for release in release_rows:
-                tagged = {"scenario_code": scenario.get("scenario_code"), **release}
-                if release.get("baseline_id") in current_release_ids:
-                    current = dict(release)
-                    current["evidence_scope"] = "CURRENT_CHANGE"
-                    scenario_current_releases.append(current)
-                    current_release_baselines.append({"scenario_code": scenario.get("scenario_code"), **current})
-                else:
-                    historical = dict(release)
-                    historical["evidence_scope"] = "HISTORICAL_CONTEXT"
-                    scenario_historical_releases.append(historical)
-                    historical_release_baselines.append({"scenario_code": scenario.get("scenario_code"), **historical})
+            # A release baseline belongs to the requested Jira only through an
+            # explicitly Jira-linked test baseline. Scenario reuse alone is not enough.
+            current_jira_release_rows = [
+                row for row in release_rows if row.get("baseline_id") in current_jira_baseline_ids
+            ] if requested_jira else release_rows
 
             scenario_gaps = []
-            if not flow_junit_evidence:
-                scenario_gaps.append("NO_FLOW_JUNIT_EVIDENCE")
-            if not current_rows:
-                scenario_gaps.append("NO_CURRENT_CHANGE_TEST_BASELINE")
-            elif not any(str(t.get("status") or "").upper() == "PASS" for t in current_rows):
-                scenario_gaps.append("NO_PASSING_CURRENT_CHANGE_TEST_BASELINE")
-            if current_rows and not scenario_current_releases:
-                scenario_gaps.append("NO_CURRENT_CHANGE_RELEASE_BASELINE")
+            if not junit_evidence:
+                scenario_gaps.append("NO_STATIC_JUNIT_FLOW_EVIDENCE")
+            effective_releases = current_jira_release_rows if requested_jira else release_rows
+            effective_tests = current_jira_test_rows if requested_jira else test_rows
+            if not effective_releases:
+                scenario_gaps.append("NO_RELEASE_BASELINE_FOR_CURRENT_JIRA" if requested_jira else "NO_RELEASE_BASELINE")
+            if not effective_tests:
+                scenario_gaps.append("NO_TEST_BASELINE_FOR_CURRENT_JIRA" if requested_jira else "NO_TEST_BASELINE")
+            elif not any(str(t.get("status") or "").upper() == "PASS" for t in effective_tests):
+                scenario_gaps.append("NO_PASSING_TEST_BASELINE_FOR_CURRENT_JIRA" if requested_jira else "NO_PASSING_TEST_BASELINE")
 
             if scenario_gaps:
                 gaps.append({
@@ -584,15 +736,18 @@ class KnowledgeToolRegistry:
                 "endpoint": scenario.get("endpoint"),
                 "relevance": scenario.get("relevance"),
                 "changed_attributes": scenario.get("changed_attributes") or [],
-                "flow_junit_evidence": flow_junit_evidence,
-                "component_junit_note": (
-                    "Component-level JUnit evidence is reported globally and is not scenario coverage."
-                    if component_junit_evidence else None
+                "junit_evidence": junit_evidence,
+                "runtime_junit_evidence": runtime_junit_evidence,
+                "runtime_test_status": (
+                    "FAIL" if any(x.get("status") == "FAIL" for x in runtime_junit_evidence)
+                    else "PASS" if runtime_junit_evidence and all(x.get("status") == "PASS" for x in runtime_junit_evidence)
+                    else "PARTIAL" if runtime_junit_evidence
+                    else "NOT_INGESTED"
                 ),
-                "current_change_test_baselines": current_rows,
-                "historical_test_baselines": historical_rows,
-                "current_change_release_baselines": scenario_current_releases,
-                "historical_release_baselines": scenario_historical_releases,
+                "release_baselines": current_jira_release_rows if requested_jira else release_rows,
+                "test_baselines": current_jira_test_rows if requested_jira else test_rows,
+                "historical_release_baselines": release_rows if requested_jira else [],
+                "historical_test_baselines": historical_test_rows if requested_jira else [],
                 "gaps": scenario_gaps,
             })
 
@@ -613,37 +768,28 @@ class KnowledgeToolRegistry:
 
         payload = {
             "closure_status": closure_status,
+            "requested_jira": requested_jira,
             "current_git": git_context,
-            "changed_attributes": changed_attributes,
-            "changed_classes": changed_classes,
+            "changed_attributes": git_changes.get("changed_attributes") or [],
+            "changed_classes": git_changes.get("changed_classes") or [],
             "changed_methods": git_changes.get("changed_methods") or [],
-            "confirmed_jiras": sorted(confirmed_jiras),
+            "confirmed_jiras": requirement.get("confirmed_jiras") or [],
             "confirmed_requirements": requirement.get("confirmed_requirements") or [],
             "impacted_scenario_count": len(impacted),
             "scenario_lineage": scenario_lineage,
             "regression_recommendation": scenario_impact.get("regression_recommendation") or [],
-            "scenario_flow_junit_evidence": all_flow_test_evidence,
-            "component_junit_evidence": component_junit_evidence,
-            "current_change_test_baselines": current_test_baselines,
-            "historical_test_baselines": historical_test_baselines,
-            "current_change_release_baselines": current_release_baselines,
-            "historical_release_baselines": historical_release_baselines,
-            # Backward-compatible names now mean current-change evidence only.
-            "static_junit_evidence": all_flow_test_evidence,
-            "captured_test_baselines": current_test_baselines,
-            "captured_release_baselines": current_release_baselines,
+            "static_junit_evidence": all_test_evidence,
+            "captured_test_baselines": all_test_baselines,
+            "captured_release_baselines": all_releases,
             "traceability_gaps": gaps,
-            "next_actions": self._sdlc_next_actions(
-                dirty, impacted, all_flow_test_evidence, current_test_baselines, current_release_baselines
-            ),
+            "next_actions": self._sdlc_next_actions(dirty, impacted, all_test_evidence, all_test_baselines, all_releases),
             "evidence_rules": {
                 "requirement_jira": "Only confirmed explicit entity evidence from git_requirement_correlation is accepted.",
-                "scenario_junit": "Only FLOW_METHOD_MATCH/FLOW_CLASS_MATCH evidence is attached to a scenario.",
-                "component_junit": "COMPONENT_STATIC_JUNIT is global changed-component evidence and is never treated as endpoint/scenario coverage.",
-                "test_result": "Current-change PASS/FAIL comes only from ScenarioTestBaseline records whose JIRA IDs intersect confirmed current Git JIRAs.",
-                "historical_baseline": "Other test/release baselines are retained only as HISTORICAL_CONTEXT and cannot close the current change.",
+                "junit": "Static Java test-source evidence only; not runtime/JaCoCo coverage.",
+                "test_result": "JUnit runtime PASS/FAIL is reported only from ingested TEST_REPORT evidence; baseline PASS/FAIL remains sourced from ScenarioTestBaseline records.",
                 "commit": "HEAD identifies the current committed parent; dirty working-tree changes are not claimed as committed.",
-                "release": "A release baseline is current-change evidence only when referenced by a current-change test baseline.",
+                "release": "Release lineage is reported only from captured ScenarioBaseline/ReleaseArchive records.",
+                "current_jira_baseline": "When requested_jira is present, only test baselines explicitly linked to that Jira (and their parent release baseline) count as current-Jira baseline evidence. Other scenario baselines are historical only.",
             },
         }
         return json.dumps(payload, default=str)
@@ -699,6 +845,74 @@ class KnowledgeToolRegistry:
         if not actions:
             actions.append("Traceability evidence is complete for the currently detected impacted scenarios.")
         return actions
+
+    def attribute_test_evidence(self, attribute: str) -> str:
+        """Return static + runtime JUnit evidence for an attribute, independent of baselines."""
+        attribute = str(attribute or "").strip()
+        if not attribute:
+            raise ValueError("attribute is required")
+
+        impact = AttributeImpactService()._analyze_code_only(attribute, self.db)
+        scenarios = impact.get("affected_scenarios") or []
+        scanner = TestCodeAnalysisService()
+        analysis = scanner.analyse()
+
+        static_rows = []
+        runtime_rows = []
+        seen_static = set()
+        seen_runtime = set()
+
+        for scenario in scenarios:
+            scenario_payload = dict(scenario)
+            # Attribute-driven evidence must require the requested attribute.
+            scenario_payload["changed_attributes"] = [attribute]
+            static = scanner.evidence_for_scenario(scenario_payload, analysis)
+            runtime = self._runtime_junit_evidence(static)
+
+            for row in static:
+                key = (row.get("test_class"), row.get("test_method"), scenario.get("scenario_code"))
+                if key in seen_static:
+                    continue
+                seen_static.add(key)
+                static_rows.append({
+                    **row,
+                    "scenario_id": scenario.get("id"),
+                    "scenario_code": scenario.get("scenario_code"),
+                    "http_method": scenario.get("http_method"),
+                    "endpoint": scenario.get("endpoint"),
+                    "scenario_relevance": scenario.get("relevance"),
+                })
+
+            for row in runtime:
+                key = (row.get("test_class"), row.get("test_method"), scenario.get("scenario_code"), row.get("report_id"))
+                if key in seen_runtime:
+                    continue
+                seen_runtime.add(key)
+                runtime_rows.append({
+                    **row,
+                    "scenario_id": scenario.get("id"),
+                    "scenario_code": scenario.get("scenario_code"),
+                    "http_method": scenario.get("http_method"),
+                    "endpoint": scenario.get("endpoint"),
+                    "scenario_relevance": scenario.get("relevance"),
+                })
+
+        statuses = {str(x.get("status") or "").upper() for x in runtime_rows}
+        runtime_status = (
+            "FAIL" if "FAIL" in statuses
+            else "PASS" if runtime_rows and statuses <= {"PASS"}
+            else "PARTIAL" if runtime_rows
+            else "NOT_INGESTED"
+        )
+        return json.dumps({
+            "attribute": attribute,
+            "static_junit_evidence": static_rows,
+            "runtime_junit_evidence": runtime_rows,
+            "runtime_test_status": runtime_status,
+            "static_test_count": len({(x.get("test_class"), x.get("test_method")) for x in static_rows}),
+            "runtime_test_count": len({(x.get("test_class"), x.get("test_method")) for x in runtime_rows}),
+            "evidence_rule": "Runtime PASS/FAIL is sourced only from ingested TEST_REPORT documents; baseline history is separate evidence.",
+        }, default=str)
 
     def baseline_history(self, attribute: str) -> str:
         """Return release/test-baseline history already linked to an attribute's impacted scenarios."""

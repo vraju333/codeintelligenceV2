@@ -495,13 +495,18 @@ Loading operations that are not yet represented in Scenario Baselines...
 <input id="testingBaselineName" placeholder="e.g. Address update regression test" type="text"/>
 </label>
 <div class="testing-jira-picker">
-<label>Related JIRAs <span class="muted-text">(optional)</span></label>
+<label>Related JIRAs <span class="muted-text">(saved or live JIRA)</span></label>
 <div class="testing-jira-add-row">
 <select id="testingBaselineJiraSelect">
 <option value="">Select a saved JIRA...</option>
 </select>
 <button class="jira-add-button" type="button" onclick="addTestingBaselineJira()" aria-label="Add selected JIRA">+</button>
 </div>
+<div class="testing-jira-add-row" style="margin-top:8px;">
+<input id="testingBaselineLiveJiraKey" type="text" placeholder="Live JIRA key, e.g. KAN-4" autocomplete="off"/>
+<button class="secondary-button" type="button" onclick="lookupAndAddLiveTestingBaselineJira()">Lookup &amp; Add</button>
+</div>
+<div id="testingBaselineLiveJiraResult" class="muted-text" style="margin-top:6px;"></div>
 <div class="testing-jira-list" id="testingBaselineJiraList">
 <span class="muted-text">No JIRAs added.</span>
 </div>
@@ -523,6 +528,7 @@ Loading operations that are not yet represented in Scenario Baselines...
 </div>
 <div class="scenario-create-actions">
 <button class="secondary-button" onclick="closeTestingBaselineModal()" type="button">Cancel</button>
+<button id="duplicateTestingBaselineButton" class="secondary-button" onclick="duplicateTestingBaselineAsNew()" type="button" style="display:none;">Save as New Test Baseline</button>
 <button id="saveTestingBaselineButton" onclick="saveTestingBaseline()" type="button">Save Testing Baseline</button>
 </div>
 </div>

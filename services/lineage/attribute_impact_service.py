@@ -223,6 +223,17 @@ class AttributeImpactService:
                 # that current source code directly depends on the attribute.
                 scenario_relevance = "SHARED_FLOW"
 
+            # Preserve the executable endpoint-flow evidence on the scenario.
+            # git_scenario_impact() consumes affected_scenarios and later the SDLC
+            # JUnit matcher needs these methods/paths to prove that a test actually
+            # exercises the impacted production flow. Previously this information
+            # was calculated above but dropped here, leaving static_junit_evidence
+            # empty even when TestCodeAnalysisService found the correct tests.
+            endpoint_matched_classes = list((endpoint_impact or {}).get("matched_classes") or [])
+            scenario_matched_classes = sorted(set(matched).union(endpoint_matched_classes))
+            endpoint_matched_methods = list((endpoint_impact or {}).get("matched_methods") or [])
+            dependency_path = (endpoint_impact or {}).get("dependency_path") or []
+
             scenarios.append({
                 "id": scenario.id,
                 "scenario_code": scenario.scenario_code,
@@ -231,7 +242,9 @@ class AttributeImpactService:
                 "endpoint": scenario.endpoint,
                 "score": score,
                 "relevance": scenario_relevance,
-                "matched_classes": matched,
+                "matched_classes": scenario_matched_classes,
+                "matched_methods": endpoint_matched_methods,
+                "dependency_paths": [dependency_path] if dependency_path else [],
                 "reasons": reasons,
                 "release_history": release_history,
             })

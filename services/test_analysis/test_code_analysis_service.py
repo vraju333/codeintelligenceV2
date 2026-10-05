@@ -12,9 +12,17 @@ class TestCodeAnalysisService:
     """
 
     TEST_ANNOTATION = re.compile(r"@(?:Test|ParameterizedTest|RepeatedTest)\b")
-    METHOD = re.compile(
-        r"(?:public|protected|private)?\s*(?:static\s+)?(?:void|[\w<>\[\], ?]+)\s+"
-        r"([A-Za-z_]\w*)\s*\([^)]*\)\s*(?:throws[^{]+)?\{"
+    # Start from the JUnit annotation and capture the method that follows it.
+    # This prevents the generic METHOD regex from accidentally treating the
+    # annotation identifier itself as part of a Java method declaration.
+    TEST_METHOD = re.compile(
+        r"@(?:Test|ParameterizedTest|RepeatedTest)\b"
+        r"(?:\s*\([^)]*\))?"
+        r"(?:\s*@[A-Za-z_][\w.]*(?:\s*\([^)]*\))?)*"
+        r"\s*(?:public|protected|private)?\s*(?:static\s+)?"
+        r"(?:void|[\w<>\[\], ?]+)\s+"
+        r"([A-Za-z_]\w*)\s*\([^)]*\)\s*(?:throws[^{]+)?\{",
+        re.MULTILINE,
     )
     CALL = re.compile(r"\b([A-Za-z_]\w*)\.([A-Za-z_]\w*)\s*\(")
     GETSET = re.compile(r"\b(?:get|set|is)([A-Z][A-Za-z0-9_]*)\s*\(")
@@ -53,46 +61,136 @@ class TestCodeAnalysisService:
         }
 
     def evidence_for_scenario(self, scenario: dict, analysis: dict) -> list[dict]:
-        flow_methods = {
-            str(x.get("changed_symbol") or "")
-            for x in (scenario.get("dependency_paths") or [])
-            if "." in str(x.get("changed_symbol") or "")
-        }
-        flow_methods.update(scenario.get("matched_methods") or [])
-        classes = set(scenario.get("matched_classes") or [])
-        attrs = {self._norm(x) for x in (scenario.get("changed_attributes") or []) if x}
+        """Return static JUnit evidence for one impacted scenario.
+
+        Matching is intentionally evidence-based:
+        1. the test must touch the changed business attribute when the scenario
+           has changed attributes; and
+        2. the test must intersect the scenario's executable production flow.
+
+        The scenario payloads produced by Git/SDLC analysis are not all shaped
+        identically, so collect flow evidence from matched_methods,
+        matched_classes, dependency_paths, execution_flow and flow.
+        """
+        flow_methods: set[str] = set()
+        flow_classes: set[str] = set()
+
+        def add_symbol(value):
+            if value is None:
+                return
+            if isinstance(value, dict):
+                # Support the different flow payloads used by CodeIntelligence.
+                for key in (
+                    "changed_symbol", "method", "method_name", "symbol",
+                    "class_method", "source", "target", "from", "to",
+                ):
+                    add_symbol(value.get(key))
+                for key in (
+                    "path", "steps", "nodes", "methods", "execution_flow",
+                    "flow", "dependency_path",
+                ):
+                    add_symbol(value.get(key))
+                return
+            if isinstance(value, (list, tuple, set)):
+                for item in value:
+                    add_symbol(item)
+                return
+
+            symbol = str(value).strip()
+            if not symbol:
+                return
+
+            # Ignore HTTP endpoint labels such as "PUT /api/persons/{id}".
+            if "/" in symbol and " " in symbol:
+                return
+
+            # Normal Class.method representation.
+            if "." in symbol and " " not in symbol:
+                flow_methods.add(symbol)
+                flow_classes.add(symbol.split(".", 1)[0])
+                return
+
+            # Class-only evidence.
+            if re.fullmatch(r"[A-Za-z_]\w*", symbol):
+                flow_classes.add(symbol)
+
+        add_symbol(scenario.get("matched_methods") or [])
+        add_symbol(scenario.get("matched_classes") or [])
+        add_symbol(scenario.get("dependency_paths") or [])
+        add_symbol(scenario.get("execution_flow") or [])
+        add_symbol(scenario.get("flow") or [])
+
+        # Scenario payloads may expose the changed attributes under different
+        # keys depending on whether they came from Git traceability or impact.
+        raw_attrs = (
+            scenario.get("changed_attributes")
+            or scenario.get("matched_attributes")
+            or scenario.get("attributes")
+            or []
+        )
+        if isinstance(raw_attrs, str):
+            raw_attrs = [raw_attrs]
+        attrs = {self._norm(x) for x in raw_attrs if x}
 
         result = []
+        seen = set()
+
         for test in analysis.get("tests", []):
             calls = set(test.get("production_calls") or [])
             call_classes = {c.split(".", 1)[0] for c in calls if "." in c}
-            test_attrs = {self._norm(x) for x in (test.get("attributes") or [])}
+            test_attrs = {self._norm(x) for x in (test.get("attributes") or []) if x}
+
             matched_calls = sorted(calls & flow_methods)
-            matched_classes = sorted(call_classes & classes)
-            matched_attrs = sorted(x for x in test_attrs if x and x in attrs)
+            matched_classes = sorted(call_classes & flow_classes)
+            matched_attrs = sorted(test_attrs & attrs)
 
-            # Automated test evidence must intersect the executable production
-            # flow for THIS scenario. A shared attribute/class is useful as a
-            # search hint, but by itself is not proof that this JUnit exercises
-            # the affected scenario.
-            #
-            # Example: a GPA promotion-controller test must not count as
-            # UPDATE_DATA evidence merely because both scenarios mention GPA.
-            if matched_calls or matched_classes:
-                result.append({
-                    "test_class": test["test_class"],
-                    "test_method": test["test_method"],
-                    "file": test["file"],
-                    "matched_calls": matched_calls,
-                    "matched_classes": matched_classes,
-                    "matched_attributes": matched_attrs,
-                    "evidence_basis": (
-                        "FLOW_METHOD_MATCH" if matched_calls else "FLOW_CLASS_MATCH"
-                    ),
-                    "assertion_count": test["assertion_count"],
-                })
+            # When the scenario is attribute-driven (KAN-4 => preferredLanguage),
+            # require that exact attribute. This prevents a GPA-only test from
+            # becoming evidence merely because it uses Student/StudentMapper.
+            attribute_ok = bool(matched_attrs) if attrs else True
+
+            # Prefer exact Class.method intersection. If a scenario payload only
+            # carries class-level flow information, class+attribute is acceptable.
+            flow_ok = bool(matched_calls) or bool(matched_classes)
+
+            if not (attribute_ok and flow_ok):
+                continue
+
+            key = (test.get("test_class"), test.get("test_method"))
+            if key in seen:
+                continue
+            seen.add(key)
+
+            if matched_calls and matched_attrs:
+                basis = "FLOW_METHOD_AND_ATTRIBUTE_MATCH"
+            elif matched_calls:
+                basis = "FLOW_METHOD_MATCH"
+            else:
+                basis = "FLOW_CLASS_AND_ATTRIBUTE_MATCH"
+
+            scenario_relevance = str(scenario.get("relevance") or "").upper()
+            if scenario_relevance == "DIRECT":
+                coverage_classification = "DIRECT"
+            elif scenario_relevance == "TRANSITIVE":
+                coverage_classification = "TRANSITIVE"
+            else:
+                coverage_classification = "SHARED"
+
+            result.append({
+                "test_class": test.get("test_class"),
+                "test_method": test.get("test_method"),
+                "file": test.get("file"),
+                "matched_calls": matched_calls,
+                "matched_classes": matched_classes,
+                "matched_attributes": matched_attrs,
+                "evidence_basis": basis,
+                "evidence_scope": "SCENARIO_STATIC_JUNIT",
+                "coverage_classification": coverage_classification,
+                "assertion_count": test.get("assertion_count", 0),
+                "has_assertion": bool(test.get("has_assertion")),
+            })
+
         return result[:30]
-
 
     def evidence_for_changed_components(
         self,
@@ -169,10 +267,7 @@ class TestCodeAnalysisService:
         class_match = re.search(r"\bclass\s+([A-Za-z_]\w*)", text)
         test_class = class_match.group(1) if class_match else file.stem
         result = []
-        for match in self.METHOD.finditer(text):
-            prefix = text[max(0, match.start() - 240):match.start()]
-            if not self.TEST_ANNOTATION.search(prefix):
-                continue
+        for match in self.TEST_METHOD.finditer(text):
             body = self._balanced_body(text, match.end() - 1)
 
             variable_types = {}

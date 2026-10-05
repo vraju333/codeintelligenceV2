@@ -44,5 +44,11 @@ class Settings:
     OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
     OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
 
+    # Live Jira connectivity. Authentication is intentionally minimal for now.
+    JIRA_LIVE_ENABLED = os.getenv("JIRA_LIVE_ENABLED", "false").lower() == "true"
+    JIRA_BASE_URL = os.getenv("JIRA_BASE_URL", "").strip().rstrip("/")
+    JIRA_EMAIL = os.getenv("JIRA_EMAIL", "").strip()
+    JIRA_API_TOKEN = os.getenv("JIRA_API_TOKEN", "").strip()
+
 
 settings = Settings()

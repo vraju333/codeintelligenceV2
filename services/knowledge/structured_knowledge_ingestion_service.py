@@ -193,7 +193,7 @@ class StructuredKnowledgeIngestionService:
             if simple_classname:
                 lines.append(f"Class: {simple_classname}")
             if qualified_classname:
-                lines.append(f"Qualified Test Class {qualified_classname}")
+                lines.append(f"Qualified Test Class: {qualified_classname}")
             lines.append(f"Result: {status}")
             if failure is not None:
                 msg = (failure.attrib.get("message") or (failure.text or "")).strip().replace("\n", " ")

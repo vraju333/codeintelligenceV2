@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import json
 import re
 from typing import Any
 
@@ -16,19 +17,44 @@ from services.agent.knowledge_tool_registry import KnowledgeToolRegistry
 SYSTEM_PROMPT = """You are the CodeIntelligence Knowledge Agent.
 Use the registered tools to answer questions about engineering knowledge.
 Choose tools dynamically from their descriptions; do not call every tool by default.
-Prefer graph_search when the user supplies an exact known engineering entity and asks for relationships.
-Prefer rag_search for semantic/document discovery questions.
-Prefer unified_knowledge_search for complete cross-source impact or 'everything about' questions.
-When a question explicitly asks for all available engineering knowledge, documented knowledge, requirements, releases, architecture, API/schema documentation, or ingested test evidence, unified_knowledge_search is mandatory.
-When such a cross-source question also contains an exact JIRA ID, graph_search is also mandatory for relationship evidence.
-Do not treat Git/SDLC, static analysis, or baseline evidence as a substitute for ingested knowledge documents.
-Use static_code_analysis for current source-code impact of an attribute.
-Use scenario_impact for affected scenario/operation questions.
-Use baseline_history for previous testing, release or baseline-history questions.
-Use git_change_analysis whenever the question refers to current Git changes, current/uncommitted/staged changes, what changed, or asks which requirements/JIRAs relate to current changes.
-For Git-to-requirement/JIRA correlation, call git_change_analysis first. Then use the returned changed attributes/classes as evidence and call unified_knowledge_search for the relevant changed concepts or exact JIRA IDs. Do not infer current Git changes from RAG or graph_search alone.
-For questions spanning current code, scenarios and historical testing, call multiple relevant tools and combine their evidence.
-You may call another tool after observing a tool result if it is genuinely needed.
+
+LIVE JIRA RULES:
+- live_jira_issue is authoritative whenever the user explicitly asks about "live Jira", "current Jira", or a live Jira issue key.
+- Never claim a live Jira requirement was analyzed unless live_jira_issue returned that issue.
+- After reading a live Jira requirement, analyze its named business attributes against CURRENT source code with static_code_analysis and scenario_impact when source/scenario impact is requested.
+- Treat existing dirty Git changes as separate evidence. They prove implementation of the live Jira only when the changed symbols/attributes actually match the live requirement.
+- If the live Jira introduces an attribute that static_code_analysis cannot find, say NOT IMPLEMENTED / NOT FOUND IN CURRENT SOURCE rather than treating unrelated Git changes as implementation.
+- Implementation status must come from current source/static evidence, NOT from whether changes are committed or uncommitted.
+- Existing baselines/JUnit evidence for other Jira IDs are historical/unrelated evidence, not proof for the live Jira.
+- For live-Jira analysis, a release/test baseline counts as CURRENT Jira evidence only when the test baseline explicitly contains that Jira ID. A baseline attached to the same scenario but to another Jira must be labeled historical and must not close the current Jira baseline gap.
+
+KNOWLEDGE RULES:
+- Use graph_search for exact engineering-entity relationship/impact/trace/history questions. For impact + baseline-history questions, combine graph_search with scenario_impact and baseline_history so Neo4j relationship evidence is not skipped.
+- Prefer rag_search for semantic/document discovery questions.
+- Prefer unified_knowledge_search for complete cross-source impact or 'everything about' questions.
+- When a question explicitly asks for all available engineering knowledge, documented knowledge, requirements, releases, architecture, API/schema documentation, or ingested test evidence, unified_knowledge_search is mandatory.
+- When such a cross-source question also contains an exact Jira ID, graph_search is also mandatory.
+- Do not treat Git/SDLC, static analysis, or baseline evidence as a substitute for ingested knowledge documents.
+
+CURRENT SOURCE / SDLC RULES:
+- Use static_code_analysis for current source-code impact of an attribute.
+- Use scenario_impact for affected scenario/operation questions.
+- Use git_scenario_impact when the user asks which scenarios/endpoints/operations are impacted by CURRENT Git changes.
+- Use attribute_test_evidence when the user asks which tests cover/validate/provide evidence for an attribute; this is independent of baselines.
+- Use baseline_history for previous testing, release or baseline-history questions.
+- Use git_sdlc_traceability for end-to-end CURRENT Git SDLC closure/traceability.
+- For questions asking which requirements/JIRAs relate to CURRENT Git changes, use git_requirement_correlation.
+- Use git_change_analysis only when the user asks what changed without asking for requirement/Jira correlation.
+- Never report a requirement/Jira as related merely because RAG returned it or because it is semantically similar.
+- Candidate-only evidence must remain explicitly unconfirmed.
+
+For questions spanning live Jira, current code, scenarios and testing, combine the relevant evidence and clearly separate:
+1. LIVE REQUIREMENT
+2. CURRENT SOURCE-CODE EVIDENCE
+3. CURRENT GIT EVIDENCE
+4. SCENARIO / TEST / BASELINE EVIDENCE
+5. TRACEABILITY GAPS
+
 Base the final answer only on returned tool evidence. Be concise and name the evidence sources used.
 """
 
@@ -45,11 +71,10 @@ class KnowledgeAgentService:
         tools = registry.tools()
         model = self._build_model().bind_tools(tools)
 
-        # Deterministic evidence routing for cross-source engineering-knowledge questions.
-        # The LLM still chooses all other tools dynamically, but it cannot accidentally
-        # skip the ingested knowledge layer when the user explicitly asks for it.
-        mandatory_calls = self._mandatory_knowledge_calls(query, tools)
-        mandatory_calls.extend(self._mandatory_live_evidence_calls(query, tools))
+        # Deterministic routing guarantees authoritative evidence sources that the
+        # LLM must not be allowed to skip. After these calls, the normal LangGraph
+        # agent loop remains dynamic and can choose additional tools from the results.
+        mandatory_calls = self._mandatory_calls(query, tools)
 
         def router_node(state: MessagesState):
             if not mandatory_calls:
@@ -63,21 +88,58 @@ class KnowledgeAgentService:
                 ]
             }
 
+        def enrichment_node(state: MessagesState):
+            # This node runs AFTER mandatory Live Jira/Git tools have returned.
+            # It deterministically derives attributes from the authoritative Jira
+            # payload and emits static/scenario tool calls.
+            enrichment_calls = self._live_jira_enrichment_calls(state["messages"], tools)
+            already_called = {
+                str(call.get("id"))
+                for message in state["messages"]
+                if isinstance(message, AIMessage)
+                for call in (getattr(message, "tool_calls", None) or [])
+                if isinstance(call, dict)
+            }
+            pending = [call for call in enrichment_calls if call["id"] not in already_called]
+            if not pending:
+                return {"messages": []}
+            return {"messages": [AIMessage(content="", tool_calls=pending)]}
+
         def agent_node(state: MessagesState):
             response = model.invoke([SystemMessage(content=SYSTEM_PROMPT), *state["messages"]])
             return {"messages": [response]}
 
         builder = StateGraph(MessagesState)
         builder.add_node("router", router_node)
+        builder.add_node("mandatory_tools", ToolNode(tools))
+        builder.add_node("enrichment", enrichment_node)
+        builder.add_node("enrichment_tools", ToolNode(tools))
         builder.add_node("agent", agent_node)
-        builder.add_node("tools", ToolNode(tools))
+        builder.add_node("agent_tools", ToolNode(tools))
+
         builder.add_edge(START, "router")
+
+        # Guaranteed pre-synthesis path:
+        # router -> live Jira/current Git -> enrichment -> static/scenario -> agent
         if mandatory_calls:
-            builder.add_edge("router", "tools")
+            builder.add_edge("router", "mandatory_tools")
+            builder.add_edge("mandatory_tools", "enrichment")
+            builder.add_conditional_edges(
+                "enrichment",
+                tools_condition,
+                {"tools": "enrichment_tools", END: "agent"},
+            )
+            builder.add_edge("enrichment_tools", "agent")
         else:
             builder.add_edge("router", "agent")
-        builder.add_conditional_edges("agent", tools_condition, {"tools": "tools", END: END})
-        builder.add_edge("tools", "agent")
+
+        # Normal dynamic agent loop remains available after guaranteed evidence.
+        builder.add_conditional_edges(
+            "agent",
+            tools_condition,
+            {"tools": "agent_tools", END: END},
+        )
+        builder.add_edge("agent_tools", "agent")
         graph = builder.compile()
 
         result = graph.invoke({"messages": [HumanMessage(content=query)]})
@@ -116,12 +178,131 @@ class KnowledgeAgentService:
             "tool_results": tool_results,
         }
 
+    @staticmethod
+    def _live_jira_enrichment_calls(messages: list[Any], tools: list[Any]) -> list[dict[str, Any]]:
+        """Turn a returned Live Jira requirement into grounded current-code evidence.
+
+        This intentionally uses the authoritative Jira payload rather than the
+        user's wording. For "Add a new attribute named X" requirements we can
+        deterministically identify X and verify it in current code/scenarios.
+        """
+        available = {tool.name for tool in tools}
+        payloads: list[dict[str, Any]] = []
+
+        for message in messages:
+            # ToolMessage is intentionally not imported just for isinstance:
+            # LangChain tool results expose name/content consistently.
+            if getattr(message, "name", None) != "live_jira_issue":
+                continue
+            raw = getattr(message, "content", "")
+            try:
+                parsed = json.loads(raw) if isinstance(raw, str) else raw
+            except Exception:
+                continue
+            if isinstance(parsed, dict):
+                payloads.append(parsed)
+
+        attributes: list[str] = []
+        for payload in payloads:
+            issue = payload.get("issue") if isinstance(payload, dict) else None
+            if not isinstance(issue, dict):
+                continue
+            requirement = " ".join(
+                str(issue.get(key) or "")
+                for key in ("summary", "description")
+            )
+
+            # Primary deterministic pattern for our Jira requirements:
+            # "Add a new attribute named preferredLanguage ..."
+            patterns = (
+                r"\battribute\s+named\s+[`'\"]?([A-Za-z_][A-Za-z0-9_]*)",
+                r"\bfield\s+named\s+[`'\"]?([A-Za-z_][A-Za-z0-9_]*)",
+                r"\badd\s+[`'\"]?([A-Za-z_][A-Za-z0-9_]*)[`'\"]?\s+to\b",
+            )
+            for pattern in patterns:
+                for match in re.findall(pattern, requirement, flags=re.IGNORECASE):
+                    if match and match.lower() not in {
+                        "a", "an", "the", "new", "string", "student", "address"
+                    }:
+                        attributes.append(match)
+
+        # Preserve order and spelling while preventing duplicate tool calls.
+        attributes = list(dict.fromkeys(attributes))[:5]
+        calls: list[dict[str, Any]] = []
+        for index, attribute in enumerate(attributes, start=1):
+            safe_id = re.sub(r"[^A-Za-z0-9]+", "_", attribute).strip("_").lower()
+            if "static_code_analysis" in available:
+                calls.append({
+                    "name": "static_code_analysis",
+                    "args": {"attribute": attribute},
+                    "id": f"live_jira_static_{index}_{safe_id}",
+                })
+            if "scenario_impact" in available:
+                calls.append({
+                    "name": "scenario_impact",
+                    "args": {"attribute": attribute},
+                    "id": f"live_jira_scenario_{index}_{safe_id}",
+                })
+        return calls
 
     @staticmethod
-    def _mandatory_knowledge_calls(query: str, tools: list[Any]) -> list[dict[str, Any]]:
-        """Guarantee knowledge retrieval only when the user explicitly asks cross-source knowledge."""
-        lowered = str(query or "").lower()
+    def _extract_graph_entity(query: str) -> str | None:
+        """Extract a concrete engineering entity from a relationship-style question.
+
+        This is deliberately conservative. It supports quoted/backticked symbols,
+        Jira IDs, and the common "for/of <identifier>" wording used by the
+        CodeIntelligence UI (for example: "baseline history for gpa").
+        """
+        text = str(query or "").strip()
+        if not text:
+            return None
+
+        jira = re.search(r"\b[A-Z][A-Z0-9]+-\d+\b", text.upper())
+        if jira:
+            return jira.group(0)
+
+        quoted = re.findall(r"[`'\"]([A-Za-z_][A-Za-z0-9_.$/-]*)[`'\"]", text)
+        if quoted:
+            return quoted[-1].rstrip(".,?!:;")
+
+        patterns = (
+            r"(?:for|of|about|on)\s+([A-Za-z_][A-Za-z0-9_.$/-]*)[?.!]*\s*$",
+            r"(?:impact|history|trace|dependencies|relationships?)\s+(?:for|of)\s+([A-Za-z_][A-Za-z0-9_.$/-]*)",
+        )
+        stop = {"the", "this", "that", "code", "scenario", "baseline", "history", "impact"}
+        for pattern in patterns:
+            match = re.search(pattern, text, flags=re.IGNORECASE)
+            if match:
+                entity = match.group(1).rstrip(".,?!:;")
+                if entity and entity.lower() not in stop:
+                    return entity
+        return None
+
+    @staticmethod
+    def _mandatory_calls(query: str, tools: list[Any]) -> list[dict[str, Any]]:
+        """Guarantee authoritative Live Jira/knowledge/current-evidence routing."""
+        text = str(query or "")
+        lowered = text.lower()
         available = {tool.name for tool in tools}
+        calls: list[dict[str, Any]] = []
+
+        jira_ids = list(dict.fromkeys(
+            re.findall(r"\b[A-Z][A-Z0-9]+-\d+\b", text.upper())
+        ))
+
+        # A user explicitly asking for LIVE Jira must always retrieve the actual issue.
+        live_jira_requested = (
+            "live jira" in lowered
+            or "current jira" in lowered
+            or "jira live" in lowered
+        )
+        if live_jira_requested and jira_ids and "live_jira_issue" in available:
+            for index, jira_id in enumerate(jira_ids[:3], start=1):
+                calls.append({
+                    "name": "live_jira_issue",
+                    "args": {"issue_key": jira_id},
+                    "id": f"mandatory_live_jira_{index}",
+                })
 
         cross_source_markers = (
             "all available engineering knowledge",
@@ -140,16 +321,12 @@ class KnowledgeAgentService:
             or "cross-source" in lowered
             or sum(marker in lowered for marker in cross_source_markers) >= 2
         )
-
-        calls: list[dict[str, Any]] = []
         if cross_source and "unified_knowledge_search" in available:
             calls.append({
                 "name": "unified_knowledge_search",
-                "args": {"query": query},
+                "args": {"query": text},
                 "id": "mandatory_unified_knowledge",
             })
-
-        jira_ids = list(dict.fromkeys(re.findall(r"\b[A-Z][A-Z0-9]+-\d+\b", query.upper())))
         if cross_source and jira_ids and "graph_search" in available:
             for index, jira_id in enumerate(jira_ids[:3], start=1):
                 calls.append({
@@ -158,105 +335,72 @@ class KnowledgeAgentService:
                     "id": f"mandatory_graph_{index}",
                 })
 
-        return calls
+        # Phase 5: relationship-aware questions about a concrete engineering entity
+        # must include Neo4j evidence.  The LLM can still choose additional tools,
+        # but it cannot silently answer an impact/history question only from the
+        # relational/static services and skip the Engineering Knowledge Graph.
+        graph_intent = any(marker in lowered for marker in (
+            "impact", "relationship", "relationships", "connected", "dependency",
+            "dependencies", "upstream", "downstream", "trace", "flow",
+            "baseline history", "release history", "what uses", "what is affected",
+            "affected by", "history for", "history of",
+        ))
+        if graph_intent and "graph_search" in available:
+            entity = KnowledgeAgentService._extract_graph_entity(text)
+            if entity:
+                calls.append({
+                    "name": "graph_search",
+                    "args": {"entity": entity},
+                    "id": "mandatory_phase5_graph",
+                })
 
+        # Test-evidence questions must not be answered from baseline history alone.
+        test_evidence_requested = any(marker in lowered for marker in (
+            "which tests", "what tests", "test evidence", "tests provide evidence",
+            "tests cover", "test covers", "tests validate", "test validates",
+            "tested by", "junit evidence", "runtime test"
+        ))
+        if test_evidence_requested and "attribute_test_evidence" in available:
+            # Prefer explicit camelCase/snake_case/business identifiers following common
+            # test-evidence phrases. Fall back to the last identifier-like token.
+            patterns = (
+                r"(?:for|cover|covers|validate|validates)\s+`?([A-Za-z_][A-Za-z0-9_]*)`?",
+                r"evidence\s+for\s+`?([A-Za-z_][A-Za-z0-9_]*)`?",
+            )
+            attribute = None
+            for pattern in patterns:
+                match = re.search(pattern, text, re.I)
+                if match:
+                    attribute = match.group(1)
+                    break
+            if attribute:
+                calls.append({
+                    "name": "attribute_test_evidence",
+                    "args": {"attribute": attribute},
+                    "id": "mandatory_attribute_test_evidence",
+                })
 
-    @classmethod
-    def _mandatory_live_evidence_calls(cls, query: str, tools: list[Any]) -> list[dict[str, Any]]:
-        """Guarantee live evidence when a cross-source question explicitly asks for current reality."""
-        lowered = str(query or "").lower()
-        available = {tool.name for tool in tools}
-
-        live_markers = (
+        # Keep current Git evidence separate when the user explicitly asks to compare
+        # a live Jira against current source/current implementation.
+        current_evidence_requested = any(marker in lowered for marker in (
             "current source",
-            "current source-code",
+            "current source code",
             "current code",
-            "current git",
-            "git changes",
-            "source-code impact",
-            "source code impact",
-            "traceability gaps",
-            "all available engineering knowledge",
-        )
-        wants_live = any(marker in lowered for marker in live_markers)
-        if not wants_live:
-            return []
-
-        calls: list[dict[str, Any]] = []
-
-        # One evidence-only SDLC call covers the current Git working tree, confirmed
-        # JIRAs, scenarios, JUnit evidence and baseline/release readiness.
-        if "git_sdlc_traceability" in available:
+            "implemented",
+            "implementation",
+            "git",
+            "current changes",
+            "uncommitted",
+            "staged",
+        ))
+        if current_evidence_requested and "git_sdlc_traceability" in available:
             calls.append({
                 "name": "git_sdlc_traceability",
-                "args": {},
+                "args": {"jira_id": jira_ids[0]} if live_jira_requested and jira_ids else {},
                 "id": "mandatory_current_git_sdlc",
             })
 
-        # Attribute-specific live evidence is intentionally limited to identifiers
-        # explicitly named by the user. Never manufacture attributes from retrieved docs.
-        attributes = cls._explicit_attribute_candidates(query)
-        for index, attribute in enumerate(attributes[:6], start=1):
-            if "static_code_analysis" in available:
-                calls.append({
-                    "name": "static_code_analysis",
-                    "args": {"attribute": attribute},
-                    "id": f"mandatory_static_{index}",
-                })
-            if "baseline_history" in available:
-                calls.append({
-                    "name": "baseline_history",
-                    "args": {"attribute": attribute},
-                    "id": f"mandatory_baseline_{index}",
-                })
-
         return calls
-
-    @staticmethod
-    def _explicit_attribute_candidates(query: str) -> list[str]:
-        """Extract likely attribute identifiers explicitly written in the question."""
-        text = str(query or "")
-        candidates: list[str] = []
-
-        # Backticks/quotes are strong identifier signals.
-        for value in re.findall(r"[`'\"]([A-Za-z_][A-Za-z0-9_]*)[`'\"]", text):
-            candidates.append(value)
-
-        # camelCase and snake_case are also strong source-attribute signals.
-        for token in re.findall(r"\b[A-Za-z_][A-Za-z0-9_]*\b", text):
-            if "_" in token or (re.search(r"[a-z][A-Z]", token) is not None):
-                candidates.append(token)
-
-        # For natural-language forms such as "country and temporaryLocation changes",
-        # inspect the short phrase immediately before change/changes.
-        for match in re.finditer(
-            r"(?:\b([A-Za-z][A-Za-z0-9_]*)\b(?:\s+and\s+|\s*,\s*)){0,3}"
-            r"\b([A-Za-z][A-Za-z0-9_]*)\b\s+changes?\b",
-            text,
-            flags=re.IGNORECASE,
-        ):
-            candidates.extend(group for group in match.groups() if group)
-
-        stop = {
-            "all", "available", "engineering", "knowledge", "current", "source", "code",
-            "sourcecode", "git", "requirement", "requirements", "release", "architecture",
-            "component", "components", "api", "endpoint", "endpoints", "schema", "schemas",
-            "executed", "test", "evidence", "traceability", "gap", "gaps", "documented",
-            "impact", "change", "changes", "jira", "jiras", "related", "using", "show",
-            "analyze", "analysis", "and", "the", "with", "from", "against",
-        }
-        jira_pattern = re.compile(r"^[A-Z][A-Z0-9]+-\d+$", re.IGNORECASE)
-
-        result: list[str] = []
-        seen: set[str] = set()
-        for candidate in candidates:
-            value = candidate.strip()
-            key = value.lower()
-            if not value or key in stop or jira_pattern.match(value) or key in seen:
-                continue
-            seen.add(key)
-            result.append(value)
-        return result
 
     @staticmethod
     def _message_text(message: AIMessage) -> str:

@@ -1568,6 +1568,37 @@ function addTestingBaselineJira() {
     select.value = "";
 }
 
+async function lookupAndAddLiveTestingBaselineJira() {
+    const input = document.getElementById("testingBaselineLiveJiraKey");
+    const result = document.getElementById("testingBaselineLiveJiraResult");
+    const issueKey = String(input?.value || "").trim().toUpperCase();
+    if (!issueKey) {
+        if (result) result.textContent = "Enter a JIRA key first.";
+        return;
+    }
+    if (result) result.textContent = `Looking up ${issueKey} in live JIRA...`;
+    try {
+        const response = await fetch(`/api/integrations/jira/issues/${encodeURIComponent(issueKey)}`);
+        const data = await response.json();
+        if (!response.ok) {
+            const detail = data?.detail;
+            throw new Error(typeof detail === "object" ? JSON.stringify(detail) : (detail || `HTTP ${response.status}`));
+        }
+        const issue = data?.issue || {};
+        const key = String(issue.key || issueKey).trim().toUpperCase();
+        if (!testingBaselineJiraIds.includes(key)) testingBaselineJiraIds.push(key);
+        renderTestingBaselineJiras();
+        if (input) input.value = "";
+        if (result) {
+            const summary = String(issue.summary || "").trim();
+            const status = String(issue.status || "").trim();
+            result.textContent = `${key}${summary ? ` — ${summary}` : ""}${status ? ` [${status}]` : ""} · verified from LIVE JIRA`;
+        }
+    } catch (error) {
+        if (result) result.textContent = `Live JIRA lookup failed: ${error.message || error}`;
+    }
+}
+
 function removeTestingBaselineJira(index) {
     testingBaselineJiraIds.splice(Number(index), 1);
     renderTestingBaselineJiras();
@@ -1580,6 +1611,12 @@ async function openTestingBaselineModal(scenarioId) {
     if (editTitle) editTitle.textContent = "Add Testing Baseline";
     const editSaveButton = document.getElementById("saveTestingBaselineButton");
     if (editSaveButton) editSaveButton.textContent = "Save Testing Baseline";
+    const duplicateButton = document.getElementById("duplicateTestingBaselineButton");
+    if (duplicateButton) duplicateButton.style.display = "none";
+    const liveJiraInput = document.getElementById("testingBaselineLiveJiraKey");
+    const liveJiraResult = document.getElementById("testingBaselineLiveJiraResult");
+    if (liveJiraInput) liveJiraInput.value = "";
+    if (liveJiraResult) liveJiraResult.textContent = "";
     const editReleaseSelect = document.getElementById("testingBaselineReleaseSelect");
     const editVersionSelect = document.getElementById("testingBaselineVersionSelect");
     if (editReleaseSelect) editReleaseSelect.disabled = false;
@@ -1890,6 +1927,8 @@ async function editSelectedTestingBaseline() {
     if (title) title.textContent = "Edit Testing Baseline";
     const button = document.getElementById("saveTestingBaselineButton");
     if (button) button.textContent = "Save Changes";
+    const duplicateButton = document.getElementById("duplicateTestingBaselineButton");
+    if (duplicateButton) duplicateButton.style.display = "inline-block";
 
     document.getElementById("testingBaselineName").value = baseline.baseline_name || "";
     document.getElementById("testingBaselineRequest").value = prettyScenarioJson(baseline.request_json);
@@ -1901,6 +1940,26 @@ async function editSelectedTestingBaseline() {
 }
 
 
+
+async function duplicateTestingBaselineAsNew() {
+    if (!editingTestingBaselineId) return;
+    const nameInput = document.getElementById("testingBaselineName");
+    const currentName = String(nameInput?.value || "").trim();
+    const newName = window.prompt("Name for the new Test Baseline. The existing baseline will remain unchanged.", currentName ? `${currentName} - revised` : "Revised test baseline");
+    if (!newName || !String(newName).trim()) return;
+    if (nameInput) nameInput.value = String(newName).trim();
+    editingTestingBaselineId = null;
+    const title = document.querySelector("#testingBaselineModal h2");
+    if (title) title.textContent = "Create New Test Baseline";
+    const saveButton = document.getElementById("saveTestingBaselineButton");
+    if (saveButton) saveButton.textContent = "Save New Test Baseline";
+    const duplicateButton = document.getElementById("duplicateTestingBaselineButton");
+    if (duplicateButton) duplicateButton.style.display = "none";
+    const releaseSelect = document.getElementById("testingBaselineReleaseSelect");
+    const versionSelect = document.getElementById("testingBaselineVersionSelect");
+    if (releaseSelect) releaseSelect.disabled = false;
+    if (versionSelect) versionSelect.disabled = false;
+}
 
 async function editTestingBaselineFromRelease(scenarioId, testBaselineId) {
     try {
