@@ -49,6 +49,32 @@ KNOWLEDGE RULES:
 - When such a cross-source question also contains an exact Jira ID, graph_search is also mandatory.
 - Do not treat Git/SDLC, static analysis, or baseline evidence as a substitute for ingested knowledge documents.
 
+AI ENGINEERING ASSISTANT RULES:
+- Use engineering_assistant when the user asks for a developer-oriented review of CURRENT changes, what to do next, an engineering brief, or a consolidated test/release action plan.
+- The engineering_assistant result is an evidence-grounded orchestration view over current-change intelligence; preserve exact entity names, test evidence, risks and release-readiness status.
+- Do not turn recommendations into claims that tests passed, requirements were approved, Jira links were proven, or release was approved.
+- Prefer engineering_assistant over manually composing many lower-level tools when the request is explicitly for a consolidated developer action plan.
+
+REGRESSION & RELEASE INTELLIGENCE RULES:
+- Use release_regression_intelligence for CURRENT-change regression recommendations, coverage gaps and release-readiness questions.
+- Release intelligence composes current Git/source impact, scenarios, captured test baselines, static test evidence, Phase 7 deep-code evidence, Phase 6 mappings and Phase 8 discovery.
+- Never describe READY_FOR_RELEASE_REVIEW as automatic release approval. Preserve BLOCKED, REVIEW_REQUIRED, READY_FOR_RELEASE_REVIEW or NO_CHANGES exactly.
+- Phase 8 evidence inside release intelligence remains discovery evidence; do not promote semantic matches into proven relationships.
+
+PHASE 8 ENTERPRISE HYBRID RAG RULES:
+- Use enterprise_hybrid_search for broad semantic/lexical discovery across engineering knowledge.
+- Phase 8 uses PostgreSQL pgvector + BM25 + metadata filtering + deterministic reranking; it does not use FAISS.
+- Retrieval results are candidate discovery evidence, not authoritative relationship proof. Verify exact relationships with graph/mapping/static/baseline tools when required.
+- Preserve source_type, title and metadata returned by enterprise_hybrid_search.
+
+PHASE 7 DEEP CODE INTELLIGENCE RULES:
+- Use control_flow_analysis for branch/condition/threshold/decision questions about an attribute.
+- Use data_flow_analysis for assignment, transformation, value propagation, source-to-target and cross-method flow questions.
+- Use shared_component_impact for reused mapper/helper/common-component ripple-effect questions.
+- Use deep_code_intelligence for broad deeper-code/everything-about-flow questions.
+- Phase 7 source evidence is deterministic. Preserve condition expressions, qualified method names, files and line numbers exactly.
+- Never infer a branch or data-flow edge that is not present in Phase 7 tool evidence.
+
 CURRENT SOURCE / SDLC RULES:
 - Use static_code_analysis for current source-code impact of an attribute.
 - Use scenario_impact for affected scenario/operation questions.
@@ -102,9 +128,33 @@ class KnowledgeAgentService:
             call.get("id") == "mandatory_phase6_relative_mapping_validation"
             for call in mandatory_calls
         )
+        deterministic_phase8_tools = {
+            str(call.get("name"))
+            for call in mandatory_calls
+            if str(call.get("id") or "").startswith("mandatory_phase8_")
+        }
+        deterministic_release_tools = {
+            str(call.get("name"))
+            for call in mandatory_calls
+            if str(call.get("id") or "").startswith("mandatory_release_")
+        }
+        deterministic_phase7_tools = {
+            str(call.get("name"))
+            for call in mandatory_calls
+            if str(call.get("id") or "").startswith("mandatory_phase7_")
+        }
+        # A deterministic Phase 7 call is authoritative for the requested source
+        # semantic.  Do not let the model "rescue" that same turn with the legacy
+        # static analyzer; otherwise a bad Phase 7 extraction can be hidden by a
+        # second LLM-selected static_code_analysis call.
+        phase7_dynamic_block = set(deterministic_phase7_tools) | set(deterministic_phase8_tools) | set(deterministic_release_tools)
+        if deterministic_phase7_tools:
+            phase7_dynamic_block.add("static_code_analysis")
+
         dynamic_tools = [
             tool for tool in tools
             if not (deterministic_relative_validation and tool.name == "mapping_validation")
+            and tool.name not in phase7_dynamic_block
         ]
         model = self._build_model().bind_tools(dynamic_tools)
 
@@ -392,6 +442,98 @@ class KnowledgeAgentService:
         lowered = text.lower()
         available = {tool.name for tool in tools}
         calls: list[dict[str, Any]] = []
+
+        # Deterministic routing for the developer-facing Engineering Assistant.
+        engineering_assistant_markers = (
+            "engineering assistant", "developer assistant", "review my current changes",
+            "review current changes", "developer brief", "engineering brief",
+            "what should i do next", "what should we do next",
+            "developer test plan", "change review and test plan",
+        )
+        if any(marker in lowered for marker in engineering_assistant_markers) and "engineering_assistant" in available:
+            calls.append({
+                "name": "engineering_assistant",
+                "args": {},
+                "id": "mandatory_engineering_assistant",
+            })
+
+        # Deterministic routing for current-change regression/release decisions.
+        release_intelligence_markers = (
+            "release readiness", "ready for release", "release ready",
+            "what should i retest", "what should we retest", "what to retest",
+            "regression recommendation", "regression recommendations",
+            "coverage gap", "coverage gaps", "release review",
+        )
+        if (
+            not any(call.get("name") == "engineering_assistant" for call in calls)
+            and any(marker in lowered for marker in release_intelligence_markers)
+            and "release_regression_intelligence" in available
+        ):
+            calls.append({
+                "name": "release_regression_intelligence",
+                "args": {},
+                "id": "mandatory_release_regression_intelligence",
+            })
+
+        # Phase 8 deterministic routing for explicit enterprise/hybrid discovery.
+        phase8_markers = (
+            "enterprise hybrid", "hybrid rag", "enterprise rag",
+            "search across all engineering knowledge",
+            "search all engineering knowledge",
+            "search across engineering knowledge",
+        )
+        if any(marker in lowered for marker in phase8_markers) and "enterprise_hybrid_search" in available:
+            calls.append({
+                "name": "enterprise_hybrid_search",
+                "args": {"query": text, "top_k": 10},
+                "id": "mandatory_phase8_enterprise_hybrid_search",
+            })
+
+        # Phase 7 deterministic routing: deeper source semantics must come from the
+        # source parser, not from an LLM guess. Attribute extraction intentionally
+        # supports common forms such as "gpa > 7", "flow of gpa" and "gpa condition".
+        phase7_attr = None
+        # Prefer intent-aware patterns before generic patterns.  This avoids taking
+        # question words such as "What" from "What condition uses GPA?".
+        p7_patterns = (
+            r"\b(?:shared\s+components?|shared\s+mapper|common\s+components?|components?)\s+(?:are\s+)?(?:impacted|affected)\s+by\s+([A-Za-z_][A-Za-z0-9_]*)\b",
+            r"\b(?:impacted|affected)\s+by\s+([A-Za-z_][A-Za-z0-9_]*)\b",
+            r"\b(?:condition|branch|threshold|decision)\s+(?:uses?|reads?|checks?|references?)\s+([A-Za-z_][A-Za-z0-9_]*)\b",
+            r"\bwhere\s+(?:does|is|are)\s+([A-Za-z_][A-Za-z0-9_]*)\s+(?:flow|assigned|used|read|written|propagat(?:e|ed|ing))\b",
+            r"\b(?:flow|data\s+flow|impact|condition|branch)\s+(?:of|for|about)\s+([A-Za-z_][A-Za-z0-9_]*)\b",
+            r"\b(?:of|for|about)\s+([A-Za-z_][A-Za-z0-9_]*)\b",
+            r"\b([A-Za-z_][A-Za-z0-9_]*)\s*(?:>=|<=|==|!=|>|<)",
+            r"\b([A-Za-z_][A-Za-z0-9_]*)\s+(?:condition|branch|flow|data\s+flow|impact)\b",
+        )
+        p7_match = None
+        for pattern in p7_patterns:
+            p7_match = re.search(pattern, text, flags=re.IGNORECASE)
+            if p7_match:
+                break
+        if p7_match:
+            candidate = p7_match.group(1).strip()
+            p7_stop_words = {
+                "what", "which", "where", "when", "why", "who", "how",
+                "the", "a", "an", "code", "source", "current", "shared",
+                "branch", "condition", "threshold", "decision", "data", "flow",
+                "impact", "component", "components", "method", "methods",
+            }
+            if candidate.lower() not in p7_stop_words:
+                phase7_attr = candidate
+
+        p7_control = any(x in lowered for x in ("condition", "branch", "threshold", "decision", "control flow", "control-flow")) or bool(re.search(r"(?:>=|<=|==|!=|>|<)", text))
+        p7_data = any(x in lowered for x in ("data flow", "data-flow", "propagat", "assignment", "assigned", "transformation", "where does", "where is"))
+        p7_shared = any(x in lowered for x in ("shared component", "shared mapper", "common component", "ripple effect", "reused mapper"))
+        p7_all = any(x in lowered for x in ("deep code", "deeper code", "complete code flow", "everything about the code flow", "full code flow"))
+
+        if phase7_attr and p7_all and "deep_code_intelligence" in available:
+            calls.append({"name": "deep_code_intelligence", "args": {"attribute": phase7_attr}, "id": "mandatory_phase7_deep_code"})
+        elif phase7_attr and p7_control and "control_flow_analysis" in available:
+            calls.append({"name": "control_flow_analysis", "args": {"attribute": phase7_attr}, "id": "mandatory_phase7_control_flow"})
+        elif phase7_attr and p7_data and "data_flow_analysis" in available:
+            calls.append({"name": "data_flow_analysis", "args": {"attribute": phase7_attr}, "id": "mandatory_phase7_data_flow"})
+        elif phase7_attr and p7_shared and "shared_component_impact" in available:
+            calls.append({"name": "shared_component_impact", "args": {"attribute": phase7_attr}, "id": "mandatory_phase7_shared_impact"})
 
         jira_ids = list(dict.fromkeys(
             re.findall(r"\b[A-Z][A-Z0-9]+-\d+\b", text.upper())

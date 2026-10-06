@@ -201,6 +201,10 @@ from routers.unified_knowledge_search_router import router as unified_knowledge_
 from routers.knowledge_agent_router import router as knowledge_agent_router
 from routers.engineering_knowledge_graph_router import router as engineering_knowledge_graph_router
 from routers.mapping_intelligence_router import router as mapping_intelligence_router
+from routers.deep_code_intelligence_router import router as deep_code_intelligence_router
+from routers.enterprise_hybrid_rag_router import router as enterprise_hybrid_rag_router
+from routers.release_intelligence_router import router as release_intelligence_router
+from routers.engineering_assistant_router import router as engineering_assistant_router
 logger = logging.getLogger(__name__)
 
 app = FastAPI(
@@ -246,6 +250,10 @@ app.include_router(unified_knowledge_search_router)
 app.include_router(knowledge_agent_router)
 app.include_router(engineering_knowledge_graph_router)
 app.include_router(mapping_intelligence_router)
+app.include_router(deep_code_intelligence_router)
+app.include_router(enterprise_hybrid_rag_router)
+app.include_router(release_intelligence_router)
+app.include_router(engineering_assistant_router)
 
 app.include_router(
     scenario_router

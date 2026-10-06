@@ -50,5 +50,9 @@ class Settings:
     JIRA_EMAIL = os.getenv("JIRA_EMAIL", "").strip()
     JIRA_API_TOKEN = os.getenv("JIRA_API_TOKEN", "").strip()
 
+    # Phase 8 Enterprise Hybrid RAG. pgvector uses the existing PostgreSQL instance.
+    PHASE8_VECTOR_BACKEND = os.getenv("PHASE8_VECTOR_BACKEND", "pgvector").strip().lower()
+    PHASE8_EMBEDDING_MODEL = os.getenv("PHASE8_EMBEDDING_MODEL", "sentence-transformers/all-MiniLM-L6-v2")
+
 
 settings = Settings()

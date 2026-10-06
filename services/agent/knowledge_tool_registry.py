@@ -19,6 +19,10 @@ from baseline_models import ScenarioBaseline, ScenarioTestBaseline, ScenarioRele
 from db_models import KnowledgeDocument, MappingDocument, MappingDefinition
 from services.cross_project.engineering_knowledge_graph_service import EngineeringKnowledgeGraphService
 from services.lineage.mapping_intelligence_service import MappingIntelligenceService
+from services.flow.deep_code_intelligence_service import DeepCodeIntelligenceService
+from services.retrieval.enterprise_hybrid_rag_service import EnterpriseHybridRagService
+from services.release_intelligence.regression_release_intelligence_service import RegressionReleaseIntelligenceService
+from services.engineering_assistant.engineering_assistant_service import EngineeringAssistantService
 
 
 class KnowledgeToolRegistry:
@@ -41,6 +45,38 @@ class KnowledgeToolRegistry:
                     "or asks to analyze a Jira issue against current source code. This is the source of "
                     "truth for the live requirement text; do not substitute Git, RAG or historical Jira "
                     "documents for this tool."
+                ),
+            ),
+            StructuredTool.from_function(
+                func=self.engineering_assistant,
+                name="engineering_assistant",
+                description=(
+                    "Developer-facing AI Engineering Assistant for CURRENT Git changes. Produces an evidence-grounded "
+                    "developer brief, behavioral-change explanation, affected operations, regression test plan, "
+                    "requirement/mapping risks, release-readiness guidance and ordered next actions. Use when the user "
+                    "asks to review current changes, explain what a developer should do next, prepare a developer test "
+                    "plan, or provide an engineering change/release brief."
+                ),
+            ),
+            StructuredTool.from_function(
+                func=self.release_regression_intelligence,
+                name="release_regression_intelligence",
+                description=(
+                    "End-to-end regression and release intelligence for CURRENT Git changes. "
+                    "Combines affected scenarios, captured test baselines, static JUnit evidence, Phase 7 deep-code evidence, "
+                    "Phase 6 mapping/contract quality and Phase 8 related-knowledge discovery. Use when the user asks what to "
+                    "retest after current changes, coverage gaps, regression recommendations, release readiness, or whether "
+                    "the current change is ready for release review."
+                ),
+            ),
+            StructuredTool.from_function(
+                func=self.enterprise_hybrid_search,
+                name="enterprise_hybrid_search",
+                description=(
+                    "Phase 8 enterprise hybrid retrieval across code, JIRA, scenarios, mappings, baselines, tests and "
+                    "ingested engineering documents. Uses PostgreSQL pgvector semantic search + BM25 + metadata filtering "
+                    "+ deterministic reranking. Use for broad discovery/search across engineering knowledge. Retrieval is "
+                    "candidate discovery, not authoritative relationship proof."
                 ),
             ),
             StructuredTool.from_function(
@@ -152,6 +188,41 @@ class KnowledgeToolRegistry:
                     "Return one consolidated Phase 6 mapping-intelligence view for an attribute: authoritative latest/previous "
                     "version resolution, change blast radius, quality/conflicts, validation and provenance. Use for broad questions "
                     "such as 'tell me everything about the latest GPA mapping and its impact'."
+                ),
+            ),
+            StructuredTool.from_function(
+                func=self.control_flow_analysis,
+                name="control_flow_analysis",
+                description=(
+                    "Phase 7 control-flow/branch intelligence for a current-source attribute. "
+                    "Returns exact IF/ELSE-IF/WHILE/FOR conditions, owning methods, source files/lines, "
+                    "and callers propagated across methods. Use for branch, condition, decision, threshold, "
+                    "or 'what happens when attribute > value' questions."
+                ),
+            ),
+            StructuredTool.from_function(
+                func=self.data_flow_analysis,
+                name="data_flow_analysis",
+                description=(
+                    "Phase 7 cross-method data-flow intelligence for a current-source attribute. Returns assignments, "
+                    "source expressions, target variables/fields, exact source evidence and caller propagation. "
+                    "Use for where a value comes from/goes to, assignment, transformation or propagation questions."
+                ),
+            ),
+            StructuredTool.from_function(
+                func=self.shared_component_impact,
+                name="shared_component_impact",
+                description=(
+                    "Phase 7 shared-component impact for an attribute. Finds reused mappers/helpers/adapters/common components "
+                    "and methods that can create ripple effects across flows."
+                ),
+            ),
+            StructuredTool.from_function(
+                func=self.deep_code_intelligence,
+                name="deep_code_intelligence",
+                description=(
+                    "Complete Phase 7 deeper-code view for an attribute combining branch/condition analysis, assignments/data flow, "
+                    "cross-method caller propagation and shared-component impact from current Java/Python source."
                 ),
             ),
             StructuredTool.from_function(
@@ -403,6 +474,26 @@ class KnowledgeToolRegistry:
             },
         }
         return json.dumps(payload, default=str)
+
+    def engineering_assistant(self) -> str:
+        """Return an evidence-grounded developer brief for the current change."""
+        result = EngineeringAssistantService().analyse_current_change(self.db)
+        return json.dumps(result, default=str)
+
+    def release_regression_intelligence(self) -> str:
+        """Return deterministic regression recommendations and release readiness."""
+        result = RegressionReleaseIntelligenceService().analyse(self.db)
+        return json.dumps(result, default=str)
+
+    def enterprise_hybrid_search(self, query: str, top_k: int = 10, source_types: list[str] | None = None, project_path: str | None = None) -> str:
+        """Phase 8 pgvector + BM25 + metadata retrieval."""
+        result = EnterpriseHybridRagService().search(
+            query=query,
+            top_k=max(1, min(int(top_k), 50)),
+            source_types=source_types,
+            project_path=project_path,
+        )
+        return json.dumps(result, default=str)
 
     def rag_search(self, query: str, top_k: int = 5) -> str:
         """Search engineering knowledge semantically."""
@@ -875,6 +966,22 @@ class KnowledgeToolRegistry:
             raise ValueError("document_id is required")
         result = MappingIntelligenceService().validate(self.db, int(document_id))
         return json.dumps(result, default=str)
+
+    def control_flow_analysis(self, attribute: str, project_path: str | None = None) -> str:
+        """Return deterministic Phase 7 branch/condition evidence."""
+        return json.dumps(DeepCodeIntelligenceService().control_flow(attribute, project_path), default=str)
+
+    def data_flow_analysis(self, attribute: str, project_path: str | None = None) -> str:
+        """Return deterministic Phase 7 assignment and cross-method flow evidence."""
+        return json.dumps(DeepCodeIntelligenceService().data_flow(attribute, project_path), default=str)
+
+    def shared_component_impact(self, attribute: str, project_path: str | None = None) -> str:
+        """Return deterministic Phase 7 shared-component ripple impact."""
+        return json.dumps(DeepCodeIntelligenceService().shared_impact(attribute, project_path), default=str)
+
+    def deep_code_intelligence(self, attribute: str, project_path: str | None = None) -> str:
+        """Return the consolidated Phase 7 deeper code intelligence view."""
+        return json.dumps(DeepCodeIntelligenceService().analyze(attribute, project_path), default=str)
 
     def static_code_analysis(self, attribute: str) -> str:
         """Analyze current source-code impact for an attribute without invoking an LLM."""
