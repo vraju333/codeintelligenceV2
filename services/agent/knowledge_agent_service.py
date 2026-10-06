@@ -29,7 +29,20 @@ LIVE JIRA RULES:
 - For live-Jira analysis, a release/test baseline counts as CURRENT Jira evidence only when the test baseline explicitly contains that Jira ID. A baseline attached to the same scenario but to another Jira must be labeled historical and must not close the current Jira baseline gap.
 
 KNOWLEDGE RULES:
-- Use graph_search for exact engineering-entity relationship/impact/trace/history questions. For impact + baseline-history questions, combine graph_search with scenario_impact and baseline_history so Neo4j relationship evidence is not skipped.
+- Use graph_search for exact engineering-entity relationship/impact/trace/history questions.
+- Use mapping_lineage when the starting point is a Java/business attribute.
+- Use mapping_source_lineage when the starting point is an XML path/node, JSON path/node, DB table.column, Kafka field, or other external source path. It resolves source -> Java target and preserves workbook/sheet/row evidence.
+- For source-side impact questions, call mapping_source_lineage with include_engineering_impact=true instead of guessing the Java attribute.
+- Use mapping_history for mapping evolution/history across versions and mapping_compare for explicit version-to-version comparisons.
+- Use mapping_validation when a mapping document/version target must be checked against current code.
+- Use mapping_change_impact for mapping-change blast radius across diff, code validity and engineering relationships.
+- Use mapping_quality for conflicts, duplicate definitions, inconsistent rules and missing code targets.
+- Use mapping_intelligence for a consolidated latest/previous mapping view; it is deterministic and preserves provenance.
+- For latest/current/previous mapping validation questions, the deterministic router resolves the document ID. Never guess or substitute a document_id from mapping lineage/history.
+- Use mapping_graph_lineage when the question spans mapping evidence AND downstream engineering impact (methods/endpoints/scenarios/JIRAs/releases/test baselines).
+- Mapping answers must cite the returned document, version, sheet and row; never invent mapping provenance.
+- When a mapping-history result introduces a changed Java target and the user asks whether it is valid/currently implemented, validate the corresponding document with mapping_validation.
+- For non-mapping impact + baseline-history questions, combine graph_search with scenario_impact and baseline_history so Neo4j relationship evidence is not skipped.
 - Prefer rag_search for semantic/document discovery questions.
 - Prefer unified_knowledge_search for complete cross-source impact or 'everything about' questions.
 - When a question explicitly asks for all available engineering knowledge, documented knowledge, requirements, releases, architecture, API/schema documentation, or ingested test evidence, unified_knowledge_search is mandatory.
@@ -55,6 +68,12 @@ For questions spanning live Jira, current code, scenarios and testing, combine t
 4. SCENARIO / TEST / BASELINE EVIDENCE
 5. TRACEABILITY GAPS
 
+EVIDENCE-GROUNDING RULES:
+- Base the final answer only on tool evidence actually returned in this request.
+- Do not create headings or claims for Live Requirement, Current Git Evidence, Test/Baseline Evidence, or any other evidence category unless a returned tool result supports that category.
+- Preserve exact engineering entity names returned by tools. Never rename an owner/class/method (for example, StudentPromotionController.checkPromotion must remain exactly that).
+- Mapping-only answers should prefer evidence-appropriate sections such as Mapping Evidence, Code Validation, Engineering Impact, Mapping Conflicts/Quality, Provenance, Risks and Traceability Gaps.
+
 Base the final answer only on returned tool evidence. Be concise and name the evidence sources used.
 """
 
@@ -69,12 +88,25 @@ class KnowledgeAgentService:
 
         registry = KnowledgeToolRegistry(db)
         tools = registry.tools()
-        model = self._build_model().bind_tools(tools)
 
         # Deterministic routing guarantees authoritative evidence sources that the
         # LLM must not be allowed to skip. After these calls, the normal LangGraph
         # agent loop remains dynamic and can choose additional tools from the results.
-        mandatory_calls = self._mandatory_calls(query, tools)
+        mandatory_calls = self._mandatory_calls(query, tools, registry)
+
+        # If a relative mapping-validation question has already been resolved to an
+        # authoritative document ID, do not expose mapping_validation to the LLM for
+        # the same turn. Otherwise the model can issue a second guessed document_id
+        # (for example V1/document 1) and override/confuse the deterministic V3 call.
+        deterministic_relative_validation = any(
+            call.get("id") == "mandatory_phase6_relative_mapping_validation"
+            for call in mandatory_calls
+        )
+        dynamic_tools = [
+            tool for tool in tools
+            if not (deterministic_relative_validation and tool.name == "mapping_validation")
+        ]
+        model = self._build_model().bind_tools(dynamic_tools)
 
         def router_node(state: MessagesState):
             if not mandatory_calls:
@@ -279,7 +311,82 @@ class KnowledgeAgentService:
         return None
 
     @staticmethod
-    def _mandatory_calls(query: str, tools: list[Any]) -> list[dict[str, Any]]:
+    def _extract_mapping_family(query: str) -> str | None:
+        """Extract an explicitly named mapping family without treating it as an attribute.
+
+        Examples: "Student Mapping", "Customer Address Mapping". Relative-version
+        words and common question prefixes are stripped from the candidate.
+        """
+        text = str(query or "").strip()
+        if not text:
+            return None
+
+        matches = re.findall(r"\b([A-Za-z][A-Za-z0-9 _-]{0,80}?\s+Mapping)\b", text, flags=re.IGNORECASE)
+        if not matches:
+            return None
+
+        candidate = matches[-1].strip()
+        prefix = r"^(?:what|which|show|tell|give|compare|changed|change|changes|in|for|of|the|latest|current|newest|previous|prior)\s+"
+        while re.match(prefix, candidate, flags=re.IGNORECASE):
+            candidate = re.sub(prefix, "", candidate, count=1, flags=re.IGNORECASE).strip()
+        return candidate or None
+
+    @staticmethod
+    def _relative_mapping_versions(
+        family: str,
+        tools: list[Any],
+    ) -> tuple[str | None, str | None]:
+        """Resolve previous/latest versions from authoritative mapping history.
+
+        This is a routing metadata lookup only. The actual user-visible evidence still
+        comes from mapping_compare/mapping_validation tool calls executed by LangGraph.
+        """
+        history_tool = next((tool for tool in tools if getattr(tool, "name", None) == "mapping_history"), None)
+        if history_tool is None:
+            return None, None
+
+        seed_attribute = family[:-len(" Mapping")].strip() if family.lower().endswith(" mapping") else family
+        try:
+            payload = history_tool.invoke({"attribute": seed_attribute, "mapping_family": family})
+        except Exception:
+            return None, None
+
+        if isinstance(payload, str):
+            try:
+                payload = json.loads(payload)
+            except Exception:
+                return None, None
+        if not isinstance(payload, dict):
+            return None, None
+
+        timelines = payload.get("timelines") or []
+        timeline = next(
+            (item for item in timelines if str(item.get("mapping_family") or "").lower() == family.lower()),
+            None,
+        )
+        if not isinstance(timeline, dict):
+            return None, None
+
+        versions = []
+        for item in timeline.get("versions") or []:
+            document = item.get("document") if isinstance(item, dict) else None
+            version = str((document or {}).get("document_version") or "").strip().upper()
+            if version:
+                versions.append(version)
+
+        def version_key(value: str):
+            nums = re.findall(r"\d+", value)
+            return tuple(int(n) for n in nums) if nums else (0,)
+
+        versions = sorted(set(versions), key=version_key)
+        if not versions:
+            return None, None
+        latest = versions[-1]
+        previous = versions[-2] if len(versions) >= 2 else None
+        return previous, latest
+
+    @staticmethod
+    def _mandatory_calls(query: str, tools: list[Any], registry: KnowledgeToolRegistry | None = None) -> list[dict[str, Any]]:
         """Guarantee authoritative Live Jira/knowledge/current-evidence routing."""
         text = str(query or "")
         lowered = text.lower()
@@ -352,6 +459,302 @@ class KnowledgeAgentService:
                     "name": "graph_search",
                     "args": {"entity": entity},
                     "id": "mandatory_phase5_graph",
+                })
+
+        # Phase 6I.1/6I.2: deterministic natural-language source-side resolution.
+        # The source path is evidence, not an attribute guess. This supports XML,
+        # JSON and DB inputs such as /Student/GPA, customer.gpa and STUDENT.TEMP_LOCATION.
+        source_path = None
+        source_patterns = (
+            r"`([^`]+)`",
+            r"(/[A-Za-z0-9_./\-\[\]@]+)",
+            r"\b([A-Za-z_][A-Za-z0-9_]*\.[A-Za-z_][A-Za-z0-9_.]*)\b",
+        )
+        source_stop = {
+            "student.mapping", "mapping.history", "mapping.compare",
+        }
+        for pattern in source_patterns:
+            for match in re.findall(pattern, text):
+                candidate = str(match or "").strip().rstrip(".,?!:;")
+                lower_candidate = candidate.lower()
+                looks_like_source = (
+                    candidate.startswith("/")
+                    or "." in candidate
+                    or lower_candidate.startswith(("xpath:", "json:", "jsonpath:", "db:", "table:", "column:"))
+                )
+                if looks_like_source and lower_candidate not in source_stop:
+                    source_path = candidate
+                    break
+            if source_path:
+                break
+
+        source_question = source_path is not None and any(marker in lowered for marker in (
+            "map", "mapping", "mapped", "where does", "comes from", "come from",
+            "which excel", "which document", "defined", "uses", "use ", "impact",
+            "impacted", "affected", "downstream", "engineering components", "lineage"
+        ))
+        source_impact = source_question and any(marker in lowered for marker in (
+            "impact", "impacted", "affected", "downstream", "engineering components",
+            "what could break", "what breaks", "uses", "use "
+        ))
+        if source_question and "mapping_source_lineage" in available:
+            calls.append({
+                "name": "mapping_source_lineage",
+                "args": {
+                    "source_path": source_path,
+                    "include_engineering_impact": source_impact,
+                },
+                "id": "mandatory_phase6_source_lineage",
+            })
+
+        # Phase 6I.3: mapping-family + relative-version resolution.
+        # "What changed in the latest Student Mapping?" must compare the previous
+        # family version with the latest one; it must NOT become attribute=Student.
+        explicit_mapping_family = KnowledgeAgentService._extract_mapping_family(text)
+        relative_latest = any(word in lowered for word in ("latest", "current", "newest"))
+        relative_previous = any(word in lowered for word in ("previous", "prior"))
+        relative_change = any(word in lowered for word in ("changed", "change", "changes", "compare", "difference"))
+        relative_family_compare = bool(explicit_mapping_family and relative_latest and relative_change)
+
+        if relative_family_compare and "mapping_compare" in available:
+            previous_version, latest_version = KnowledgeAgentService._relative_mapping_versions(
+                explicit_mapping_family, tools
+            )
+            if previous_version and latest_version:
+                calls.append({
+                    "name": "mapping_compare",
+                    "args": {
+                        "mapping_family": explicit_mapping_family,
+                        "from_version": previous_version,
+                        "to_version": latest_version,
+                    },
+                    "id": "mandatory_phase6_relative_mapping_compare",
+                })
+
+        # Phase 6I.3: deterministic relative-version validation.
+        # Never allow the LLM to guess internal document IDs for questions such as
+        # "Is the latest GPA mapping valid in code?". Resolve family/version/document
+        # from authoritative mapping metadata first, then call mapping_validation.
+        relative_validation_intent = (
+            any(marker in lowered for marker in (
+                "valid in code", "valid", "validate", "validation",
+                "exist in code", "exists in code", "implemented in code",
+            ))
+            and (relative_latest or relative_previous)
+            and "mapping" in lowered
+        )
+
+        relative_validation_attr = None
+        if relative_validation_intent:
+            match = re.search(
+                r"\b([A-Za-z_][A-Za-z0-9_]*)\s+mapping\b",
+                text,
+                flags=re.IGNORECASE,
+            )
+            if match:
+                candidate = match.group(1).strip()
+                if candidate.lower() not in {
+                    "student", "customer", "latest", "current", "newest",
+                    "previous", "prior", "the", "a", "an",
+                }:
+                    relative_validation_attr = candidate
+
+        relative_validation_context = None
+        if relative_validation_intent and registry:
+            requested_relative = "previous" if relative_previous and not relative_latest else "latest"
+            try:
+                # First honor a real explicit family such as "Student Mapping".
+                # Natural language such as "latest GPA mapping" is syntactically
+                # extracted as "GPA mapping", but that may be an attribute phrase,
+                # not a stored mapping family. If the family lookup does not resolve,
+                # reinterpret the prefix (GPA) as the attribute and resolve the
+                # strongest authoritative version lineage instead of letting the LLM
+                # guess a document ID.
+                if explicit_mapping_family:
+                    relative_validation_context = registry.resolve_relative_mapping_context(
+                        attribute=None,
+                        relative_version=requested_relative,
+                        mapping_family=explicit_mapping_family,
+                    )
+
+                if not relative_validation_context or not relative_validation_context.get("document_id"):
+                    fallback_attr = relative_validation_attr
+                    if not fallback_attr and explicit_mapping_family.lower().endswith(" mapping"):
+                        fallback_attr = explicit_mapping_family[:-len(" Mapping")].strip()
+                    if fallback_attr:
+                        relative_validation_attr = fallback_attr
+                        relative_validation_context = registry.resolve_relative_mapping_context(
+                            attribute=fallback_attr,
+                            relative_version=requested_relative,
+                            mapping_family=None,
+                        )
+            except Exception:
+                relative_validation_context = None
+
+        if (
+            relative_validation_intent
+            and relative_validation_context
+            and relative_validation_context.get("document_id")
+            and "mapping_validation" in available
+        ):
+            calls.append({
+                "name": "mapping_validation",
+                "args": {"document_id": relative_validation_context["document_id"]},
+                "id": "mandatory_phase6_relative_mapping_validation",
+            })
+
+        # Phase 6 completion: deterministic blast-radius, quality and consolidated intelligence.
+        advanced_mapping_attr = relative_validation_attr
+        if not advanced_mapping_attr:
+            for pattern in (
+                r"\b(?:latest|current|newest|previous|prior)\s+([A-Za-z_][A-Za-z0-9_]*)\s+mapping\b",
+                r"\b([A-Za-z_][A-Za-z0-9_]*)\s+mapping\b",
+                r"\bfor\s+([A-Za-z_][A-Za-z0-9_]*)\b",
+            ):
+                match = re.search(pattern, text, flags=re.IGNORECASE)
+                if match:
+                    candidate = match.group(1).rstrip(".,?!:;")
+                    if candidate.lower() not in {"student", "customer", "the", "a", "an", "mapping"}:
+                        advanced_mapping_attr = candidate
+                        break
+
+        mapping_change_impact_intent = (
+            "mapping" in lowered
+            and "change" in lowered
+            and any(word in lowered for word in ("impact", "blast radius", "affected", "downstream"))
+        )
+        mapping_quality_intent = (
+            "mapping" in lowered
+            and any(word in lowered for word in ("conflict", "quality", "inconsistent", "consistency", "duplicate"))
+        )
+        mapping_consolidated_intent = (
+            "mapping" in lowered
+            and any(phrase in lowered for phrase in (
+                "everything about", "complete mapping", "full mapping", "mapping intelligence",
+                "mapping and its impact", "mapping with impact",
+            ))
+        )
+        phase6_advanced_intent = mapping_change_impact_intent or mapping_quality_intent or mapping_consolidated_intent
+
+        if mapping_change_impact_intent and advanced_mapping_attr and registry and "mapping_change_impact" in available:
+            try:
+                latest_ctx = registry.resolve_relative_mapping_context(attribute=advanced_mapping_attr, relative_version="latest")
+                previous_ctx = registry.resolve_relative_mapping_context(
+                    attribute=advanced_mapping_attr,
+                    relative_version="previous",
+                    mapping_family=latest_ctx.get("mapping_family"),
+                ) if latest_ctx.get("mapping_family") else None
+            except Exception:
+                latest_ctx, previous_ctx = None, None
+            if latest_ctx and previous_ctx and latest_ctx.get("mapping_family") and latest_ctx.get("document_version") and previous_ctx.get("document_version"):
+                calls.append({
+                    "name": "mapping_change_impact",
+                    "args": {
+                        "mapping_family": latest_ctx["mapping_family"],
+                        "from_version": previous_ctx["document_version"],
+                        "to_version": latest_ctx["document_version"],
+                        "attribute": advanced_mapping_attr,
+                    },
+                    "id": "mandatory_phase6_mapping_change_impact",
+                })
+
+        if mapping_quality_intent and "mapping_quality" in available:
+            calls.append({
+                "name": "mapping_quality",
+                "args": {"attribute": advanced_mapping_attr} if advanced_mapping_attr else {},
+                "id": "mandatory_phase6_mapping_quality",
+            })
+
+        if mapping_consolidated_intent and advanced_mapping_attr and "mapping_intelligence" in available:
+            calls.append({
+                "name": "mapping_intelligence",
+                "args": {"attribute": advanced_mapping_attr, "relative_version": "latest"},
+                "id": "mandatory_phase6_mapping_intelligence",
+            })
+
+        # Phase 6H.1: deterministically orchestrate compound mapping questions.
+        # Resolve family/version/document IDs from the DB instead of trusting the
+        # model to reproduce exact stored metadata names.
+        mapping_versions = re.findall(r"\bV\d+(?:\.\d+)*\b", text, flags=re.IGNORECASE)
+        mapping_versions = list(dict.fromkeys(v.upper() for v in mapping_versions))
+        mapping_attr = None
+        attr_patterns = (
+            r"\b([A-Za-z_][A-Za-z0-9_]*)\s+mapping\b",
+            r"\bfor\s+([A-Za-z_][A-Za-z0-9_]*)\b",
+        )
+        for pattern in attr_patterns:
+            match = re.search(pattern, text, flags=re.IGNORECASE)
+            if match:
+                candidate = match.group(1).rstrip(".,?!:;")
+                if candidate.lower() not in {"student", "the", "a", "an"}:
+                    mapping_attr = candidate
+                    break
+
+        mapping_intent = any(marker in lowered for marker in (
+            "mapping", "mapped from", "mapped to", "input path", "source path",
+            "xml node", "xpath", "json node", "json path", "db column",
+            "null handling", "null rule", "which mapping document", "data lineage"
+        ))
+        compare_intent = mapping_intent and len(mapping_versions) >= 2 and any(
+            marker in lowered for marker in ("changed", "change", "compare", "between", "from")
+        )
+        validation_intent = mapping_intent and any(
+            marker in lowered for marker in ("valid in code", "valid", "exist in code", "exists in code", "implemented in code")
+        )
+        mapping_impact_intent = mapping_intent and any(
+            marker in lowered for marker in ("impact", "impacted", "engineering components", "downstream", "affected")
+        )
+
+        resolved_context = None
+        if registry and mapping_attr and mapping_versions:
+            try:
+                resolved_context = registry.resolve_mapping_context(
+                    attribute=mapping_attr,
+                    from_version=mapping_versions[0] if len(mapping_versions) > 1 else None,
+                    to_version=mapping_versions[1] if len(mapping_versions) > 1 else mapping_versions[0],
+                )
+            except Exception:
+                resolved_context = None
+
+        if compare_intent and registry and resolved_context and resolved_context.get("mapping_family") and "mapping_compare" in available:
+            calls.append({
+                "name": "mapping_compare",
+                "args": {
+                    "mapping_family": resolved_context["mapping_family"],
+                    "from_version": mapping_versions[0],
+                    "to_version": mapping_versions[1],
+                    "attribute": mapping_attr,
+                },
+                "id": "mandatory_phase6_mapping_compare",
+            })
+
+        if validation_intent and resolved_context and resolved_context.get("to_document_id") and "mapping_validation" in available:
+            calls.append({
+                "name": "mapping_validation",
+                "args": {"document_id": resolved_context["to_document_id"]},
+                "id": "mandatory_phase6_mapping_validation",
+            })
+
+        if mapping_impact_intent and mapping_attr and "mapping_graph_lineage" in available:
+            calls.append({
+                "name": "mapping_graph_lineage",
+                "args": {"attribute": mapping_attr},
+                "id": "mandatory_phase6_mapping_graph",
+            })
+
+        # Phase 6: mapping/lineage questions must include authoritative mapping-row evidence.
+        mapping_intent = any(marker in lowered for marker in (
+            "mapping", "mapped from", "mapped to", "input path", "source path",
+            "xml node", "xpath", "json node", "json path", "db column",
+            "null handling", "null rule", "which mapping document", "data lineage"
+        ))
+        if mapping_intent and not compare_intent and not relative_family_compare and not relative_validation_intent and not source_question and not phase6_advanced_intent and "mapping_lineage" in available:
+            entity = KnowledgeAgentService._extract_graph_entity(text)
+            if entity:
+                calls.append({
+                    "name": "mapping_lineage",
+                    "args": {"attribute": entity},
+                    "id": "mandatory_phase6_mapping",
                 })
 
         # Test-evidence questions must not be answered from baseline history alone.

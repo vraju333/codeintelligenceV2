@@ -52,3 +52,47 @@ class KnowledgeDocument(Base):
     status = Column(String(30), nullable=False, default="ACTIVE")
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class MappingDocument(Base):
+    """Phase 6 authoritative mapping workbook with immutable provenance metadata."""
+    __tablename__ = "mapping_documents"
+
+    id = Column(Integer, primary_key=True, index=True)
+    project_path = Column(Text, nullable=False, index=True)
+    filename = Column(String(500), nullable=False)
+    title = Column(String(500), nullable=False)
+    mapping_family = Column(String(500), nullable=True, index=True)
+    document_version = Column(String(100), nullable=True)
+    source_ref = Column(String(1000), nullable=True)
+    checksum_sha256 = Column(String(64), nullable=False, index=True)
+    sheet_count = Column(Integer, nullable=False, default=0)
+    row_count = Column(Integer, nullable=False, default=0)
+    status = Column(String(30), nullable=False, default="ACTIVE")
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class MappingDefinition(Base):
+    """One normalized mapping row. Sheet + row are preserved as evidence."""
+    __tablename__ = "mapping_definitions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    document_id = Column(Integer, nullable=False, index=True)
+    project_path = Column(Text, nullable=False, index=True)
+    sheet_name = Column(String(300), nullable=False)
+    row_number = Column(Integer, nullable=False)
+    source_type = Column(String(50), nullable=False, default="UNKNOWN", index=True)
+    source_system = Column(String(300), nullable=True)
+    source_path = Column(Text, nullable=False, index=True)
+    mapping_rule = Column(Text, nullable=True)
+    target_class = Column(String(500), nullable=True, index=True)
+    target_attribute = Column(String(500), nullable=False, index=True)
+    target_expression = Column(Text, nullable=False)
+    null_rule = Column(Text, nullable=True)
+    validation_rule = Column(Text, nullable=True)
+    comments = Column(Text, nullable=True)
+    raw_row_json = Column(Text, nullable=True)
+    status = Column(String(30), nullable=False, default="ACTIVE")
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

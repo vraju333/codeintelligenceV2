@@ -20,7 +20,7 @@ from services.knowledge.common_entity_extractor import CommonKnowledgeEntityExtr
 class KnowledgeIngestionService:
     """Ingest engineering documents into DB + semantic RAG + Neo4j relationships."""
 
-    ALLOWED_TYPES = {"ARCHITECTURE", "API", "RELEASE", "TEST", "TEST_REPORT", "REQUIREMENT", "JIRA", "CODE_CHANGE"}
+    ALLOWED_TYPES = {"ARCHITECTURE", "API", "RELEASE", "TEST", "TEST_REPORT", "REQUIREMENT", "JIRA", "CODE_CHANGE", "MAPPING"}
 
     def __init__(self):
         self.embeddings = HuggingFaceEmbeddings(

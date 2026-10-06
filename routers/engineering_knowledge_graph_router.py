@@ -58,8 +58,8 @@ def impact(
 @router.get("/schema")
 def schema():
     return {
-        "nodes": ["Project", "Class", "Method", "Attribute", "Endpoint", "Scenario", "Jira", "Release", "TestBaseline"],
-        "relationships": ["CONTAINS", "DECLARES", "READS", "WRITES", "CALLS", "EXPOSES", "INVOKES", "COVERED_BY", "CHANGED_BY", "RELEASED_IN", "TESTED_IN", "BELONGS_TO", "VERIFIES_CHANGE"],
+        "nodes": ["Project", "Class", "Method", "Attribute", "Endpoint", "Scenario", "Jira", "Release", "TestBaseline", "MappingDocument", "MappingDefinition", "MappingSource"],
+        "relationships": ["CONTAINS", "DECLARES", "READS", "WRITES", "CALLS", "EXPOSES", "INVOKES", "COVERED_BY", "CHANGED_BY", "RELEASED_IN", "TESTED_IN", "BELONGS_TO", "VERIFIES_CHANGE", "MAPS_TO", "DEFINED_IN", "SOURCE_OF", "TARGETS"],
         "system_of_record": "PostgreSQL/SQLite",
         "relationship_intelligence": "Neo4j",
     }

@@ -16,8 +16,9 @@ from services.regression.git_diff_service import GitDiffService
 from services.jira.jira_live_client import jira_live_client
 from services.test_analysis.test_code_analysis_service import TestCodeAnalysisService
 from baseline_models import ScenarioBaseline, ScenarioTestBaseline, ScenarioReleaseArchive
-from db_models import KnowledgeDocument
+from db_models import KnowledgeDocument, MappingDocument, MappingDefinition
 from services.cross_project.engineering_knowledge_graph_service import EngineeringKnowledgeGraphService
+from services.lineage.mapping_intelligence_service import MappingIntelligenceService
 
 
 class KnowledgeToolRegistry:
@@ -68,6 +69,89 @@ class KnowledgeToolRegistry:
                     "semantic RAG discovery, Neo4j relationship expansion and PostgreSQL evidence. "
                     "Use for broad requests such as complete impact, everything about a JIRA, "
                     "or a consolidated requirement/test/code-change view."
+                ),
+            ),
+            StructuredTool.from_function(
+                func=self.mapping_lineage,
+                name="mapping_lineage",
+                description=(
+                    "Find authoritative Phase 6 mapping definitions for an attribute/source path. "
+                    "Returns source type/path, transformation, Java target, null handling, comments, "
+                    "and exact mapping-document provenance including workbook, sheet and row. Use for "
+                    "mapping, lineage, XML/JSON/DB source, null/default rule, or 'which mapping document' questions."
+                ),
+            ),
+            StructuredTool.from_function(
+                func=self.mapping_source_lineage,
+                name="mapping_source_lineage",
+                description=(
+                    "Resolve an XML XPath/node, JSON path/node, DB table.column, Kafka field or other source path "
+                    "to its authoritative Phase 6 Java target mapping. Returns all matching versions plus exact "
+                    "workbook/sheet/row provenance. When include_engineering_impact is true, also joins each resolved "
+                    "Java target to the Phase 5 Neo4j engineering impact graph. Use when the user's starting point "
+                    "is a source such as /Student/GPA, customer.gpa or STUDENT.TEMP_LOCATION."
+                ),
+            ),
+            StructuredTool.from_function(
+                func=self.mapping_graph_lineage,
+                name="mapping_graph_lineage",
+                description=(
+                    "Traverse Phase 6 MAPS_TO relationships in Neo4j for an attribute and join them to the "
+                    "Phase 5 engineering impact graph. Returns mapping source/provenance plus impacted methods, "
+                    "endpoints, scenarios, JIRAs, releases and test baselines. Use for mapping + downstream impact questions."
+                ),
+            ),
+            StructuredTool.from_function(
+                func=self.mapping_history,
+                name="mapping_history",
+                description=(
+                    "Show how an attribute mapping evolved across versions in a mapping family. Returns each version, "
+                    "field-level changes from the previous version, and exact workbook/sheet/row provenance. "
+                    "Use for mapping history/evolution, when/where a mapping changed, or how an attribute changed over time."
+                ),
+            ),
+            StructuredTool.from_function(
+                func=self.mapping_compare,
+                name="mapping_compare",
+                description=(
+                    "Compare two explicit versions of the same mapping family, optionally for one attribute. "
+                    "Returns ADDED/REMOVED/CHANGED/UNCHANGED mappings, field-level differences and provenance on both sides. "
+                    "Use for questions such as 'compare Student Mapping V1 and V2'."
+                ),
+            ),
+            StructuredTool.from_function(
+                func=self.mapping_validation,
+                name="mapping_validation",
+                description=(
+                    "Validate all Java targets in one Phase 6 mapping document against the current Neo4j code graph. "
+                    "Requires a document_id and returns FOUND_IN_CODE_GRAPH / NOT_FOUND_IN_CODE_GRAPH with sheet/row evidence. "
+                    "Use when the user asks whether targets introduced by a mapping document/version actually exist in code."
+                ),
+            ),
+            StructuredTool.from_function(
+                func=self.mapping_change_impact,
+                name="mapping_change_impact",
+                description=(
+                    "Return the complete blast radius of a mapping change between two versions: mapping diff, target rename, "
+                    "latest code validation, current Neo4j engineering impact, risks, and exact provenance. Use for questions "
+                    "such as 'what is the impact of the latest GPA mapping change?'."
+                ),
+            ),
+            StructuredTool.from_function(
+                func=self.mapping_quality,
+                name="mapping_quality",
+                description=(
+                    "Detect mapping quality problems including competing targets, conflicting null rules/transforms, duplicate "
+                    "active definitions, and mapping targets missing from current code. Use for conflict/quality/consistency questions."
+                ),
+            ),
+            StructuredTool.from_function(
+                func=self.mapping_intelligence,
+                name="mapping_intelligence",
+                description=(
+                    "Return one consolidated Phase 6 mapping-intelligence view for an attribute: authoritative latest/previous "
+                    "version resolution, change blast radius, quality/conflicts, validation and provenance. Use for broad questions "
+                    "such as 'tell me everything about the latest GPA mapping and its impact'."
                 ),
             ),
             StructuredTool.from_function(
@@ -361,6 +445,436 @@ class KnowledgeToolRegistry:
         result = self.unified.search(self.db, query, top_k=max(1, min(int(top_k), 10)))
         return json.dumps(result, default=str)
 
+
+    def mapping_lineage(self, attribute: str) -> str:
+        """Return Phase 6 mapping lineage with exact document/sheet/row evidence."""
+        value = str(attribute or "").strip().rstrip(".,?!:;")
+        if not value:
+            raise ValueError("attribute is required")
+        result = MappingIntelligenceService().lineage(self.db, value)
+        return json.dumps(result, default=str)
+
+    def mapping_source_lineage(
+        self,
+        source_path: str,
+        include_engineering_impact: bool = False,
+        project: str | None = None,
+    ) -> str:
+        """Resolve a source-side XML/JSON/DB path to mapping targets and optional code impact."""
+        value = str(source_path or "").strip().strip('`\"\'').rstrip(".,?!:;")
+        if not value:
+            raise ValueError("source_path is required")
+
+        service = MappingIntelligenceService()
+        service._ensure_mapping_family_column(self.db)
+        project_path = service._project_path()
+        rows = (
+            self.db.query(MappingDefinition, MappingDocument)
+            .join(MappingDocument, MappingDocument.id == MappingDefinition.document_id)
+            .filter(
+                MappingDefinition.project_path == project_path,
+                MappingDefinition.status == "ACTIVE",
+                MappingDocument.status == "ACTIVE",
+            )
+            .all()
+        )
+
+        def norm(raw: Any) -> str:
+            text = str(raw or "").strip().lower()
+            # Business users frequently vary harmless whitespace and source prefixes.
+            for prefix in ("xpath:", "json:", "jsonpath:", "db:", "table:", "column:"):
+                if text.startswith(prefix):
+                    text = text[len(prefix):].strip()
+                    break
+            return text
+
+        needle = norm(value)
+        matches = []
+        targets: list[str] = []
+        for row, doc in rows:
+            if norm(row.source_path) != needle:
+                continue
+            target = str(row.target_attribute or "").strip()
+            if target and target not in targets:
+                targets.append(target)
+            matches.append({
+                "mapping_id": row.id,
+                "mapping_family": str(doc.mapping_family or doc.title or "").strip(),
+                "document_version": doc.document_version,
+                "source": {
+                    "type": row.source_type,
+                    "system": row.source_system,
+                    "path": row.source_path,
+                },
+                "target": {
+                    "class": row.target_class,
+                    "attribute": row.target_attribute,
+                    "expression": row.target_expression,
+                },
+                "rules": {
+                    "mapping": row.mapping_rule,
+                    "null": row.null_rule,
+                    "validation": row.validation_rule,
+                    "comments": row.comments,
+                },
+                "provenance": {
+                    "document_id": doc.id,
+                    "document": doc.filename,
+                    "document_version": doc.document_version,
+                    "sheet": row.sheet_name,
+                    "row": row.row_number,
+                    "source_ref": doc.source_ref,
+                },
+            })
+
+        # Sort versions naturally while preserving all historical evidence.
+        matches.sort(key=lambda item: service._version_key(item.get("document_version")))
+        impacts = []
+        if include_engineering_impact:
+            requested_project = str(project or "").strip() or None
+            for target in targets:
+                try:
+                    impact = EngineeringKnowledgeGraphService().impact(target, requested_project)
+                except Exception as exc:
+                    impact = {"status": "UNAVAILABLE", "entity": target, "error": str(exc)}
+                impacts.append({"target_attribute": target, "engineering_impact": impact})
+
+        return json.dumps({
+            "status": "FOUND" if matches else "NO_MATCH",
+            "source_path": value,
+            "mappings": matches,
+            "mapping_count": len(matches),
+            "resolved_target_attributes": targets,
+            "engineering_impacts": impacts,
+            "evidence_rule": "Every source resolution preserves mapping document, version, sheet and row provenance.",
+        }, default=str)
+
+    def mapping_graph_lineage(self, attribute: str, project: str | None = None) -> str:
+        """Join Phase 6 MAPS_TO evidence to the Phase 5 Neo4j engineering-impact graph."""
+        value = str(attribute or "").strip().rstrip(".,?!:;")
+        if not value:
+            raise ValueError("attribute is required")
+        project_value = str(project or "").strip() or None
+        result = MappingIntelligenceService().graph_lineage(value, project_value)
+        return json.dumps(result, default=str)
+
+    def mapping_history(self, attribute: str, mapping_family: str | None = None) -> str:
+        """Return version-by-version mapping evolution with exact provenance."""
+        value = str(attribute or "").strip().rstrip(".,?!:;")
+        if not value:
+            raise ValueError("attribute is required")
+        family = str(mapping_family or "").strip() or None
+        result = MappingIntelligenceService().mapping_history(self.db, value, family)
+        return json.dumps(result, default=str)
+
+    def mapping_compare(
+        self,
+        mapping_family: str,
+        from_version: str,
+        to_version: str,
+        attribute: str | None = None,
+    ) -> str:
+        """Compare two versions within one mapping family."""
+        family = str(mapping_family or "").strip()
+        old_version = str(from_version or "").strip()
+        new_version = str(to_version or "").strip()
+        attr = str(attribute or "").strip().rstrip(".,?!:;") or None
+        if not old_version or not new_version:
+            raise ValueError("from_version and to_version are required")
+
+        # Agent-safe resolution: the LLM may send a descriptive family such as
+        # "GPA mapping" even though the authoritative family is "Student Mapping".
+        # Resolve the unique family that actually contains both requested versions
+        # and (when supplied) the requested attribute before calling Phase 6G.
+        context = self.resolve_mapping_context(
+            attribute=attr,
+            from_version=old_version,
+            to_version=new_version,
+            mapping_family=family or None,
+        )
+        resolved_family = context.get("mapping_family")
+        if not resolved_family:
+            raise ValueError("requested mapping family/version was not found")
+
+        result = MappingIntelligenceService().compare_versions(
+            self.db, resolved_family, old_version, new_version, attr
+        )
+        result["requested_mapping_family"] = family or None
+        result["resolved_mapping_family"] = resolved_family
+        return json.dumps(result, default=str)
+
+
+    def resolve_mapping_context(
+        self,
+        attribute: str | None = None,
+        from_version: str | None = None,
+        to_version: str | None = None,
+        mapping_family: str | None = None,
+    ) -> dict[str, Any]:
+        """Resolve family/version/document IDs from authoritative mapping metadata.
+
+        This is intentionally deterministic and is used by the agent adapter so a
+        natural-language phrase such as "GPA mapping V2 to V3" does not have to
+        exactly spell the stored mapping-family name.
+        """
+        service = MappingIntelligenceService()
+        service._ensure_mapping_family_column(self.db)
+        project_path = service._project_path()
+        docs = self.db.query(MappingDocument).filter(
+            MappingDocument.project_path == project_path,
+            MappingDocument.status == "ACTIVE",
+        ).all()
+
+        wanted_versions = {
+            str(v).strip().lower() for v in (from_version, to_version) if str(v or "").strip()
+        }
+        requested_family = str(mapping_family or "").strip()
+        attribute_value = str(attribute or "").strip().lower()
+
+        grouped: dict[str, list[MappingDocument]] = {}
+        for doc in docs:
+            family = str(doc.mapping_family or doc.title or "").strip()
+            if family:
+                grouped.setdefault(family, []).append(doc)
+
+        candidates: list[tuple[str, list[MappingDocument]]] = []
+        for family, family_docs in grouped.items():
+            versions = {str(d.document_version or "").strip().lower() for d in family_docs}
+            if wanted_versions and not wanted_versions.issubset(versions):
+                continue
+            if attribute_value:
+                doc_ids = [d.id for d in family_docs]
+                rows = self.db.query(MappingDefinition).filter(
+                    MappingDefinition.document_id.in_(doc_ids),
+                    MappingDefinition.status == "ACTIVE",
+                ).all()
+                if not any(
+                    attribute_value in str(r.target_attribute or "").lower()
+                    or attribute_value in str(r.target_expression or "").lower()
+                    for r in rows
+                ):
+                    continue
+            candidates.append((family, family_docs))
+
+        # Prefer an exact authoritative family name when it is valid. Otherwise,
+        # resolve only when the metadata leaves one unambiguous candidate.
+        exact = next((x for x in candidates if requested_family and x[0].lower() == requested_family.lower()), None)
+        selected = exact or (candidates[0] if len(candidates) == 1 else None)
+        if not selected:
+            return {
+                "mapping_family": None,
+                "candidates": [name for name, _ in candidates],
+                "reason": "AMBIGUOUS" if len(candidates) > 1 else "NOT_FOUND",
+            }
+
+        family, family_docs = selected
+        by_version = {str(d.document_version or "").strip().lower(): d for d in family_docs}
+        return {
+            "mapping_family": family,
+            "from_document_id": getattr(by_version.get(str(from_version or "").strip().lower()), "id", None),
+            "to_document_id": getattr(by_version.get(str(to_version or "").strip().lower()), "id", None),
+            "candidates": [name for name, _ in candidates],
+            "reason": "RESOLVED",
+        }
+
+
+    def resolve_relative_mapping_context(
+        self,
+        attribute: str | None = None,
+        relative_version: str = "latest",
+        mapping_family: str | None = None,
+    ) -> dict[str, Any]:
+        """Resolve latest/previous mapping document without exposing document-id choice to the LLM.
+
+        Attribute matching is performed across the whole family, then the requested
+        relative document is selected from that family's versions. This is important
+        for renamed targets: an older GPA row can establish the Student Mapping family
+        even when the latest document renamed the target.
+        """
+        service = MappingIntelligenceService()
+        service._ensure_mapping_family_column(self.db)
+        project_path = service._project_path()
+        docs = self.db.query(MappingDocument).filter(
+            MappingDocument.project_path == project_path,
+            MappingDocument.status == "ACTIVE",
+        ).all()
+
+        requested_family = str(mapping_family or "").strip()
+        attribute_value = str(attribute or "").strip().lower()
+        relative = str(relative_version or "latest").strip().lower()
+        if relative not in {"latest", "current", "newest", "previous", "prior"}:
+            raise ValueError("relative_version must be latest/current/newest/previous/prior")
+
+        grouped: dict[str, list[MappingDocument]] = {}
+        for doc in docs:
+            family = str(doc.mapping_family or doc.title or "").strip()
+            if family:
+                grouped.setdefault(family, []).append(doc)
+
+        candidates: list[tuple[str, list[MappingDocument]]] = []
+        for family, family_docs in grouped.items():
+            if requested_family and family.lower() != requested_family.lower():
+                continue
+            if attribute_value:
+                doc_ids = [d.id for d in family_docs]
+                rows = self.db.query(MappingDefinition).filter(
+                    MappingDefinition.document_id.in_(doc_ids),
+                    MappingDefinition.status == "ACTIVE",
+                ).all()
+                if not any(
+                    attribute_value == str(row.target_attribute or "").strip().lower()
+                    or attribute_value == str(row.target_expression or "").strip().lower().split(".")[-1]
+                    or attribute_value == str(row.source_path or "").strip().lower().split("/")[-1].split(".")[-1]
+                    for row in rows
+                ):
+                    continue
+            candidates.append((family, family_docs))
+
+        # If the caller supplied an exact family, the filter above already makes
+        # the choice authoritative. For attribute-only relative questions we may
+        # legitimately find more than one family (for example a one-off conflict
+        # test plus the real versioned Student Mapping family). Never fall back to
+        # an LLM-guessed document id. Prefer the uniquely strongest version lineage:
+        # the family with the greatest number of active mapping documents.
+        if not candidates:
+            return {
+                "mapping_family": None,
+                "document_version": None,
+                "document_id": None,
+                "candidates": [],
+                "reason": "NOT_FOUND",
+            }
+
+        if len(candidates) > 1:
+            ranked = sorted(
+                candidates,
+                key=lambda item: (
+                    len(item[1]),
+                    max(
+                        (service._version_key(d.document_version) for d in item[1]),
+                        default=(),
+                    ),
+                ),
+                reverse=True,
+            )
+            top_count = len(ranked[0][1])
+            equally_versioned = [item for item in ranked if len(item[1]) == top_count]
+
+            # Resolve only when one family has a strictly stronger version lineage.
+            # If two real families are equally strong, preserve ambiguity rather
+            # than guessing.
+            if len(equally_versioned) != 1:
+                return {
+                    "mapping_family": None,
+                    "document_version": None,
+                    "document_id": None,
+                    "candidates": [name for name, _ in ranked],
+                    "reason": "AMBIGUOUS",
+                }
+            candidates = [equally_versioned[0]]
+
+        family, family_docs = candidates[0]
+        ordered = sorted(
+            family_docs,
+            key=lambda d: (service._version_key(d.document_version), int(d.id or 0)),
+        )
+        use_previous = relative in {"previous", "prior"}
+        if use_previous and len(ordered) < 2:
+            return {
+                "mapping_family": family,
+                "document_version": None,
+                "document_id": None,
+                "candidates": [family],
+                "reason": "NO_PREVIOUS_VERSION",
+            }
+        selected = ordered[-2] if use_previous else ordered[-1]
+        return {
+            "mapping_family": family,
+            "document_version": selected.document_version,
+            "document_id": selected.id,
+            "candidates": [family],
+            "reason": "RESOLVED",
+        }
+
+    def mapping_change_impact(
+        self,
+        mapping_family: str,
+        from_version: str,
+        to_version: str,
+        attribute: str | None = None,
+        project: str | None = None,
+    ) -> str:
+        """Return mapping diff + code validation + Neo4j engineering blast radius."""
+        family = str(mapping_family or "").strip()
+        old = str(from_version or "").strip()
+        new = str(to_version or "").strip()
+        attr = str(attribute or "").strip().rstrip(".,?!:;") or None
+        if not family or not old or not new:
+            raise ValueError("mapping_family, from_version and to_version are required")
+        result = MappingIntelligenceService().change_impact(self.db, family, old, new, attr, project)
+        return json.dumps(result, default=str)
+
+    def mapping_quality(
+        self,
+        attribute: str | None = None,
+        source_path: str | None = None,
+        mapping_family: str | None = None,
+    ) -> str:
+        """Return authoritative mapping conflicts/quality findings."""
+        result = MappingIntelligenceService().quality(
+            self.db,
+            str(attribute or "").strip() or None,
+            str(source_path or "").strip() or None,
+            str(mapping_family or "").strip() or None,
+        )
+        return json.dumps(result, default=str)
+
+    def mapping_intelligence(self, attribute: str, relative_version: str = "latest", project: str | None = None) -> str:
+        """Consolidate latest/previous mapping change, validation, impact and quality."""
+        attr = str(attribute or "").strip().rstrip(".,?!:;")
+        if not attr:
+            raise ValueError("attribute is required")
+        relative = str(relative_version or "latest").strip().lower()
+        context = self.resolve_relative_mapping_context(attribute=attr, relative_version=relative)
+        if not context.get("document_id") or not context.get("mapping_family"):
+            return json.dumps({"status": "UNRESOLVED", "attribute": attr, "resolution": context}, default=str)
+
+        service = MappingIntelligenceService()
+        docs = service._family_documents(self.db, context["mapping_family"])
+        ordered = sorted(docs, key=lambda d: (service._version_key(d.document_version), int(d.id or 0)))
+        selected_index = next((i for i, d in enumerate(ordered) if d.id == context["document_id"]), -1)
+        selected = ordered[selected_index] if selected_index >= 0 else None
+        previous = ordered[selected_index - 1] if selected_index > 0 else None
+
+        validation = service.validate(self.db, context["document_id"])
+        quality = service.quality(self.db, attribute=attr)
+        impact = None
+        if selected is not None and previous is not None:
+            impact = service.change_impact(
+                self.db,
+                context["mapping_family"],
+                str(previous.document_version or ""),
+                str(selected.document_version or ""),
+                attr,
+                project,
+            )
+        return json.dumps({
+            "status": "FOUND",
+            "attribute": attr,
+            "resolution": context,
+            "previous_version": previous.document_version if previous else None,
+            "validation": validation,
+            "change_impact": impact,
+            "quality": quality,
+            "evidence_rule": "This response is assembled deterministically from mapping metadata, provenance and the current Neo4j engineering graph.",
+        }, default=str)
+
+    def mapping_validation(self, document_id: int) -> str:
+        """Validate one mapping document's Java targets against the current code graph."""
+        if document_id is None:
+            raise ValueError("document_id is required")
+        result = MappingIntelligenceService().validate(self.db, int(document_id))
+        return json.dumps(result, default=str)
 
     def static_code_analysis(self, attribute: str) -> str:
         """Analyze current source-code impact for an attribute without invoking an LLM."""
