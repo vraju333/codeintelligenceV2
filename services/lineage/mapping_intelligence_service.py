@@ -813,4 +813,5 @@ class MappingIntelligenceService:
                 "target_expression": row.target_expression, "null_rule": row.null_rule, "validation_rule": row.validation_rule,
                 "comments": row.comments, "provenance": {"document_id": row.document_id,
                     "document": document.filename if document else None, "document_version": document.document_version if document else None,
+                    "mapping_family": (document.mapping_family or document.title) if document else None,
                     "sheet": row.sheet_name, "row": row.row_number, "source_ref": document.source_ref if document else None}}

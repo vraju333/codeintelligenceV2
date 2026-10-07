@@ -50,8 +50,12 @@ KNOWLEDGE RULES:
 - Do not treat Git/SDLC, static analysis, or baseline evidence as a substitute for ingested knowledge documents.
 
 AI ENGINEERING ASSISTANT RULES:
-- Use engineering_assistant when the user asks for a developer-oriented review of CURRENT changes, what to do next, an engineering brief, or a consolidated test/release action plan.
+- Use engineering_assistant when the user asks about CURRENT/current changes, including where a changed attribute comes from, its JIRA relationship, impacted scenarios, regression testing, developer review, or a consolidated test/release action plan.
+- For a current-change question, treat engineering_assistant as the primary consolidated evidence. Do not override it with narrower legacy Git results. Its mapping_data_lineage resolves changed Java target attributes and preserves mapping family/version/document/sheet/row provenance.
 - The engineering_assistant result is an evidence-grounded orchestration view over current-change intelligence; preserve exact entity names, test evidence, risks and release-readiness status.
+- JIRA SEMANTICS ARE STRICT: `impacted_historical_jiras` / compatibility field `confirmed_jiras` are historical/impacted traceability only. NEVER describe them as the Jira for the current uncommitted change. `current_change_jira_candidates` are the only inferred current-change Jira candidates and remain unconfirmed/non-authoritative unless separate current-change evidence confirms them. If a candidate exists, report its exact classification and confidence.
+- If KAN-4 is historical while STUD-101 is a LIKELY_CURRENT_JIRA candidate, say exactly that distinction; never call KAN-4 the likely/current Jira.
+- MAPPING SEMANTICS ARE STRICT: mapping version recency and code validity are separate. `version_status=LATEST` does not mean the mapping is valid or matching. Preserve `version_status`, `target_status`, `conflict_status`, and `classification`; a LATEST mapping with TARGET_NOT_FOUND must be described as latest but invalid, not current/matching.
 - Do not turn recommendations into claims that tests passed, requirements were approved, Jira links were proven, or release was approved.
 - Prefer engineering_assistant over manually composing many lower-level tools when the request is explicitly for a consolidated developer action plan.
 
@@ -150,6 +154,16 @@ class KnowledgeAgentService:
         phase7_dynamic_block = set(deterministic_phase7_tools) | set(deterministic_phase8_tools) | set(deterministic_release_tools)
         if deterministic_phase7_tools:
             phase7_dynamic_block.add("static_code_analysis")
+
+        # Current-change questions use Engineering Assistant as the authoritative
+        # aggregator. Block narrower legacy tools that can contradict its normalized
+        # code/scenario evidence or misread a Java target attribute as a source path.
+        if any(call.get("name") == "engineering_assistant" for call in mandatory_calls):
+            phase7_dynamic_block.update({
+                "git_requirement_correlation",
+                "git_scenario_impact",
+                "mapping_source_lineage",
+            })
 
         dynamic_tools = [
             tool for tool in tools
@@ -449,6 +463,8 @@ class KnowledgeAgentService:
             "review current changes", "developer brief", "engineering brief",
             "what should i do next", "what should we do next",
             "developer test plan", "change review and test plan",
+            "my current change", "current change", "current changes",
+            "what should i regression test", "what should we regression test",
         )
         if any(marker in lowered for marker in engineering_assistant_markers) and "engineering_assistant" in available:
             calls.append({

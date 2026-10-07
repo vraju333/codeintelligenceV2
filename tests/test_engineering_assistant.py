@@ -62,3 +62,70 @@ def test_engineering_assistant_routes_deterministically():
         "id": "mandatory_engineering_assistant",
     }
     assert not any(call["name"] == "release_regression_intelligence" for call in calls)
+
+
+def test_jira_change_correlation_uses_code_and_test_evidence():
+    from types import SimpleNamespace
+    from services.jira.jira_change_correlation_service import JiraChangeCorrelationService
+
+    class Query:
+        def order_by(self, *args):
+            return self
+        def all(self):
+            return [
+                SimpleNamespace(
+                    jira_id="KAN-25",
+                    title="Change student promotion GPA threshold to 6.5",
+                    requirement="Student promotion is eligible when gpa > 6.5",
+                    project_path=r"D:\\AIlearning\\student-employee-project",
+                ),
+                SimpleNamespace(
+                    jira_id="KAN-4",
+                    title="Original GPA promotion rule",
+                    requirement="Student promotion is eligible when gpa > 7",
+                    project_path=r"D:\\AIlearning\\student-employee-project",
+                ),
+            ]
+
+    class DB:
+        def query(self, _model):
+            return Query()
+
+    result = {
+        "project_path": r"D:\\AIlearning\\student-employee-project",
+        "change_summary": {
+            "changed_attributes": ["gpa"],
+            "changed_classes": ["StudentPromotionController"],
+            "changed_methods": [{"method_name": "checkPromotion"}],
+        },
+        "behavioral_changes": [{
+            "attribute": "gpa",
+            "old_operator": ">",
+            "old_threshold": 7,
+            "new_operator": ">",
+            "new_threshold": 6.5,
+            "old_condition": "student.getGpa() > 7",
+            "new_condition": "student.getGpa() > 6.5",
+        }],
+        "affected_scenarios": [{
+            "scenario_code": "CREATE_DATA_API_PROMOTIONS_CHECK",
+            "http_method": "POST",
+            "endpoint": "/api/promotions/check",
+        }],
+        "captured_test_baseline_evidence": {
+            "CREATE_DATA_API_PROMOTIONS_CHECK": [{"test_baseline_name": "GPA Promotion scenario"}]
+        },
+        "regression_recommendations": [{
+            "automated_test_evidence": [{
+                "test_class": "StudentPromotionControllerTest",
+                "test_method": "shouldReturnEligibleWhenGpaGreaterThanSeven",
+            }]
+        }],
+    }
+
+    correlation = JiraChangeCorrelationService().correlate(DB(), result, historical_jira_ids={"KAN-4"})
+    assert correlation["candidates"]
+    assert correlation["candidates"][0]["jira_id"] == "KAN-25"
+    assert correlation["candidates"][0]["classification"] == "LIKELY_CURRENT_JIRA"
+    assert any(r["type"] == "NEW_BEHAVIOR_RULE_MATCH" for r in correlation["candidates"][0]["why_matched"])
+    assert not any(c["jira_id"] == "KAN-4" for c in correlation["candidates"])

@@ -355,6 +355,7 @@ class RegressionReleaseIntelligenceService:
                 "changed_classes": impact.get("changed_classes") or [],
                 "changed_methods": impact.get("changed_methods") or [],
                 "changed_attributes": attrs,
+                "changed_symbols": impact.get("changed_symbols") or [],
             },
             "behavioral_changes": behavioral_changes,
             "impact_summary": {

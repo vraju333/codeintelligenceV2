@@ -6,6 +6,7 @@ from db_models import Scenario
 from services.regression.git_diff_service import GitDiffService
 from services.scenario.scenario_service import ScenarioService
 from services.flow.endpoint_flow_service import EndpointFlowService
+from services.flow.code_flow_service import CodeFlowService
 from repositories.scenario_baseline_repository import ScenarioBaselineRepository
 from db_models import JiraKnowledge
 from config import settings
@@ -72,6 +73,35 @@ class RegressionImpactService:
         except Exception:
             live_controller_by_endpoint = {}
 
+        # Build current-source endpoint flows as a second source of truth. Stored
+        # baselines can be older than the working tree, especially while a developer
+        # is editing mapper/service code in IntelliJ. This lets a changed downstream
+        # class (for example AddressMapper) be traced back to every current endpoint
+        # that calls it without requiring a new baseline capture first.
+        live_flow_by_endpoint = {}
+        try:
+            flow_service = CodeFlowService()
+            for ep in EndpointFlowService().discover_endpoints():
+                live_key = (
+                    str(ep.get("http_method") or "").upper(),
+                    self._canonical_endpoint(ep.get("endpoint")),
+                )
+                try:
+                    flow = flow_service.analyze(
+                        str(ep.get("class_name") or ""),
+                        str(ep.get("method_name") or ""),
+                    )
+                    classes, methods = self._extract_flow_dependencies(flow)
+                    live_flow_by_endpoint[live_key] = {
+                        "classes": classes,
+                        "methods": methods,
+                        "flow": flow,
+                    }
+                except Exception:
+                    continue
+        except Exception:
+            live_flow_by_endpoint = {}
+
         changed_classes = set()
         changed_methods = []
         changed_method_keys = set()
@@ -85,7 +115,7 @@ class RegressionImpactService:
             for symbol in changed_file.get("changed_symbols", []):
                 changed_symbols.append(symbol)
                 if symbol.get("symbol_type") == "ATTRIBUTE" and symbol.get("symbol"):
-                    changed_attributes.add(str(symbol["symbol"]))
+                    changed_attributes.add(self._business_attribute_name(str(symbol["symbol"])))
             for method in changed_file.get("changed_methods", []):
                 method_name = method.get("method_name")
                 item = {
@@ -105,6 +135,15 @@ class RegressionImpactService:
             key = (str(scenario.http_method or "").upper(), str(scenario.endpoint or ""))
             operation_baseline = operation_by_key.get(key)
             legacy = legacy_by_scenario.get(scenario.id)
+            live_key = (
+                str(scenario.http_method or "").upper(),
+                self._canonical_endpoint(scenario.endpoint),
+            )
+            live_flow = live_flow_by_endpoint.get(live_key) or {}
+            live_classes = set(live_flow.get("classes") or set())
+            live_methods = set(live_flow.get("methods") or set())
+            live_matched_classes = sorted(live_classes & changed_classes)
+            live_matched_methods = sorted(live_methods & changed_method_keys)
 
             if operation_baseline:
                 endpoint_flow = operation_baseline.endpoint_flow
@@ -130,13 +169,15 @@ class RegressionImpactService:
                     str(scenario.http_method or "").upper(),
                     self._canonical_endpoint(scenario.endpoint),
                 )
-                live_methods = live_controller_by_endpoint.get(live_key, set())
-                matched_live_methods = sorted(live_methods & changed_method_keys)
+                controller_methods = live_controller_by_endpoint.get(live_key, set())
+                matched_live_methods = sorted((controller_methods | live_methods) & changed_method_keys)
+                matched_live_classes = sorted(live_classes & changed_classes)
 
-                if matched_live_methods:
+                if matched_live_methods or matched_live_classes:
                     direct_methods = [
                         method for method in changed_methods
-                        if f"{method['class_name']}.{method.get('method_name')}" in matched_live_methods
+                        if method.get("class_name") in matched_live_classes
+                        or f"{method['class_name']}.{method.get('method_name')}" in matched_live_methods
                     ]
                     directly_affected.append({
                         "scenario_id": scenario.id,
@@ -146,27 +187,23 @@ class RegressionImpactService:
                         "baseline_version": None,
                         "baseline_scope": None,
                         "impact_status": "DIRECTLY_AFFECTED",
-                        "matched_classes": sorted({
+                        "matched_classes": sorted(set(matched_live_classes) | {
                             x.split(".", 1)[0] for x in matched_live_methods
                         }),
                         "declared_matched_classes": [],
                         "matched_methods": matched_live_methods,
                         "changed_methods": direct_methods,
                         "changed_attributes": sorted(changed_attributes),
-                        "dependency_paths": [
-                            {
-                                "changed_symbol": method_key,
-                                "path": [
-                                    method_key,
-                                    f"{str(scenario.http_method or '').upper()} {scenario.endpoint}",
-                                ],
-                            }
-                            for method_key in matched_live_methods
-                        ],
+                        "dependency_paths": self._build_dependency_paths(
+                            endpoint_flow=live_flow.get("flow") or {},
+                            endpoint_label=f"{str(scenario.http_method or '').upper()} {scenario.endpoint}",
+                            changed_classes=changed_classes,
+                            changed_method_keys=changed_method_keys,
+                        ),
                         "test_baselines": [],
                         "jira_ids": [],
                         "reason": (
-                            "Changed controller method maps to this registered endpoint; "
+                            "Current-source endpoint flow intersects changed code; "
                             "no captured operation baseline exists yet."
                         ),
                     })
@@ -187,10 +224,10 @@ class RegressionImpactService:
                 continue
 
             flow_classes, flow_methods = self._extract_flow_dependencies(endpoint_flow)
-            dependency_classes = declared_classes | flow_classes
+            dependency_classes = declared_classes | flow_classes | live_classes
             matched_classes = sorted(dependency_classes & changed_classes)
             declared_matched_classes = sorted(declared_classes & changed_classes)
-            matched_method_keys = sorted(flow_methods & changed_method_keys)
+            matched_method_keys = sorted((flow_methods | live_methods) & changed_method_keys)
             scenario_methods = [
                 method for method in changed_methods
                 if f"{method['class_name']}.{method.get('method_name')}" in matched_method_keys
@@ -201,6 +238,15 @@ class RegressionImpactService:
                 changed_classes=changed_classes,
                 changed_method_keys=changed_method_keys,
             )
+            live_paths = self._build_dependency_paths(
+                endpoint_flow=live_flow.get("flow") or {},
+                endpoint_label=f"{http_method} {endpoint}",
+                changed_classes=changed_classes,
+                changed_method_keys=changed_method_keys,
+            )
+            for path in live_paths:
+                if path not in dependency_paths:
+                    dependency_paths.append(path)
             test_traceability = self._test_traceability(
                 db=db,
                 scenario_id=scenario.id,
@@ -348,6 +394,16 @@ class RegressionImpactService:
                 "created_at": test.created_at.isoformat() if test.created_at else None,
             })
         return result
+
+    @staticmethod
+    def _business_attribute_name(value: str) -> str:
+        """Normalize Java accessor-style symbols to the underlying attribute."""
+        raw = str(value or "").strip()
+        match = re.match(r"^(?:get|set|is)([A-Z].*)$", raw)
+        if match:
+            raw = match.group(1)
+            raw = raw[:1].lower() + raw[1:]
+        return raw
 
     @staticmethod
     def _normalize_business_token(value: str) -> str:
