@@ -103,8 +103,8 @@ class KnowledgeIngestionService:
         )
         return {"project_path": project_path, "documents": [self._row(x) for x in rows]}
 
-    def rebuild_rag(self, db: Session) -> dict:
-        project_path = self._project_path()
+    def rebuild_rag(self, db: Session, project_path: str | None = None) -> dict:
+        project_path = str(project_path or self._project_path())
         rows = (
             db.query(KnowledgeDocument)
             .filter(KnowledgeDocument.project_path == project_path)
@@ -163,16 +163,16 @@ class KnowledgeIngestionService:
         vector.save_local(str(folder))
         return {"status": "INDEXED", "documents": len(rows), "chunks": len(docs)}
 
-    def search(self, db: Session, query: str, top_k: int = 5) -> dict:
+    def search(self, db: Session, query: str, top_k: int = 5, project_path: str | None = None) -> dict:
         query = str(query or "").strip()
         if not query:
             raise ValueError("query is required")
-        project_path = self._project_path()
+        project_path = str(project_path or self._project_path())
         vector = self._vectors.get(project_path)
         if vector is None:
             vector = self._load_vector(project_path)
         if vector is None:
-            self.rebuild_rag(db)
+            self.rebuild_rag(db, project_path=project_path)
             vector = self._vectors.get(project_path)
         if vector is None:
             return {"query": query, "results": [], "total_matches": 0}

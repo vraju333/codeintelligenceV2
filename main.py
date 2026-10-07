@@ -205,6 +205,8 @@ from routers.deep_code_intelligence_router import router as deep_code_intelligen
 from routers.enterprise_hybrid_rag_router import router as enterprise_hybrid_rag_router
 from routers.release_intelligence_router import router as release_intelligence_router
 from routers.engineering_assistant_router import router as engineering_assistant_router
+from routers.knowledge_sync_router import router as knowledge_sync_router
+from services.knowledge.knowledge_sync_scheduler import start_knowledge_sync_scheduler, stop_knowledge_sync_scheduler
 logger = logging.getLogger(__name__)
 
 app = FastAPI(
@@ -254,6 +256,7 @@ app.include_router(deep_code_intelligence_router)
 app.include_router(enterprise_hybrid_rag_router)
 app.include_router(release_intelligence_router)
 app.include_router(engineering_assistant_router)
+app.include_router(knowledge_sync_router)
 
 app.include_router(
     scenario_router
@@ -313,6 +316,8 @@ app.include_router(
 )
 @app.on_event("startup")
 def startup():
+
+    start_knowledge_sync_scheduler()
 
     #seed_scenarios()
 
@@ -384,3 +389,8 @@ def health():
         "project_initialization": initialization
     }
 from services.scenario.scenario_service import ScenarioService
+
+
+@app.on_event("shutdown")
+def shutdown_knowledge_sync():
+    stop_knowledge_sync_scheduler()

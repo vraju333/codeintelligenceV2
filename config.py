@@ -49,6 +49,14 @@ class Settings:
     JIRA_BASE_URL = os.getenv("JIRA_BASE_URL", "").strip().rstrip("/")
     JIRA_EMAIL = os.getenv("JIRA_EMAIL", "").strip()
     JIRA_API_TOKEN = os.getenv("JIRA_API_TOKEN", "").strip()
+    JIRA_SYNC_JQL = os.getenv("JIRA_SYNC_JQL", "ORDER BY updated ASC").strip()
+
+    # Enterprise Knowledge Sync. Raw source files stay inside CodeIntelligence;
+    # only normalized evidence may later be supplied to an LLM by the agent.
+    KNOWLEDGE_AUTO_SYNC_ENABLED = os.getenv("KNOWLEDGE_AUTO_SYNC_ENABLED", "false").lower() == "true"
+    KNOWLEDGE_SYNC_INTERVAL_SECONDS = max(60, int(os.getenv("KNOWLEDGE_SYNC_INTERVAL_SECONDS", "900")))
+    KNOWLEDGE_DOCUMENT_FOLDER = os.getenv("KNOWLEDGE_DOCUMENT_FOLDER", "").strip()
+    KNOWLEDGE_MAPPING_FOLDER = os.getenv("KNOWLEDGE_MAPPING_FOLDER", "").strip()
 
     # Phase 8 Enterprise Hybrid RAG. pgvector uses the existing PostgreSQL instance.
     PHASE8_VECTOR_BACKEND = os.getenv("PHASE8_VECTOR_BACKEND", "pgvector").strip().lower()

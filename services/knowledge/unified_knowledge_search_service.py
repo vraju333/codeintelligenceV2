@@ -86,6 +86,35 @@ class UnifiedKnowledgeSearchService:
                     "entities": jira_entities,
                 })
 
+        # Natural-language project questions (for example "requirements for Customer
+        # Account Service") must resolve synchronized Jira project metadata before
+        # project-local RAG. This prevents an unrelated active checkout from leaking
+        # Student/other-project evidence into a fresh Jira-only project.
+        if not requested_jiras:
+            query_normalized = self._normalize_text(query)
+            for jira in jira_knowledge_service.list_all(db):
+                metadata = self._jira_metadata(jira.get("requirement"))
+                project_name = self._normalize_text(metadata.get("project_name"))
+                project_key = self._normalize_text(metadata.get("project_key"))
+                if not ((project_name and project_name in query_normalized) or
+                        (project_key and project_key in query_normalized.split())):
+                    continue
+                jira_id = str(jira.get("jira_id") or "").strip().upper()
+                title = str(jira.get("title") or "").strip()
+                requirement = str(jira.get("requirement") or "").strip()
+                jira_entities = self.extractor.extract(
+                    "\n".join(x for x in (f"JIRA: {jira_id}", title, requirement) if x), "JIRA"
+                )
+                self._merge_entities(exact_seeds, jira_entities)
+                if jira_id and jira_id not in exact_seeds["jira_ids"]:
+                    exact_seeds["jira_ids"].append(jira_id)
+                jira_evidence.append({
+                    "id": f"jira:{jira_id}", "source_type": "JIRA",
+                    "title": title or jira_id, "source_ref": jira_id,
+                    "content": requirement, "project_path": jira.get("project_path"),
+                    "entities": jira_entities,
+                })
+
         exact_values = self._entity_values(exact_seeds)
         exact_rows: list[KnowledgeDocument] = []
         if exact_values:
@@ -95,18 +124,22 @@ class UnifiedKnowledgeSearchService:
                 if exact_values.intersection(row_values):
                     exact_rows.append(row)
 
-        # Keep semantic retrieval available for diagnostics/support. It must not
-        # establish relationships when an exact JIRA/entity has been resolved.
-        rag = self.knowledge.search(db, query, top_k)
-
         exact_authority = bool(jira_evidence or exact_rows)
+
+        # RAG candidates must obey the same authority scope as the resolved
+        # requirement/Jira evidence.  In particular, a Jira-only project such as
+        # jira://CAS must never query the currently-open Student FAISS index.
+        authoritative_scope = self._authoritative_scope(jira_evidence, exact_rows)
+        rag = self.knowledge.search(
+            db, query, top_k, project_path=authoritative_scope
+        ) if authoritative_scope else self.knowledge.search(db, query, top_k)
         if exact_authority:
             discovered = {field: [] for field in self.ENTITY_FIELDS}
             self._merge_entities(discovered, exact_seeds)
             for row in exact_rows:
                 self._merge_entities(discovered, self._row_entities(row))
 
-            graph = self._expand_graph(discovered)
+            graph = self._expand_graph(discovered, project_scope=authoritative_scope)
             self._merge_entities(discovered, graph.get("entities") or {})
 
             evidence_ids = {row.id for row in exact_rows}
@@ -239,6 +272,22 @@ class UnifiedKnowledgeSearchService:
         }
 
     @staticmethod
+    def _normalize_text(value: Any) -> str:
+        return " ".join(str(value or "").lower().replace("-", " ").replace("_", " ").split())
+
+    @staticmethod
+    def _jira_metadata(requirement: Any) -> dict[str, Any]:
+        text = str(requirement or "")
+        marker = "Jira metadata:"
+        if marker not in text:
+            return {}
+        try:
+            value = json.loads(text.rsplit(marker, 1)[1].strip())
+            return value if isinstance(value, dict) else {}
+        except Exception:
+            return {}
+
+    @staticmethod
     def _normalize_entity(value: Any) -> str:
         return "".join(ch.lower() for ch in str(value or "") if ch.isalnum())
 
@@ -252,7 +301,31 @@ class UnifiedKnowledgeSearchService:
             .all()
         )
 
-    def _expand_graph(self, seeds: dict[str, list[str]]) -> dict[str, Any]:
+
+    @staticmethod
+    def _authoritative_scope(jira_evidence: list[dict[str, Any]], exact_rows: list[KnowledgeDocument]) -> str | None:
+        scopes = {
+            str(item.get("project_path") or "").strip()
+            for item in jira_evidence
+            if str(item.get("project_path") or "").strip()
+        }
+        scopes.update(
+            str(row.project_path or "").strip()
+            for row in exact_rows
+            if str(row.project_path or "").strip()
+        )
+        return next(iter(scopes)) if len(scopes) == 1 else None
+
+    @staticmethod
+    def _scope_project_name(project_scope: str | None, fallback: str) -> str:
+        scope = str(project_scope or "").strip()
+        if scope.lower().startswith("jira://"):
+            return scope.split("://", 1)[1].strip("/\\")
+        if scope:
+            return Path(scope).name
+        return Path(fallback).name
+
+    def _expand_graph(self, seeds: dict[str, list[str]], project_scope: str | None = None) -> dict[str, Any]:
         if not getattr(settings, "NEO4J_ENABLED", False):
             return {"enabled": False, "status": "DISABLED", "document_ids": [], "entities": {}}
         names = sorted(self._entity_values(seeds))
@@ -264,7 +337,7 @@ class UnifiedKnowledgeSearchService:
                 settings.NEO4J_URI,
                 auth=(settings.NEO4J_USERNAME, settings.NEO4J_PASSWORD),
             )
-            project_name = Path(self.knowledge._project_path()).name
+            project_name = self._scope_project_name(project_scope, self.knowledge._project_path())
             cypher = (
                 "MATCH (seed:CodeIntelligence:KnowledgeEntity) "
                 "WHERE seed.project=$project AND seed.name IN $names "

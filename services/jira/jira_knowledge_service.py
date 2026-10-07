@@ -124,7 +124,9 @@ class JiraKnowledgeService:
             # another selected Java project into Attribute Impact.
             active_project = str(settings.JAVA_PROJECT_PATH or "").strip().lower()
             row_project = str(row.project_path or "").strip().lower()
-            if active_project and row_project and row_project != active_project:
+            # Synced Jira sources use a logical scope (jira://PROJECTKEY), which
+            # is independent of the currently selected local code checkout.
+            if active_project and row_project and not row_project.startswith("jira://") and row_project != active_project:
                 continue
             results.append({
                 **self._to_dict(row),

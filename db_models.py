@@ -96,3 +96,56 @@ class MappingDefinition(Base):
     status = Column(String(30), nullable=False, default="ACTIVE")
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class KnowledgeSyncSource(Base):
+    """Registered enterprise source that CodeIntelligence can synchronize incrementally."""
+    __tablename__ = "knowledge_sync_sources"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(200), nullable=False, unique=True, index=True)
+    source_type = Column(String(50), nullable=False, index=True)
+    location = Column(Text, nullable=True)
+    project_path = Column(Text, nullable=True, index=True)
+    config_json = Column(Text, nullable=True)
+    enabled = Column(String(10), nullable=False, default="true")
+    last_cursor = Column(Text, nullable=True)
+    last_sync_at = Column(DateTime, nullable=True)
+    last_status = Column(String(30), nullable=True)
+    last_error = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class KnowledgeSyncItem(Base):
+    """Per-source checkpoint used to skip unchanged Jira issues and documents."""
+    __tablename__ = "knowledge_sync_items"
+
+    id = Column(Integer, primary_key=True, index=True)
+    source_id = Column(Integer, nullable=False, index=True)
+    external_id = Column(String(700), nullable=False, index=True)
+    version_token = Column(String(200), nullable=True)
+    content_hash = Column(String(64), nullable=True)
+    local_ref = Column(Text, nullable=True)
+    status = Column(String(30), nullable=False, default="ACTIVE")
+    last_seen_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class KnowledgeSyncRun(Base):
+    """Audit trail for automatic/manual knowledge synchronization."""
+    __tablename__ = "knowledge_sync_runs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    source_id = Column(Integer, nullable=False, index=True)
+    trigger = Column(String(30), nullable=False, default="MANUAL")
+    status = Column(String(30), nullable=False, default="RUNNING")
+    discovered = Column(Integer, nullable=False, default=0)
+    created_count = Column(Integer, nullable=False, default=0)
+    updated_count = Column(Integer, nullable=False, default=0)
+    skipped_count = Column(Integer, nullable=False, default=0)
+    failed_count = Column(Integer, nullable=False, default=0)
+    details_json = Column(Text, nullable=True)
+    started_at = Column(DateTime, default=datetime.utcnow)
+    completed_at = Column(DateTime, nullable=True)
