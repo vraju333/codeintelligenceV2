@@ -128,6 +128,13 @@ class KnowledgeToolRegistry:
                 ),
             ),
             StructuredTool.from_function(
+                func=self.mapping_document_catalog,
+                name="mapping_document_catalog",
+                description=("List active-project mapping workbooks and their stored document metadata. "
+                             "Use to identify the original mapping document when no exact .xlsx filename is given. "
+                             "A catalog entry is not a downloadable file URL."),
+            ),
+            StructuredTool.from_function(
                 func=self.mapping_document_rows,
                 name="mapping_document_rows",
                 description=("Retrieve ALL authoritative Excel mapping rows for a named workbook filename "
@@ -558,13 +565,27 @@ class KnowledgeToolRegistry:
                            "exact_matches": matches, "phase8_pgvector_discovery": discovery,
                            "rule": "Exact source is authoritative; vector matches are discovery only."}, default=str)
 
+    @staticmethod
+    def _active_project_scope() -> str:
+        from config import settings
+        return str(Path(str(getattr(settings, "JAVA_PROJECT_PATH", "") or
+                            getattr(settings, "PYTHON_PROJECT_PATH", "") or
+                            "ACTIVE_PROJECT")).expanduser().resolve())
+
+    @staticmethod
+    def _active_project_scope() -> str:
+        from config import settings
+        return str(Path(str(getattr(settings, "JAVA_PROJECT_PATH", "") or
+                            getattr(settings, "PYTHON_PROJECT_PATH", "") or
+                            "ACTIVE_PROJECT")).expanduser().resolve())
+
     def enterprise_hybrid_search(self, query: str, top_k: int = 10, source_types: list[str] | None = None, project_path: str | None = None) -> str:
         """Phase 8 pgvector + BM25 + metadata retrieval."""
         result = EnterpriseHybridRagService().search(
             query=query,
             top_k=max(1, min(int(top_k), 50)),
             source_types=source_types,
-            project_path=project_path,
+            project_path=self._active_project_scope(),
         )
         return json.dumps(result, default=str)
 
@@ -573,6 +594,7 @@ class KnowledgeToolRegistry:
         result = EnterpriseHybridRagService().search(
             query=query, top_k=max(1, min(int(top_k), 10)),
             source_types=["ARCHITECTURE", "API", "RELEASE", "TEST", "TEST_REPORT", "REQUIREMENT", "JIRA", "CODE_CHANGE", "MAPPING"],
+            project_path=self._active_project_scope(),
         )
         return json.dumps(result, default=str)
 
@@ -585,6 +607,20 @@ class KnowledgeToolRegistry:
         engineering_graph = None
         try:
             engineering_graph = EngineeringKnowledgeGraphService().impact(value)
+            if isinstance(engineering_graph, dict):
+                scope = self._active_project_scope().casefold()
+                nodes = engineering_graph.get("nodes")
+                if isinstance(nodes, list):
+                    nodes = [n for n in nodes if isinstance(n, dict) and
+                             str(n.get("project_path") or "").casefold() == scope]
+                    engineering_graph["nodes"] = nodes
+                    ids = {str(n.get("id")) for n in nodes}
+                    if isinstance(engineering_graph.get("relationships"), list):
+                        engineering_graph["relationships"] = [r for r in engineering_graph["relationships"]
+                            if str(r.get("source")) in ids and str(r.get("target")) in ids]
+                if isinstance(engineering_graph.get("matches"), list):
+                    engineering_graph["matches"] = [n for n in engineering_graph["matches"]
+                        if isinstance(n, dict) and str(n.get("project_path") or "").casefold() == scope]
         except Exception as exc:
             engineering_graph = {"status": "UNAVAILABLE", "error": str(exc)}
 
@@ -601,7 +637,7 @@ class KnowledgeToolRegistry:
                 for field in self.unified.ENTITY_FIELDS:
                     seeds[field] = [value]
 
-        graph = self.unified._expand_graph(seeds)
+        graph = self.unified._expand_graph(seeds, project_scope=self._active_project_scope())
         rows = self.unified._project_rows(self.db)
         ids = set(graph.get("document_ids") or [])
         evidence = [self.unified._evidence(row) for row in rows if row.id in ids]
@@ -620,6 +656,10 @@ class KnowledgeToolRegistry:
             raise ValueError("attribute is required")
         result = MappingIntelligenceService().lineage(self.db, value)
         return json.dumps(result, default=str)
+
+    def mapping_document_catalog(self) -> str:
+        """Return active-project mapping document identities, without inventing file URLs."""
+        return json.dumps(MappingIntelligenceService().list_documents(self.db), default=str)
 
     def mapping_document_rows(self, filename: str) -> str:
         return json.dumps(MappingIntelligenceService().rows_by_filename(self.db, filename), default=str)
@@ -1050,21 +1090,36 @@ class KnowledgeToolRegistry:
         result = MappingIntelligenceService().validate(self.db, int(document_id))
         return json.dumps(result, default=str)
 
+    def _source_project_scope(self, requested: str | None = None) -> str:
+        """Always analyze the selected project's canonical root, never an LLM-supplied folder name.
+
+        The IntelliJ active-project selection updates settings.JAVA_PROJECT_PATH.
+        Accepting arbitrary tool arguments here previously turned the project label
+        'customer-account-service' into a nonexistent relative filesystem path.
+        """
+        from config import settings
+        raw = str(getattr(settings, "JAVA_PROJECT_PATH", "") or "").strip()
+        if not raw:
+            raise ValueError("No active Java project configured")
+        # Do not resolve paths against the Python backend working directory.
+        # On Windows, the configured absolute path is authoritative.
+        return raw
+
     def control_flow_analysis(self, attribute: str, project_path: str | None = None) -> str:
         """Return deterministic Phase 7 branch/condition evidence."""
-        return json.dumps(DeepCodeIntelligenceService().control_flow(attribute, project_path), default=str)
+        return json.dumps(DeepCodeIntelligenceService().control_flow(attribute, self._source_project_scope(project_path)), default=str)
 
     def data_flow_analysis(self, attribute: str, project_path: str | None = None) -> str:
         """Return deterministic Phase 7 assignment and cross-method flow evidence."""
-        return json.dumps(DeepCodeIntelligenceService().data_flow(attribute, project_path), default=str)
+        return json.dumps(DeepCodeIntelligenceService().data_flow(attribute, self._source_project_scope(project_path)), default=str)
 
     def shared_component_impact(self, attribute: str, project_path: str | None = None) -> str:
         """Return deterministic Phase 7 shared-component ripple impact."""
-        return json.dumps(DeepCodeIntelligenceService().shared_impact(attribute, project_path), default=str)
+        return json.dumps(DeepCodeIntelligenceService().shared_impact(attribute, self._source_project_scope(project_path)), default=str)
 
     def deep_code_intelligence(self, attribute: str, project_path: str | None = None) -> str:
         """Return the consolidated Phase 7 deeper code intelligence view."""
-        return json.dumps(DeepCodeIntelligenceService().analyze(attribute, project_path), default=str)
+        return json.dumps(DeepCodeIntelligenceService().analyze(attribute, self._source_project_scope(project_path)), default=str)
 
     def static_code_analysis(self, attribute: str) -> str:
         """Analyze current source-code impact for an attribute without invoking an LLM."""

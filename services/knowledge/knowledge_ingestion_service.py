@@ -164,23 +164,27 @@ class KnowledgeIngestionService:
         vector.save_local(str(folder))
         return {"status": "INDEXED", "documents": len(rows), "chunks": len(docs)}
 
-    def search(self, db: Session, query: str, top_k: int = 5) -> dict:
+    def search(self, db: Session, query: str, top_k: int = 5, project_path: str | None = None) -> dict:
         query = str(query or "").strip()
         if not query:
             raise ValueError("query is required")
-        project_path = self._project_path()
+        project_path = project_path or self._project_path()
         vector = self._vectors.get(project_path)
         if vector is None:
             vector = self._load_vector(project_path)
         if vector is None:
-            self.rebuild_rag(db)
-            vector = self._vectors.get(project_path)
+            # Never rebuild a different project index as a side effect of search.
+            if project_path == self._project_path():
+                self.rebuild_rag(db)
+                vector = self._vectors.get(project_path)
         if vector is None:
             return {"query": query, "results": [], "total_matches": 0}
 
         pairs = vector.similarity_search_with_score(query, k=max(1, min(int(top_k), 10)))
         results = []
         for doc, distance in pairs:
+            if str(doc.metadata.get("project_path") or "").casefold() != project_path.casefold():
+                continue
             results.append({
                 "knowledge_document_id": doc.metadata.get("knowledge_document_id"),
                 "chunk_id": doc.metadata.get("chunk_id"),

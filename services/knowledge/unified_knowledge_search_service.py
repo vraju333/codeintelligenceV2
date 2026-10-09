@@ -93,6 +93,8 @@ class UnifiedKnowledgeSearchService:
         if not requested_jiras:
             query_normalized = self._normalize_text(query)
             for jira in jira_knowledge_service.list_all(db):
+                if str(jira.get("project_path") or "").casefold() != self.knowledge._project_path().casefold():
+                    continue
                 metadata = self._jira_metadata(jira.get("requirement"))
                 project_name = self._normalize_text(metadata.get("project_name"))
                 project_key = self._normalize_text(metadata.get("project_key"))
@@ -129,7 +131,7 @@ class UnifiedKnowledgeSearchService:
         # RAG candidates must obey the same authority scope as the resolved
         # requirement/Jira evidence.  In particular, a Jira-only project such as
         # jira://CAS must never query the currently-open Student FAISS index.
-        authoritative_scope = self._authoritative_scope(jira_evidence, exact_rows)
+        authoritative_scope = self.knowledge._project_path()
         rag = self.knowledge.search(
             db, query, top_k, project_path=authoritative_scope
         ) if authoritative_scope else self.knowledge.search(db, query, top_k)
@@ -161,7 +163,7 @@ class UnifiedKnowledgeSearchService:
             for match in rag.get("results", []):
                 self._merge_entities(discovered, match.get("entities") or {})
 
-            graph = self._expand_graph(discovered)
+            graph = self._expand_graph(discovered, project_scope=authoritative_scope)
             self._merge_entities(discovered, graph.get("entities") or {})
 
             evidence_ids = set(graph.get("document_ids") or [])

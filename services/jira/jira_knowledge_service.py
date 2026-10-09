@@ -126,7 +126,7 @@ class JiraKnowledgeService:
             row_project = str(row.project_path or "").strip().lower()
             # Synced Jira sources use a logical scope (jira://PROJECTKEY), which
             # is independent of the currently selected local code checkout.
-            if active_project and row_project and not row_project.startswith("jira://") and row_project != active_project:
+            if active_project and row_project != active_project:
                 continue
             results.append({
                 **self._to_dict(row),

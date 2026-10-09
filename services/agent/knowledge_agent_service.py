@@ -32,6 +32,18 @@ KNOWLEDGE RULES:
 - Use graph_search for exact engineering-entity relationship/impact/trace/history questions.
 - For "why was <Class> created", "which Jira introduced <Class>", or class-purpose questions, retrieve current Java source, cross-source JIRA/requirement evidence and graph relationships. Do NOT substitute current Git diff for historical authorship.
 - A class matching a Jira requirement is an INFERRED CANDIDATE, not a confirmed creation reason. Only explicit Jira references or verified historical records can establish authorship.
+- Never explain missing scenario coverage as caused by uncommitted Git changes; scenario coverage is independently captured and linked.
+- SCENARIO EVIDENCE LEVELS: a discovered API scenario is VERIFIED AS EXISTING only. It is NOT verified as covering an attribute or Jira. A scenario_impact result is a POTENTIALLY IMPACTED CANDIDATE unless explicit test assertions, captured test evidence or scenario-to-Jira/baseline links prove coverage. Never put such candidates under "Verified Test Scenarios" or say "confirmed coverage".
+- When the Jira scenario/baseline lookup returns no explicit links, retain "confirmed Jira coverage: none found" even if other tools return 6 API operations or attribute-level candidates.
+- A change to input validation does not automatically impact GET, DELETE or account-type PATCH endpoints; require concrete call/data-flow evidence or label as low-confidence candidates.
+- For CURRENT Java implementation, java_source_search exact working-tree evidence is authoritative; an indexed code snippet without a matching live source path/fingerprint is historical or UNVERIFIED CURRENT, not confirmed current.
+- For Phase 7 source tools, never pass a project folder name such as customer-account-service as a filesystem path; use the selected project's configured absolute path.
+- For mapping document questions, prefer exact mapping_lineage rows with filename, sheet, row and target over semantic search.
+- For attribute impact, relevant JIRA requirements are inferred implementation candidates unless an explicit reference is verified.
+- No matches in one tool do not prove that another registry has no evidence.
+- A verified JIRA document is NOT a verified JIRA-to-class link. Label requirement existence VERIFIED and class association INFERRED separately; never summarize an inferred link as "Verified JIRA".
+- For attribute impact questions, retrieve exact mapping rows and JIRA/requirement candidates even when no explicit JIRA graph edge exists. Do not claim no related JIRA solely because explicit links are zero.
+- Document metadata (document ID, workbook filename, sheet, row, source path, target) is evidence; do not invent a download URL or claim the original workbook is available without a verified source path.
 - Documented XML-to-Customer mappings must not be silently relabeled as XML-to-CustomerXmlRequest mappings. State the precise source/target of each mapping.
 - Missing Jira-method edges or no current Git changes means "historical link unverified", not "class has no related requirements".
 - Use mapping_lineage when the starting point is a Java/business attribute.
@@ -231,13 +243,28 @@ class KnowledgeAgentService:
             response = model.invoke([SystemMessage(content=SYSTEM_PROMPT), *state["messages"]])
             return {"messages": [response]}
 
+        # LangGraph ToolNode executes multiple calls concurrently. The registry's
+        # tools share the request-scoped SQLAlchemy Session, which is not safe
+        # for concurrent use. Execute each tool call in order instead.
+        def sequential_tools_node(state: MessagesState):
+            last = state["messages"][-1]
+            calls = getattr(last, "tool_calls", None) or []
+            if not calls:
+                return {"messages": []}
+            responses = []
+            for call in calls:
+                single_call = AIMessage(content="", tool_calls=[call])
+                result = ToolNode(tools).invoke({"messages": [single_call]})
+                responses.extend(result.get("messages", []))
+            return {"messages": responses}
+
         builder = StateGraph(MessagesState)
         builder.add_node("router", router_node)
-        builder.add_node("mandatory_tools", ToolNode(tools))
+        builder.add_node("mandatory_tools", sequential_tools_node)
         builder.add_node("enrichment", enrichment_node)
-        builder.add_node("enrichment_tools", ToolNode(tools))
+        builder.add_node("enrichment_tools", sequential_tools_node)
         builder.add_node("agent", agent_node)
-        builder.add_node("agent_tools", ToolNode(tools))
+        builder.add_node("agent_tools", sequential_tools_node)
 
         builder.add_edge(START, "router")
 
@@ -595,6 +622,50 @@ class KnowledgeAgentService:
                 calls.append({"name": "enterprise_hybrid_search", "args": {"query": text, "top_k": 10},
                               "id": "mandatory_class_origin_pgvector"})
 
+        # Cross-source attribute questions must not stop at Java-only impact or Git diffs.
+        # A dotted Java field (e.g. CustomerXmlRequest.countryCode) is resolved to
+        # its business attribute for authoritative mapping lookup, while retrieval
+        # separately discovers candidate JIRAs without claiming explicit linkage.
+        attribute_impact_question = any(term in lowered for term in (
+            "impact", "impacted", "affected", "if i change", "changing", "change to",
+            "which jira", "which requirement", "mapping document", "where is", "mapped",
+        ))
+        field_match = re.search(r"\b[A-Z][A-Za-z0-9_]*\.([a-z][A-Za-z0-9_]*)\b", text)
+        if field_match and attribute_impact_question:
+            field = field_match.group(1)
+            if "mapping_lineage" in available:
+                calls.append({"name": "mapping_lineage", "args": {"attribute": field},
+                              "id": "mandatory_attribute_mapping_lineage"})
+            if "mapping_graph_lineage" in available:
+                calls.append({"name": "mapping_graph_lineage", "args": {"attribute": field},
+                              "id": "mandatory_attribute_mapping_graph"})
+            if "enterprise_hybrid_search" in available:
+                calls.append({"name": "enterprise_hybrid_search",
+                              "args": {"query": f"{field} requirement JIRA mapping {text}",
+                                       "top_k": 12, "source_types": ["JIRA", "REQUIREMENT", "MAPPING"]},
+                              "id": "mandatory_attribute_jira_mapping_discovery"})
+            if "scenario_impact" in available and any(x in lowered for x in ("scenario", "test", "impact", "affected")):
+                calls.append({"name": "scenario_impact", "args": {"attribute": field},
+                              "id": "mandatory_attribute_scenario_impact"})
+
+        # Deterministic evidence retrieval for bare attributes and Jira coverage.
+        # Do not depend on an LLM choosing the mapping/requirement tool.
+        document_intent = any(x in lowered for x in (
+            "mapping document", "mapping workbook", "which document defines",
+            "which workbook", "mapping for", "mapping defines"))
+        attributes = re.findall(r"\b[A-Z][A-Za-z0-9_]*\.([a-z][A-Za-z0-9_]*)\b", text)
+        attributes += re.findall(r"\b(?:defines?|mapping for|attribute|field)\s+`?([a-z][A-Za-z0-9_]*)`?", text, flags=re.I)
+        attributes += re.findall(r"`([a-z][A-Za-z0-9_]*)`", text)
+        attributes += [x[0].lower() + x[1:] for x in re.findall(r"\b(?:xml element|element)\s+([A-Z][A-Za-z0-9_]*)\b", text, re.I)]
+        ignored = {"the", "which", "mapping", "document", "workbook", "attribute", "field", "java", "xml", "from"}
+        attributes = list(dict.fromkeys(a for a in attributes if len(a) > 2 and a.lower() not in ignored))[:3]
+        for attr in attributes:
+            if (document_intent or attribute_impact_question) and "mapping_lineage" in available:
+                calls.append({"name": "mapping_lineage", "args": {"attribute": attr}, "id": f"evidence_mapping_{attr}"})
+            if attribute_impact_question and "scenario_impact" in available and any(x in lowered for x in ("scenario", "test")):
+                calls.append({"name": "scenario_impact", "args": {"attribute": attr}, "id": f"evidence_scenario_{attr}"})
+        if attribute_impact_question and any(x in lowered for x in ("jira", "requirement", "mapping", "scenario")) and "enterprise_hybrid_search" in available:
+            calls.append({"name": "enterprise_hybrid_search", "args": {"query": text, "top_k": 12, "source_types": ["JIRA", "REQUIREMENT", "MAPPING"]}, "id": "evidence_cross_source_requirements"})
         # Phase 8 deterministic routing for explicit enterprise/hybrid discovery.
         phase8_markers = (
             "enterprise hybrid", "hybrid rag", "enterprise rag",
@@ -658,6 +729,12 @@ class KnowledgeAgentService:
         jira_ids = list(dict.fromkeys(
             re.findall(r"\b[A-Z][A-Z0-9]+-\d+\b", text.upper())
         ))
+
+        if jira_ids and any(x in lowered for x in ("scenario", "test", "baseline", "coverage")):
+            if "unified_knowledge_search" in available:
+                calls.append({"name": "unified_knowledge_search", "args": {"query": f"{jira_ids[0]} scenario baseline test coverage"}, "id": "evidence_jira_scenario_registry"})
+            if "graph_search" in available:
+                calls.append({"name": "graph_search", "args": {"entity": jira_ids[0]}, "id": "evidence_jira_scenario_graph"})
 
         # A user explicitly asking for LIVE Jira must always retrieve the actual issue.
         live_jira_requested = (
@@ -728,6 +805,14 @@ class KnowledgeAgentService:
                     "args": {"entity": entity},
                     "id": "mandatory_phase5_graph",
                 })
+
+        # Mapping document discovery is different from mapping-row lookup.
+        if any(term in lowered for term in (
+            "mapping document", "mapping workbook", "original mapping", "mapping file",
+            "download mapping", "open mapping", "show mappings for",
+        )) and "mapping_document_catalog" in available:
+            calls.append({"name": "mapping_document_catalog", "args": {},
+                          "id": "mandatory_mapping_document_catalog"})
 
         # A workbook filename is a document identity, never an XML/JSON source path.
         workbook_match = re.search(r"([A-Za-z0-9_ .-]+\\.xls(?:x|m))", text, flags=re.I)
