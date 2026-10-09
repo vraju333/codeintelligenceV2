@@ -125,7 +125,8 @@ class EngineeringKnowledgeGraphService:
         pid = self._key("Project", project_name, root)
         node(pid, "Project", project_name, path=str(root))
         method_index: dict[str, list[str]] = {}
-        pending_calls: list[tuple[str, str]] = []
+        typed_method_index: dict[tuple[str, str], str] = {}
+        pending_calls: list[tuple[str, str, str | None, str, dict[str, str]]] = []
 
         for file in root.rglob("*.java"):
             source = file.read_text(encoding="utf-8", errors="ignore")
@@ -137,6 +138,10 @@ class EngineeringKnowledgeGraphService:
             node(cid, "Class", class_name, file=str(file.resolve()))
             edge(pid, cid, "CONTAINS")
 
+            # Receiver types from declarations and constructor-injected fields.
+            # This is conservative source-level resolution, not full Java AST analysis.
+            field_types = {name: typ for typ, name in re.findall(
+                r"\b(?:private|protected|public)\s+(?:final\s+)?([A-Za-z_]\w*)\s+([A-Za-z_]\w*)\s*[;=,)]", source)}
             fields = set(self.FIELD_RE.findall(source))
             for field in fields:
                 aid = self._key("Attribute", project_name, class_name, field.lower())
@@ -157,6 +162,7 @@ class EngineeringKnowledgeGraphService:
                 node(mid, "Method", f"{class_name}.{method_name}", method=method_name, owner=class_name)
                 edge(cid, mid, "DECLARES")
                 method_index.setdefault(method_name, []).append(mid)
+                typed_method_index[(class_name, method_name)] = mid
 
                 for match in self.GETTER_RE.finditer(body):
                     attr = self._camel(match.group(1) or match.group(2))
@@ -175,7 +181,7 @@ class EngineeringKnowledgeGraphService:
                 for call in self.CALL_RE.finditer(body):
                     called = call.group(2)
                     if called not in {method_name, "if", "for", "while", "switch", "return", "new", "catch"}:
-                        pending_calls.append((mid, called))
+                        pending_calls.append((mid, called, call.group(1), class_name, field_types))
 
                 prefix = source[max(0, mm.start() - 700):mm.start()]
                 maps = list(self.MAPPING_RE.finditer(prefix))
@@ -191,10 +197,21 @@ class EngineeringKnowledgeGraphService:
                     edge(eid, mid, "INVOKES")
                     edge(pid, eid, "EXPOSES")
 
-        for source_id, called_name in pending_calls:
-            targets = method_index.get(called_name, [])
-            if len(targets) == 1:
-                edge(source_id, targets[0], "CALLS")
+        for source_id, called_name, receiver, owner, field_types in pending_calls:
+            target = None
+            if receiver in (None, "this"):
+                target = typed_method_index.get((owner, called_name))
+            elif receiver in field_types:
+                target = typed_method_index.get((field_types[receiver], called_name))
+            elif receiver:
+                # Static calls such as CustomerJpaMapper.toEntity(...).
+                target = typed_method_index.get((receiver, called_name))
+            if target is None:
+                targets = method_index.get(called_name, [])
+                if len(targets) == 1:
+                    target = targets[0]
+            if target is not None and target != source_id:
+                edge(source_id, target, "CALLS")
 
         return list(nodes.values()), [
             {"source": s, "target": t, "type": r} for s, t, r in sorted(edges)
@@ -264,9 +281,25 @@ class EngineeringKnowledgeGraphService:
                 add(jid, "Jira", jira)
                 edges.add((sid, jid, "CHANGED_BY"))
 
+        # A JIRA's persisted project_path is explicit ownership evidence.
+        # Only connect it to a registered workspace with an exact normalized path.
+        # This does NOT assert that any Java method implements the JIRA.
         for j in db.query(JiraKnowledge).all():
-            jid = self._key("Jira", j.jira_id.upper())
-            add(jid, "Jira", j.jira_id.upper(), project=j.project_path, title=j.title or "")
+            jira_key = str(j.jira_id or "").strip().upper()
+            if not jira_key:
+                continue
+            jid = self._key("Jira", jira_key)
+            workspace_name = project_map.get(self._norm_path(j.project_path))
+            add(jid, "Jira", jira_key, project=workspace_name or j.project_path,
+                project_path=j.project_path, title=j.title or "")
+            if workspace_name:
+                # Same identity as the project node produced by _scan_project.
+                project_node = next((n for n in self._projects(None)
+                                     if n["name"] == workspace_name and
+                                     self._norm_path(n["path"]) == self._norm_path(j.project_path)), None)
+                if project_node:
+                    pid = self._key("Project", workspace_name, Path(project_node["path"]))
+                    edges.add((jid, pid, "BELONGS_TO_PROJECT"))
 
         baselines = db.query(ScenarioBaseline).all()
         baseline_by_id = {b.id: b for b in baselines}
@@ -306,8 +339,41 @@ class EngineeringKnowledgeGraphService:
 
         return list(nodes.values()), [{"source": s, "target": t, "type": r} for s, t, r in sorted(edges)]
 
+    def ensure_jira_project_links(self, db: Session, project_path: str) -> dict:
+        """Repair evidence-backed Jira ownership without deleting any graph data."""
+        canon = lambda v: str(v or "").replace("\\", "/").rstrip("/").casefold()
+        registered = next((p for p in self._projects(None)
+                           if canon(p["path"]) == canon(project_path)), None)
+        if registered is None:
+            return {"status": "PROJECT_NOT_REGISTERED", "project_path": project_path}
+        issues = [j for j in db.query(JiraKnowledge).all()
+                  if canon(j.project_path) == canon(project_path) and j.jira_id]
+        driver = self._driver()
+        try:
+            with driver.session(database=settings.NEO4J_DATABASE) as session:
+                # Match an existing project by name, without creating duplicate project identities.
+                count = session.run("MATCH (p:EngineeringKnowledge:Project {name:$name}) RETURN count(p) AS n",
+                                    name=registered["name"]).single()["n"]
+                if count != 1:
+                    return {"status": "PROJECT_GRAPH_MISSING", "project_nodes": count}
+                for issue in issues:
+                    key = str(issue.jira_id).upper()
+                    session.run("""
+                        MATCH (p:EngineeringKnowledge:Project {name:$project_name})
+                        MERGE (j:EngineeringKnowledge:Jira {id:$jira_id})
+                        SET j.name=$jira_key, j.project=$project_name,
+                            j.project_path=$project_path, j.title=$title
+                        MERGE (j)-[:BELONGS_TO_PROJECT]->(p)
+                    """, project_name=registered["name"], jira_id=self._key("Jira", key),
+                        jira_key=key, project_path=project_path, title=issue.title or "").consume()
+            return {"status": "SYNCED", "project": registered["name"], "jira_issues": len(issues)}
+        finally:
+            driver.close()
+
     def sync(self, db: Session, selected_projects: list[str] | None = None) -> dict:
-        projects = self._projects(selected_projects)
+        # Graph storage is globally replaced below. Always include all registered
+        # projects; a selected-project rebuild would erase other projects.
+        projects = self._projects(None)
         if not projects:
             raise ValueError("No registered Java project was found.")
 
@@ -322,7 +388,7 @@ class EngineeringKnowledgeGraphService:
         ns, es = self._business_nodes(
             db,
             project_map,
-            selected_project_names=[p["name"] for p in projects] if selected_projects else None,
+            selected_project_names=None,
         )
         nodes.update({n["id"]: n for n in ns})
         edges.update((e["source"], e["target"], e["type"]) for e in es)

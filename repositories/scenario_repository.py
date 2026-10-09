@@ -2,6 +2,11 @@ from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session
 
 from db_models import Scenario
+from config import settings
+
+
+def _same_project(a, b):
+    return bool(a and b) and str(a).strip().replace("\\", "/").rstrip("/").casefold() == str(b).strip().replace("\\", "/").rstrip("/").casefold()
 from schemas import ScenarioRequest, ScenarioUpdateRequest
 
 
@@ -51,7 +56,10 @@ class ScenarioRepository:
                 filters.append(and_(Scenario.http_method == method, Scenario.endpoint == endpoint))
         if not filters:
             return []
-        return db.query(Scenario).filter(or_(*filters)).order_by(Scenario.id).all()
+        rows = db.query(Scenario).filter(or_(*filters)).order_by(Scenario.id).all()
+        # Endpoint overlap is NOT project ownership. Legacy unowned rows are
+        # excluded from agent impact to prevent cross-project evidence leaks.
+        return [row for row in rows if _same_project(row.project_path, settings.JAVA_PROJECT_PATH)]
 
     def find_by_id(self, db: Session, scenario_id: int):
         return db.query(Scenario).filter(Scenario.id == scenario_id).first()

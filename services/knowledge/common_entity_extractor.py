@@ -140,9 +140,19 @@ class CommonKnowledgeEntityExtractor:
         content = str(content or "")
 
         jira_ids = self._unique(re.findall(r"\b[A-Z][A-Z0-9]+-\d+\b", content), 100)
-        endpoints = self._unique(
-            re.findall(r"(?<!\w)/(?:api/)?[A-Za-z0-9_{}./:-]+", content), 100
+        # XML/JSON mapping paths must never be interpreted as HTTP endpoints.
+        # Only explicit HTTP method + path or labeled endpoint declarations qualify.
+        route_matches = re.findall(
+            r"(?im)\b(?:GET|POST|PUT|PATCH|DELETE)\s+(/[^\s,;]+)", content
         )
+        labeled_routes = self._labeled_values(
+            content, r"endpoint(?:s)?|api\s+(?:route|path|endpoint)(?:s)?"
+        )
+        endpoints = self._unique(
+            [path for path in route_matches + labeled_routes if path.startswith("/")], 100
+        )
+        if source_type in {"MAPPING", "MAPPING_FOLDER"}:
+            endpoints = []
         http_methods = self._unique(
             [x.upper() for x in re.findall(r"\b(GET|POST|PUT|PATCH|DELETE)\b", content, re.I)],
             10,

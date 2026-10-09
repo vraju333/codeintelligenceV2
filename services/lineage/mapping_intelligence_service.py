@@ -26,16 +26,16 @@ class MappingIntelligenceService:
     HEADER_ALIASES = {
         "source_type": {"source type", "input type", "format", "source format", "input format"},
         "source_system": {"source system", "input system", "source application", "source app"},
-        "source_path": {"input attribute", "input path", "source", "source field", "source attribute", "source path", "xml node", "xpath", "json node", "json path", "db column", "source column"},
-        "mapping_rule": {"mapping", "mapping rule", "transformation", "transform", "logic", "rule", "conversion"},
-        "target_attribute": {"java attribute", "java attribute to be mapped to", "target", "target field", "target attribute", "java field", "application attribute"},
+        "source_path": {"input attribute", "input path", "source", "source field", "source attribute", "source path", "source field / xpath", "xml node", "xpath", "json node", "json path", "db column", "source column"},
+        "mapping_rule": {"mapping", "mapping rule", "transformation", "transformation / validation", "transform", "logic", "rule", "conversion"},
+        "target_attribute": {"java attribute", "java attribute to be mapped to", "target", "target field", "target attribute", "java field", "application attribute", "application field", "java model"},
         "null_rule": {"if null", "null handling", "null rule", "default", "default value", "null/default handling"},
-        "validation_rule": {"validation", "validation rule", "validations", "constraint"},
+        "validation_rule": {"validation", "validation rule", "transformation / validation", "validations", "constraint"},
         "comments": {"comments", "comment", "remarks", "notes", "description", "business comments"},
     }
 
     def _project_path(self) -> str:
-        value = getattr(settings, "PYTHON_PROJECT_PATH", None) or getattr(settings, "JAVA_PROJECT_PATH", None) or "ACTIVE_PROJECT"
+        value = getattr(settings, "JAVA_PROJECT_PATH", None) or getattr(settings, "PYTHON_PROJECT_PATH", None) or "ACTIVE_PROJECT"
         try:
             return str(Path(str(value)).expanduser().resolve())
         except Exception:
@@ -90,22 +90,27 @@ class MappingIntelligenceService:
         return None, value
 
     def import_excel(self, db: Session, *, filename: str, content: bytes, title: str | None = None,
-                     document_version: str | None = None, mapping_family: str | None = None, source_ref: str | None = None) -> dict:
+                     document_version: str | None = None, mapping_family: str | None = None, source_ref: str | None = None, project_path: str | None = None) -> dict:
         if not filename.lower().endswith((".xlsx", ".xlsm")):
             raise ValueError("Phase 6 mapping upload currently accepts .xlsx or .xlsm files")
         if not content:
             raise ValueError("mapping workbook is empty")
 
         self._ensure_mapping_family_column(db)
-        project_path = self._project_path()
+        project_path = str(project_path or self._project_path()).replace("/", "\\\\")
         checksum = hashlib.sha256(content).hexdigest()
         existing = db.query(MappingDocument).filter(
             MappingDocument.project_path == project_path,
             MappingDocument.checksum_sha256 == checksum,
             MappingDocument.status == "ACTIVE",
         ).first()
-        if existing:
+        if existing and existing.row_count > 0:
             return {"status": "ALREADY_IMPORTED", "document": self._document_dict(existing), "rows_imported": existing.row_count}
+        if existing:
+            # Repair an earlier import that accepted the workbook but parsed zero rows.
+            db.query(MappingDefinition).filter(MappingDefinition.document_id == existing.id).delete()
+            db.delete(existing)
+            db.flush()
 
         workbook = load_workbook(BytesIO(content), data_only=True, read_only=True)
         document = MappingDocument(
@@ -162,6 +167,12 @@ class MappingIntelligenceService:
                 db.add(mapping)
                 imported.append(mapping)
 
+        if not imported:
+            db.rollback()
+            raise ValueError(
+                f"No mapping rows parsed from {filename}; verify the source/target header aliases. "
+                f"Skipped sheets: {skipped}"
+            )
         document.row_count = len(imported)
         document.sheet_count = len(workbook.sheetnames)
         db.commit()
@@ -213,10 +224,102 @@ class MappingIntelligenceService:
                 best_index, best_map = index, found
         return best_index, best_map
 
+    @staticmethod
+    def _canonical_project_key(value: str) -> str:
+        """Compare Windows project identities independent of slash style/case."""
+        return str(value or "").strip().replace("\\", "/").rstrip("/").casefold()
+
+    def ensure_active_project_workbooks(self, db: Session) -> dict:
+        """Import missing/changed workbooks under the selected project, not other projects.
+
+        This is deterministic and idempotent by checksum. A query may now see
+        newly added workbooks without manually uploading each file.
+        """
+        root = Path(self._project_path())
+        if not root.is_dir():
+            return {"status": "PROJECT_NOT_ACCESSIBLE", "project_path": str(root),
+                    "error": "The active Java project directory cannot be read by the backend process."}
+        files = sorted(set(root.glob("docs/**/*.xlsx")) | set(root.glob("docs/**/*.xlsm")) |
+                       set(root.glob("mappings/**/*.xlsx")) | set(root.glob("mappings/**/*.xlsm")))
+        results = []
+        for file in files:
+            if file.name.startswith("~$"):
+                continue
+            content = file.read_bytes()
+            checksum = hashlib.sha256(content).hexdigest()
+            active = db.query(MappingDocument).filter(
+                MappingDocument.checksum_sha256 == checksum,
+                MappingDocument.status == "ACTIVE",
+                MappingDocument.row_count > 0,
+            ).all()
+            if any(self._canonical_project_key(doc.project_path) == self._canonical_project_key(str(root)) for doc in active):
+                continue
+            # Preserve existing ingestion logic and provenance. Never manufacture rows.
+            try:
+                result = self.import_excel(db, filename=file.name, content=content,
+                                           source_ref=str(file), project_path=str(root))
+                results.append({"filename": file.name, "status": result.get("status"),
+                                "rows_imported": result.get("rows_imported", 0),
+                                "neo4j": result.get("neo4j")})
+            except Exception as exc:
+                # Never turn a failed import into an unexplained empty lineage result.
+                db.rollback()
+                results.append({"filename": file.name, "status": "IMPORT_FAILED", "error": str(exc)})
+        return {"status": "CHECKED" if files else "NO_WORKBOOKS_FOUND",
+                "project_path": str(root), "files_found": len(files), "imports": results}
+
+    def _active_project_rows(self, db: Session):
+        key = self._canonical_project_key(self._project_path())
+        documents = db.query(MappingDocument).filter(MappingDocument.status == "ACTIVE").all()
+        docs = {doc.id: doc for doc in documents if self._canonical_project_key(doc.project_path) == key}
+        if not docs:
+            return []
+        rows = db.query(MappingDefinition).filter(
+            MappingDefinition.document_id.in_(list(docs)), MappingDefinition.status == "ACTIVE"
+        ).all()
+        return [(row, docs[row.document_id]) for row in rows]
+
+    def rows_by_filename(self, db: Session, filename: str) -> dict:
+        """Resolve a workbook filename to structured rows in the active project only."""
+        name = Path(str(filename or "").replace("\\", "/")).name.casefold()
+        if not name:
+            raise ValueError("mapping filename is required")
+        self.ensure_active_project_workbooks(db)
+        project = self._project_path()
+        project_key = self._canonical_project_key(project)
+        # Scope every returned document in Python because Windows path separators
+        # and case vary in historical PostgreSQL records.
+        candidates = db.query(MappingDocument).filter(
+            MappingDocument.status == "ACTIVE"
+        ).order_by(MappingDocument.id.desc()).all()
+        matches = [doc for doc in candidates
+                   if self._canonical_project_key(doc.project_path) == project_key
+                   and (str(doc.filename or "").casefold() == name
+                        or str(doc.title or "").casefold() == name)]
+        mappings = []
+        for doc in matches:
+            rows = db.query(MappingDefinition).filter(
+                MappingDefinition.document_id == doc.id,
+                MappingDefinition.status == "ACTIVE",
+            ).order_by(MappingDefinition.sheet_name, MappingDefinition.row_number).all()
+            # Document ownership is authoritative; never pull unrelated rows.
+            mappings.extend(self._mapping_dict(row, doc) for row in rows)
+        return {
+            "filename": filename,
+            "project_path": project,
+            "documents": [self._document_dict(doc) for doc in matches],
+            "mappings": mappings,
+            "mapping_count": len(mappings),
+        }
+
     def list_documents(self, db: Session) -> dict:
         self._ensure_mapping_family_column(db)
         rows = db.query(MappingDocument).filter(
-            MappingDocument.project_path == self._project_path(), MappingDocument.status == "ACTIVE"
+            MappingDocument.project_path.in_({
+                self._project_path(),
+                self._project_path().replace("/", "\\\\"),
+                self._project_path().replace("\\\\", "/"),
+            }), MappingDocument.status == "ACTIVE"
         ).order_by(MappingDocument.id.desc()).all()
         return {"documents": [self._document_dict(row) for row in rows]}
 
@@ -233,17 +336,17 @@ class MappingIntelligenceService:
         value = str(query or "").strip()
         if not value:
             raise ValueError("query is required")
-        pattern = f"%{value}%"
-        rows = db.query(MappingDefinition).filter(
-            MappingDefinition.project_path == self._project_path(), MappingDefinition.status == "ACTIVE",
-            or_(
-                MappingDefinition.source_path.ilike(pattern), MappingDefinition.target_attribute.ilike(pattern),
-                MappingDefinition.target_expression.ilike(pattern), MappingDefinition.mapping_rule.ilike(pattern),
-                MappingDefinition.null_rule.ilike(pattern), MappingDefinition.comments.ilike(pattern),
-            )
-        ).order_by(MappingDefinition.document_id.desc(), MappingDefinition.row_number).limit(max(1, min(limit, 250))).all()
-        docs = {d.id: d for d in db.query(MappingDocument).filter(MappingDocument.id.in_({r.document_id for r in rows})).all()} if rows else {}
-        return {"query": value, "matches": [self._mapping_dict(row, docs.get(row.document_id)) for row in rows], "count": len(rows)}
+        ingestion = self.ensure_active_project_workbooks(db)
+        needle = value.casefold()
+        matches = []
+        for row, doc in self._active_project_rows(db):
+            searchable = (row.source_path, row.target_attribute, row.target_expression,
+                          row.mapping_rule, row.null_rule, row.comments)
+            if any(needle in str(field or "").casefold() for field in searchable):
+                matches.append(self._mapping_dict(row, doc))
+        matches = matches[:max(1, min(limit, 250))]
+        return {"query": value, "matches": matches, "count": len(matches),
+                "project_path": self._project_path(), "workbook_discovery": ingestion}
 
     def lineage(self, db: Session, attribute: str) -> dict:
         result = self.search(db, attribute, 250)
@@ -254,7 +357,16 @@ class MappingIntelligenceService:
             if any(needle == str(x or "").lower() or needle in str(x or "").lower() for x in candidates):
                 exact.append(row)
         conflicts = self._conflicts(exact)
-        return {"attribute": attribute, "mappings": exact, "mapping_count": len(exact), "conflicts": conflicts,
+        discovery = result.get("workbook_discovery") or {}
+        failures = [x for x in discovery.get("imports", []) if x.get("status") == "IMPORT_FAILED"]
+        status = ("FOUND" if exact else
+                  "IMPORT_FAILED" if failures else
+                  discovery.get("status") if discovery.get("status") in
+                  ("PROJECT_NOT_ACCESSIBLE", "NO_WORKBOOKS_FOUND") else "NO_MATCH")
+        return {"status": status, "attribute": attribute, "mappings": exact,
+                "mapping_count": len(exact), "conflicts": conflicts,
+                "project_path": result.get("project_path"),
+                "workbook_discovery": discovery,
                 "evidence_rule": "Every mapping includes document, sheet and row provenance."}
 
 

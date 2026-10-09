@@ -70,6 +70,16 @@ class KnowledgeToolRegistry:
                 ),
             ),
             StructuredTool.from_function(
+                func=self.java_source_search,
+                name="java_source_search",
+                description=(
+                    "Retrieve exact Java class/method signatures and method bodies from the active Java project. "
+                    "Use for exact class names, method signatures, implementations, execution flow and source paths. "
+                    "Uses Phase 8 PostgreSQL pgvector + BM25 for discovery, and verifies exact symbols "
+                    "against current local Java source; never uses legacy FAISS."
+                ),
+            ),
+            StructuredTool.from_function(
                 func=self.enterprise_hybrid_search,
                 name="enterprise_hybrid_search",
                 description=(
@@ -116,6 +126,14 @@ class KnowledgeToolRegistry:
                     "and exact mapping-document provenance including workbook, sheet and row. Use for "
                     "mapping, lineage, XML/JSON/DB source, null/default rule, or 'which mapping document' questions."
                 ),
+            ),
+            StructuredTool.from_function(
+                func=self.mapping_document_rows,
+                name="mapping_document_rows",
+                description=("Retrieve ALL authoritative Excel mapping rows for a named workbook filename "
+                             "within the active project. Includes XPath, application field, database columns "
+                             "from original row, transformation rules, sheet and row provenance. "
+                             "Never use mapping_source_lineage with an .xlsx filename."),
             ),
             StructuredTool.from_function(
                 func=self.mapping_source_lineage,
@@ -485,6 +503,61 @@ class KnowledgeToolRegistry:
         result = RegressionReleaseIntelligenceService().analyse(self.db)
         return json.dumps(result, default=str)
 
+    def java_source_search(self, query: str, top_k: int = 10) -> str:
+        """Phase 8 discovery plus authoritative exact-symbol verification in active source."""
+        import re
+        from config import settings
+
+        root = Path(str(getattr(settings, "JAVA_PROJECT_PATH", "") or "")).expanduser()
+        if not root.is_dir():
+            return json.dumps({"status": "PROJECT_NOT_ACCESSIBLE", "project_path": str(root)})
+        # An exact symbol request must not depend on vector ranking or index freshness.
+        class_match = re.search(r"\b([A-Z][A-Za-z0-9_]*(?:Service|Controller|Mapper|Repository))\b", query)
+        class_name = class_match.group(1) if class_match else None
+        method_match = re.search(r"\b(?:" + re.escape(class_name) + r"\s*\.\s*)?([a-z][A-Za-z0-9_]*)\s*\(", query) if class_name else None
+        method_name = method_match.group(1) if method_match else None
+        if class_name and not method_name:
+            following = query[class_match.end():]
+            candidate = re.search(r"(?:\.|\s+)\s*(create|replace|update|delete|getAll|get|save|validate|toModel|toEntity)\b", following)
+            if candidate:
+                method_name = candidate.group(1)
+        matches = []
+        if class_name:
+            for file in root.rglob(class_name + ".java"):
+                if len(matches) >= 10:
+                    break
+                source = file.read_text(encoding="utf-8", errors="replace")
+                if method_name:
+                    pattern = re.compile(r"(?m)^\s*(?:public|protected|private)\s+(?:(?:static|final|synchronized)\s+)*[\w<>\[\], ?]+\s+" + re.escape(method_name) + r"\s*\([^;{}]*\)\s*(?:throws\s+[\w, ]+)?\s*\{")
+                    for hit in pattern.finditer(source):
+                        opening = source.find("{", hit.start(), hit.end())
+                        depth, end = 0, opening
+                        # Bound the excerpt; braces in string literals may require a full Java parser.
+                        for pos in range(opening, min(len(source), opening + 16000)):
+                            if source[pos] == "{": depth += 1
+                            elif source[pos] == "}":
+                                depth -= 1
+                                if depth == 0:
+                                    end = pos + 1
+                                    break
+                        matches.append({"class_name": class_name, "method_name": method_name,
+                                        "file_path": str(file), "line_number": source.count("\n", 0, hit.start()) + 1,
+                                        "source": source[hit.start():end].strip(), "evidence": "CURRENT_JAVA_SOURCE"})
+                else:
+                    matches.append({"class_name": class_name, "file_path": str(file),
+                                    "source": source[:6000], "evidence": "CURRENT_JAVA_SOURCE"})
+        discovery = None
+        try:
+            discovery = EnterpriseHybridRagService().search(
+                query=query, top_k=max(1, min(int(top_k), 20)),
+                source_types=["CODE"], project_path=str(root.resolve()))
+        except Exception as exc:
+            discovery = {"status": "UNAVAILABLE", "error": str(exc)}
+        return json.dumps({"query": query, "project_path": str(root),
+                           "status": "EXACT_SOURCE_FOUND" if matches else "NO_EXACT_SOURCE_MATCH",
+                           "exact_matches": matches, "phase8_pgvector_discovery": discovery,
+                           "rule": "Exact source is authoritative; vector matches are discovery only."}, default=str)
+
     def enterprise_hybrid_search(self, query: str, top_k: int = 10, source_types: list[str] | None = None, project_path: str | None = None) -> str:
         """Phase 8 pgvector + BM25 + metadata retrieval."""
         result = EnterpriseHybridRagService().search(
@@ -545,6 +618,9 @@ class KnowledgeToolRegistry:
         result = MappingIntelligenceService().lineage(self.db, value)
         return json.dumps(result, default=str)
 
+    def mapping_document_rows(self, filename: str) -> str:
+        return json.dumps(MappingIntelligenceService().rows_by_filename(self.db, filename), default=str)
+
     def mapping_source_lineage(
         self,
         source_path: str,
@@ -559,11 +635,11 @@ class KnowledgeToolRegistry:
         service = MappingIntelligenceService()
         service._ensure_mapping_family_column(self.db)
         project_path = service._project_path()
+        service.ensure_active_project_workbooks(self.db)
         rows = (
             self.db.query(MappingDefinition, MappingDocument)
             .join(MappingDocument, MappingDocument.id == MappingDefinition.document_id)
             .filter(
-                MappingDefinition.project_path == project_path,
                 MappingDefinition.status == "ACTIVE",
                 MappingDocument.status == "ACTIVE",
             )
@@ -583,6 +659,8 @@ class KnowledgeToolRegistry:
         matches = []
         targets: list[str] = []
         for row, doc in rows:
+            if service._canonical_project_key(doc.project_path) != service._canonical_project_key(project_path):
+                continue
             if norm(row.source_path) != needle:
                 continue
             target = str(row.target_attribute or "").strip()
@@ -645,8 +723,10 @@ class KnowledgeToolRegistry:
         value = str(attribute or "").strip().rstrip(".,?!:;")
         if not value:
             raise ValueError("attribute is required")
-        project_value = str(project or "").strip() or None
-        result = MappingIntelligenceService().graph_lineage(value, project_value)
+        service = MappingIntelligenceService()
+        project_value = service._project_path()  # Ignore untrusted cross-project tool arguments.
+        service.ensure_active_project_workbooks(self.db)
+        result = service.graph_lineage(value, project_value)
         return json.dumps(result, default=str)
 
     def mapping_history(self, attribute: str, mapping_family: str | None = None) -> str:

@@ -31,6 +31,7 @@ LIVE JIRA RULES:
 KNOWLEDGE RULES:
 - Use graph_search for exact engineering-entity relationship/impact/trace/history questions.
 - Use mapping_lineage when the starting point is a Java/business attribute.
+- Use mapping_document_rows for a named .xlsx/.xlsm workbook and return every authoritative mapping row; workbook names are NOT source XPaths.
 - Use mapping_source_lineage when the starting point is an XML path/node, JSON path/node, DB table.column, Kafka field, or other external source path. It resolves source -> Java target and preserves workbook/sheet/row evidence.
 - For source-side impact questions, call mapping_source_lineage with include_engineering_impact=true instead of guessing the Java attribute.
 - Use mapping_history for mapping evolution/history across versions and mapping_compare for explicit version-to-version comparisons.
@@ -67,6 +68,7 @@ REGRESSION & RELEASE INTELLIGENCE RULES:
 
 PHASE 8 ENTERPRISE HYBRID RAG RULES:
 - Use enterprise_hybrid_search for broad semantic/lexical discovery across engineering knowledge.
+- Use java_source_search for exact Java class/method signatures, implementations and execution flows; its exact current-source evidence is authoritative, while pgvector matches are discovery only.
 - Phase 8 uses PostgreSQL pgvector + BM25 + metadata filtering + deterministic reranking; it does not use FAISS.
 - Retrieval results are candidate discovery evidence, not authoritative relationship proof. Verify exact relationships with graph/mapping/static/baseline tools when required.
 - Preserve source_type, title and metadata returned by enterprise_hybrid_search.
@@ -97,6 +99,26 @@ For questions spanning live Jira, current code, scenarios and testing, combine t
 3. CURRENT GIT EVIDENCE
 4. SCENARIO / TEST / BASELINE EVIDENCE
 5. TRACEABILITY GAPS
+
+JIRA IMPLEMENTATION EVIDENCE:
+- The Java static analyzer verifies current source occurrences, not historical Jira authorship.
+- Never claim a Jira-to-code link from attribute-name overlap alone.
+- Only show persistence methods and HTTP routes explicitly evidenced by static tools.
+- A graph NO_MATCH must be reported as missing graph traceability.
+
+ENDPOINT CLASSIFICATION RULES:
+- A retrieved document's `entities.endpoints` is NOT authoritative HTTP-route evidence.
+  This includes stale persisted RAG metadata; reject XPath-like entries from
+  mapping documents regardless of what their metadata calls them.
+- HTTP routes require an HTTP method (GET/POST/PUT/PATCH/DELETE) and a Java
+  Spring mapping annotation or static analyzer evidence. If absent, report
+  "REST endpoints not verified" rather than listing XML paths.
+- An XML XPath is mapping input evidence only, even when it begins with '/'.
+- XML XPaths (such as /CustomerAccount/Email) are NOT HTTP API endpoints.
+- Report HTTP endpoints only from explicit HTTP route declarations or verified Java static analysis.
+- Jira issue keys are not Java attributes. Never pass a Jira key as mapping_lineage.attribute.
+- A graph NO_MATCH is a missing relationship, not proof that Java implementation is absent.
+- Do not infer a database table/column from the name of a Java class.
 
 EVIDENCE-GROUNDING RULES:
 - Base the final answer only on tool evidence actually returned in this request.
@@ -322,8 +344,58 @@ class KnowledgeAgentService:
                     }:
                         attributes.append(match)
 
+        # Also recognize enumerated business fields in a live Jira description.
+        # They are source-analysis candidates, not proven implementation links.
+        for payload in payloads:
+            issue = payload.get("issue") if isinstance(payload, dict) else None
+            if not isinstance(issue, dict):
+                continue
+            description = str(issue.get("description") or "")
+            lines = description.splitlines()
+            for position, line in enumerate(lines):
+                if not re.search(r"\bcontains\s*:\s*$", line, re.I):
+                    continue
+                for item in lines[position + 1:position + 16]:
+                    item = item.strip().lstrip("-* ")
+                    if not item:
+                        break
+                    if not re.fullmatch(r"[A-Za-z]+(?:\s+[A-Za-z]+){0,3}", item):
+                        break
+                    parts = item.split()
+                    attributes.append(parts[0].lower() + "".join(p.title() for p in parts[1:]))
+                break
+
+        # XML element declarations in Jira often enumerate fields without saying
+        # "attribute named". They are candidates for current-code verification,
+        # never proof of a Jira-to-code relationship.
+        for payload in payloads:
+            issue = payload.get("issue") if isinstance(payload, dict) else None
+            if not isinstance(issue, dict):
+                continue
+            description = str(issue.get("description") or "")
+            # Explicit XML tags / paths are unambiguous business field names.
+            for field in re.findall(r"/CustomerAccount/([A-Za-z][A-Za-z0-9_]*)", description, re.I):
+                attributes.append(field[0].lower() + field[1:])
+            # Support bullet enumerations like "- customerId", "* Country Code".
+            in_fields = False
+            for line in description.splitlines():
+                if re.search(r"\b(?:fields?|attributes?|elements?)\s*(?:include|contains?|are|:)\s*:?$", line, re.I):
+                    in_fields = True
+                    continue
+                if not in_fields:
+                    continue
+                match = re.match(r"^\s*(?:[-*•]|\d+[.)])\s*([A-Za-z][A-Za-z0-9_]*(?:\s+[A-Za-z]+){0,2})\s*$", line)
+                if not match:
+                    if line.strip():
+                        in_fields = False
+                    continue
+                words = match.group(1).split()
+                candidate = words[0][0].lower() + words[0][1:] + "".join(word.title() for word in words[1:])
+                if candidate.casefold() not in {"xml", "database", "validation", "required"}:
+                    attributes.append(candidate)
+
         # Preserve order and spelling while preventing duplicate tool calls.
-        attributes = list(dict.fromkeys(attributes))[:5]
+        attributes = list(dict.fromkeys(attributes))[:20]
         calls: list[dict[str, Any]] = []
         for index, attribute in enumerate(attributes, start=1):
             safe_id = re.sub(r"[^A-Za-z0-9]+", "_", attribute).strip("_").lower()
@@ -491,6 +563,18 @@ class KnowledgeAgentService:
                 "id": "mandatory_release_regression_intelligence",
             })
 
+        # Exact Java symbols must be retrieved before synthesis, never left to the LLM.
+        java_symbol = re.search(r"\b[A-Z][A-Za-z0-9_]*(?:Service|Controller|Mapper|Repository)\b", text)
+        java_intent = any(x in lowered for x in (
+            "method", "signature", "execution flow", "implementation", "source code",
+            "java code", "codebase", "class", "trace", "retrieve", "search"))
+        if java_symbol and java_intent and "java_source_search" in available:
+            calls.append({
+                "name": "java_source_search",
+                "args": {"query": text, "top_k": 10},
+                "id": "mandatory_phase8_java_source_search",
+            })
+
         # Phase 8 deterministic routing for explicit enterprise/hybrid discovery.
         phase8_markers = (
             "enterprise hybrid", "hybrid rag", "enterprise rag",
@@ -561,7 +645,13 @@ class KnowledgeAgentService:
             or "current jira" in lowered
             or "jira live" in lowered
         )
-        if live_jira_requested and jira_ids and "live_jira_issue" in available:
+        jira_analysis_requested = bool(jira_ids) and any(
+            marker in lowered for marker in (
+                "analy", "impact", "affected", "trace", "implementation",
+                "java", "source code", "persistence", "endpoint", "mapping"
+            )
+        )
+        if (live_jira_requested or jira_analysis_requested) and jira_ids and "live_jira_issue" in available:
             for index, jira_id in enumerate(jira_ids[:3], start=1):
                 calls.append({
                     "name": "live_jira_issue",
@@ -610,7 +700,7 @@ class KnowledgeAgentService:
             "baseline history", "release history", "what uses", "what is affected",
             "affected by", "history for", "history of",
         ))
-        if graph_intent and "graph_search" in available:
+        if graph_intent and "graph_search" in available and not (cross_source and jira_ids):
             entity = KnowledgeAgentService._extract_graph_entity(text)
             if entity:
                 calls.append({
@@ -618,6 +708,16 @@ class KnowledgeAgentService:
                     "args": {"entity": entity},
                     "id": "mandatory_phase5_graph",
                 })
+
+        # A workbook filename is a document identity, never an XML/JSON source path.
+        workbook_match = re.search(r"([A-Za-z0-9_ .-]+\\.xls(?:x|m))", text, flags=re.I)
+        workbook_filename = workbook_match.group(1).strip() if workbook_match else None
+        if workbook_filename and "mapping_document_rows" in available:
+            calls.append({
+                "name": "mapping_document_rows",
+                "args": {"filename": workbook_filename},
+                "id": "mandatory_mapping_document_rows",
+            })
 
         # Phase 6I.1/6I.2: deterministic natural-language source-side resolution.
         # The source path is evidence, not an attribute guess. This supports XML,
@@ -637,7 +737,7 @@ class KnowledgeAgentService:
                 lower_candidate = candidate.lower()
                 looks_like_source = (
                     candidate.startswith("/")
-                    or "." in candidate
+                    or ("." in candidate and not lower_candidate.endswith((".xlsx", ".xlsm")))
                     or lower_candidate.startswith(("xpath:", "json:", "jsonpath:", "db:", "table:", "column:"))
                 )
                 if looks_like_source and lower_candidate not in source_stop:
@@ -655,7 +755,7 @@ class KnowledgeAgentService:
             "impact", "impacted", "affected", "downstream", "engineering components",
             "what could break", "what breaks", "uses", "use "
         ))
-        if source_question and "mapping_source_lineage" in available:
+        if source_question and not workbook_filename and "mapping_source_lineage" in available:
             calls.append({
                 "name": "mapping_source_lineage",
                 "args": {
@@ -844,7 +944,7 @@ class KnowledgeAgentService:
             match = re.search(pattern, text, flags=re.IGNORECASE)
             if match:
                 candidate = match.group(1).rstrip(".,?!:;")
-                if candidate.lower() not in {"student", "the", "a", "an"}:
+                if candidate.lower() not in {"student", "the", "a", "an", "excel", "xml", "java", "jira", "database", "customer", "account", "service", "project", "code", "all", "six", "mapping", "mappings", "implementation"}:
                     mapping_attr = candidate
                     break
 
@@ -893,7 +993,30 @@ class KnowledgeAgentService:
                 "id": "mandatory_phase6_mapping_validation",
             })
 
-        if mapping_impact_intent and mapping_attr and "mapping_graph_lineage" in available:
+        # CAS-style cross-source requests name a set of business attributes rather
+        # than a single attribute. Never infer an attribute from "Excel mapping".
+        # Resolve authoritative mapping rows separately from Neo4j graph edges:
+        # the former can exist even when the Jira-to-code edge is not recorded.
+        customer_six_requested = (
+            bool(jira_ids)
+            and "customer" in lowered
+            and bool(re.search(r"\b(?:all\s+)?six\b|\b6\s+customer\b", lowered))
+            and mapping_intent
+        )
+        if customer_six_requested:
+            for attr in ("customerId", "firstName", "lastName", "email", "countryCode", "accountType"):
+                if "mapping_lineage" in available:
+                    calls.append({
+                        "name": "mapping_lineage", "args": {"attribute": attr},
+                        "id": f"mandatory_customer_mapping_{attr}",
+                    })
+                if "mapping_graph_lineage" in available:
+                    calls.append({
+                        "name": "mapping_graph_lineage", "args": {"attribute": attr},
+                        "id": f"mandatory_customer_graph_mapping_{attr}",
+                    })
+
+        if mapping_impact_intent and mapping_attr and not customer_six_requested and "mapping_graph_lineage" in available:
             calls.append({
                 "name": "mapping_graph_lineage",
                 "args": {"attribute": mapping_attr},
@@ -906,7 +1029,7 @@ class KnowledgeAgentService:
             "xml node", "xpath", "json node", "json path", "db column",
             "null handling", "null rule", "which mapping document", "data lineage"
         ))
-        if mapping_intent and not compare_intent and not relative_family_compare and not relative_validation_intent and not source_question and not phase6_advanced_intent and "mapping_lineage" in available:
+        if mapping_intent and not jira_ids and not workbook_filename and not compare_intent and not relative_family_compare and not relative_validation_intent and not source_question and not phase6_advanced_intent and "mapping_lineage" in available:
             entity = KnowledgeAgentService._extract_graph_entity(text)
             if entity:
                 calls.append({

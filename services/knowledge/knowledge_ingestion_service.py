@@ -53,6 +53,7 @@ class KnowledgeIngestionService:
         content: str,
         source_ref: str | None = None,
         metadata: dict[str, Any] | None = None,
+        project_path: str | None = None,
     ) -> dict:
         source_type = str(source_type or "").strip().upper()
         title = str(title or "").strip()
@@ -64,7 +65,7 @@ class KnowledgeIngestionService:
         if not content:
             raise ValueError("content is required")
 
-        project_path = self._project_path()
+        project_path = project_path or self._project_path()
         extracted = self.entity_extractor.extract(content, source_type)
         combined_metadata = dict(metadata or {})
         combined_metadata["extracted"] = extracted
@@ -103,8 +104,8 @@ class KnowledgeIngestionService:
         )
         return {"project_path": project_path, "documents": [self._row(x) for x in rows]}
 
-    def rebuild_rag(self, db: Session, project_path: str | None = None) -> dict:
-        project_path = str(project_path or self._project_path())
+    def rebuild_rag(self, db: Session) -> dict:
+        project_path = self._project_path()
         rows = (
             db.query(KnowledgeDocument)
             .filter(KnowledgeDocument.project_path == project_path)
@@ -163,16 +164,16 @@ class KnowledgeIngestionService:
         vector.save_local(str(folder))
         return {"status": "INDEXED", "documents": len(rows), "chunks": len(docs)}
 
-    def search(self, db: Session, query: str, top_k: int = 5, project_path: str | None = None) -> dict:
+    def search(self, db: Session, query: str, top_k: int = 5) -> dict:
         query = str(query or "").strip()
         if not query:
             raise ValueError("query is required")
-        project_path = str(project_path or self._project_path())
+        project_path = self._project_path()
         vector = self._vectors.get(project_path)
         if vector is None:
             vector = self._load_vector(project_path)
         if vector is None:
-            self.rebuild_rag(db, project_path=project_path)
+            self.rebuild_rag(db)
             vector = self._vectors.get(project_path)
         if vector is None:
             return {"query": query, "results": [], "total_matches": 0}

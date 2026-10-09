@@ -144,7 +144,7 @@ class AttributeImpactService:
             (item["http_method"], item["endpoint"])
             for item in endpoints
         }
-        active_scenarios = self.scenarios.get_all(db)
+        active_scenarios = self.scenarios.get_all_for_active_project(db)
         domain_tokens = self._infer_attribute_domain_tokens(occurrences, active_scenarios)
 
         scenarios = []
