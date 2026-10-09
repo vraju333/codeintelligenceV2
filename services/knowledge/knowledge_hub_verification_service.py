@@ -78,24 +78,43 @@ def verify_source(db, source_id: int) -> dict:
                     WHERE j.name IN $keys
                     RETURN count(DISTINCT j) AS n
                 """, keys=keys, project_name=project_name).single()["n"]
-                implementation = session.run("""
+                # Neo4j does not register labels/types until their first write.
+                # Skip optional counts when absent to avoid 01N50/01N51 warnings.
+                present_types = set(session.run(
+                    "CALL db.relationshipTypes() YIELD relationshipType RETURN relationshipType"
+                ).value())
+                present_labels = set(session.run(
+                    "CALL db.labels() YIELD label RETURN label"
+                ).value())
+                def optional_count(required_types, cypher, *, required_labels=(), **params):
+                    if not set(required_types).intersection(present_types):
+                        return 0
+                    if not set(required_labels).issubset(present_labels):
+                        return 0
+                    # Cypher alternations must not mention an absent type, even if
+                    # another type in the alternation exists.
+                    if "[:IMPLEMENTS|IMPLEMENTED_BY]" in cypher:
+                        actual = [t for t in ("IMPLEMENTS", "IMPLEMENTED_BY") if t in present_types]
+                        cypher = cypher.replace("[:IMPLEMENTS|IMPLEMENTED_BY]", "[:" + "|".join(actual) + "]")
+                    return int(session.run(cypher, **params).single()["n"])
+                implementation = optional_count({"IMPLEMENTS", "IMPLEMENTED_BY"}, """
                     MATCH (j:EngineeringKnowledge:Jira)-[:IMPLEMENTS|IMPLEMENTED_BY]-(m:EngineeringKnowledge:Method)
                     WHERE j.name IN $keys RETURN count(DISTINCT m) AS n
-                """, keys=keys).single()["n"]
-                code_references = session.run("""
+                """, keys=keys)
+                code_references = optional_count({"REFERENCES_JIRA"}, """
                     MATCH (j:EngineeringKnowledge:Jira)<-[:REFERENCES_JIRA]-(m:EngineeringKnowledge:Method)
                     WHERE j.name IN $keys RETURN count(DISTINCT m) AS n
-                """, keys=keys).single()["n"]
-                inferred = session.run("""
+                """, keys=keys)
+                inferred = optional_count({"POSSIBLY_COVERS_JIRA"}, """
                     MATCH (s:EngineeringKnowledge:ScenarioEvidence {project:$project})
                           -[:POSSIBLY_COVERS_JIRA]->(j:EngineeringKnowledge:Jira)
                     WHERE j.name IN $keys RETURN count(DISTINCT s) AS n
-                """, project=project_name, keys=keys).single()["n"]
-                explicit_scenarios = session.run("""
+                """, required_labels={"ScenarioEvidence"}, project=project_name, keys=keys)
+                explicit_scenarios = optional_count({"COVERS_JIRA"}, """
                     MATCH (s:EngineeringKnowledge:ScenarioEvidence {project:$project})
                           -[:COVERS_JIRA]->(j:EngineeringKnowledge:Jira)
                     WHERE j.name IN $keys RETURN count(DISTINCT s) AS n
-                """, project=project_name, keys=keys).single()["n"]
+                """, required_labels={"ScenarioEvidence"}, project=project_name, keys=keys)
             else:
                 linked, relations, ownership, implementation, code_references = None, None, None, None, None
                 inferred, explicit_scenarios = None, None

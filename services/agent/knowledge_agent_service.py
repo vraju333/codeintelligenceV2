@@ -30,6 +30,10 @@ LIVE JIRA RULES:
 
 KNOWLEDGE RULES:
 - Use graph_search for exact engineering-entity relationship/impact/trace/history questions.
+- For "why was <Class> created", "which Jira introduced <Class>", or class-purpose questions, retrieve current Java source, cross-source JIRA/requirement evidence and graph relationships. Do NOT substitute current Git diff for historical authorship.
+- A class matching a Jira requirement is an INFERRED CANDIDATE, not a confirmed creation reason. Only explicit Jira references or verified historical records can establish authorship.
+- Documented XML-to-Customer mappings must not be silently relabeled as XML-to-CustomerXmlRequest mappings. State the precise source/target of each mapping.
+- Missing Jira-method edges or no current Git changes means "historical link unverified", not "class has no related requirements".
 - Use mapping_lineage when the starting point is a Java/business attribute.
 - Use mapping_document_rows for a named .xlsx/.xlsm workbook and return every authoritative mapping row; workbook names are NOT source XPaths.
 - Use mapping_source_lineage when the starting point is an XML path/node, JSON path/node, DB table.column, Kafka field, or other external source path. It resolves source -> Java target and preserves workbook/sheet/row evidence.
@@ -564,16 +568,32 @@ class KnowledgeAgentService:
             })
 
         # Exact Java symbols must be retrieved before synthesis, never left to the LLM.
-        java_symbol = re.search(r"\b[A-Z][A-Za-z0-9_]*(?:Service|Controller|Mapper|Repository)\b", text)
+        java_symbol = re.search(r"\b[A-Z][A-Za-z0-9_]*(?:Service|Controller|Mapper|Repository|Request|Entity|Model|Dto|DTO)\b", text)
         java_intent = any(x in lowered for x in (
             "method", "signature", "execution flow", "implementation", "source code",
-            "java code", "codebase", "class", "trace", "retrieve", "search"))
+            "java code", "codebase", "class", "trace", "retrieve", "search", "created", "purpose", "why"))
         if java_symbol and java_intent and "java_source_search" in available:
             calls.append({
                 "name": "java_source_search",
                 "args": {"query": text, "top_k": 10},
                 "id": "mandatory_phase8_java_source_search",
             })
+
+        # Class-origin questions require requirements and graph evidence, not just Git diff.
+        class_origin = bool(java_symbol) and any(phrase in lowered for phrase in (
+            "why was", "why is", "why does", "created", "introduced", "purpose",
+            "which jira", "what jira", "which requirement", "what requirement",
+        ))
+        if class_origin:
+            if "unified_knowledge_search" in available:
+                calls.append({"name": "unified_knowledge_search", "args": {"query": text, "top_k": 10},
+                              "id": "mandatory_class_origin_knowledge"})
+            if "graph_search" in available:
+                calls.append({"name": "graph_search", "args": {"entity": java_symbol.group(0)},
+                              "id": "mandatory_class_origin_graph"})
+            if "enterprise_hybrid_search" in available:
+                calls.append({"name": "enterprise_hybrid_search", "args": {"query": text, "top_k": 10},
+                              "id": "mandatory_class_origin_pgvector"})
 
         # Phase 8 deterministic routing for explicit enterprise/hybrid discovery.
         phase8_markers = (

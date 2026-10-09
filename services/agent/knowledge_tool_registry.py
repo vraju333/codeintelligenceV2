@@ -570,7 +570,10 @@ class KnowledgeToolRegistry:
 
     def rag_search(self, query: str, top_k: int = 5) -> str:
         """Search engineering knowledge semantically."""
-        result = self.knowledge.search(self.db, query, top_k=max(1, min(int(top_k), 10)))
+        result = EnterpriseHybridRagService().search(
+            query=query, top_k=max(1, min(int(top_k), 10)),
+            source_types=["ARCHITECTURE", "API", "RELEASE", "TEST", "TEST_REPORT", "REQUIREMENT", "JIRA", "CODE_CHANGE", "MAPPING"],
+        )
         return json.dumps(result, default=str)
 
     def graph_search(self, entity: str) -> str:
