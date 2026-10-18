@@ -13,10 +13,12 @@ from services.knowledge.knowledge_ingestion_service import KnowledgeIngestionSer
 from services.knowledge.unified_knowledge_search_service import UnifiedKnowledgeSearchService
 from services.lineage.attribute_impact_service import AttributeImpactService
 from services.regression.git_diff_service import GitDiffService
+from services.agent.current_change_traceability import build as build_current_change_traceability
 from services.jira.jira_live_client import jira_live_client
 from services.test_analysis.test_code_analysis_service import TestCodeAnalysisService
-from baseline_models import ScenarioBaseline, ScenarioTestBaseline, ScenarioReleaseArchive
+from baseline_models import ScenarioBaseline, ScenarioTestBaseline, ScenarioReleaseArchive, OperationBaseline, OperationBaselineSourceSnapshot, ScenarioBaselineSourceSnapshot
 from db_models import KnowledgeDocument, MappingDocument, MappingDefinition
+from services.jira.attribute_jira_lookup_service import lookup as lookup_attribute_jiras, indexing_status
 from services.cross_project.engineering_knowledge_graph_service import EngineeringKnowledgeGraphService
 from services.lineage.mapping_intelligence_service import MappingIntelligenceService
 from services.flow.deep_code_intelligence_service import DeepCodeIntelligenceService
@@ -36,6 +38,26 @@ class KnowledgeToolRegistry:
 
     def tools(self) -> list[StructuredTool]:
         return [
+            StructuredTool.from_function(
+                func=self.current_change_traceability,
+                name="current_change_traceability",
+                description="Deterministic Git semantic diff -> changed validation attribute -> same-class caller evidence -> indexed JIRA requirement mentions -> authoritative mapping lineage. Use for combined actual code-change impact, JIRA, business operations and mappings; never assert implementation links without evidence.",
+            ),
+            StructuredTool.from_function(
+                func=self.jira_indexing_status,
+                name="jira_indexing_status",
+                description="Check whether a specific JIRA key exists in the indexed requirement database; show stored description, project scope and attributes, or NOT_INDEXED.",
+            ),
+            StructuredTool.from_function(
+                func=self.attribute_jira_lookup,
+                name="attribute_jira_lookup",
+                description="Find indexed Jira requirements that explicitly mention an attribute, such as countryCode; distinguishes requirement matches from implementation/baseline links.",
+            ),
+            StructuredTool.from_function(
+                func=self.git_history,
+                name="git_history",
+                description="Read historical Git commits from the active project, optionally scoped to a JIRA key in commit subjects. Historical evidence only.",
+            ),
             StructuredTool.from_function(
                 func=self.live_jira_issue,
                 name="live_jira_issue",
@@ -301,6 +323,16 @@ class KnowledgeToolRegistry:
                 ),
             ),
             StructuredTool.from_function(
+                func=self.project_version_comparison,
+                name="project_version_comparison",
+                description="Compare the latest two CAPTURED operation baseline versions of the active project using persisted snapshots; do not compare mapping-document versions or current Git changes.",
+            ),
+            StructuredTool.from_function(
+                func=self.sdlc_audit_history,
+                name="sdlc_audit_history",
+                description="Read captured test baselines, releases and archives from PostgreSQL for the active project and optionally a JIRA key. This is historical evidence, not current Git status.",
+            ),
+            StructuredTool.from_function(
                 func=self.baseline_history,
                 name="baseline_history",
                 description=(
@@ -328,14 +360,58 @@ class KnowledgeToolRegistry:
             ),
         ]
 
+    def jira_indexing_status(self, issue_key: str) -> str:
+        return json.dumps(indexing_status(self.db, issue_key), default=str)
+
+    def attribute_jira_lookup(self, attribute: str) -> str:
+        """Return requirement-level Jira matches for an attribute from indexed Jira rows."""
+        return json.dumps(lookup_attribute_jiras(self.db, attribute), default=str)
+
     def live_jira_issue(self, issue_key: str) -> str:
         """Retrieve one issue directly from the configured Live Jira instance."""
         issue_key = str(issue_key or "").strip().upper()
         if not issue_key:
             raise ValueError("issue_key is required")
-        issue = jira_live_client.get_issue(issue_key)
+        try:
+            issue = jira_live_client.get_issue(issue_key)
+        except (LookupError, ValueError, RuntimeError) as exc:
+            # Live-Jira availability is independent of indexed requirements.
+            # Never convert a failed live lookup into an authoritative issue.
+            return json.dumps({
+                "source": "LIVE_JIRA", "authoritative": False,
+                "status": "UNAVAILABLE", "issue_key": issue_key,
+                "reason": str(exc),
+                "evidence_rule": "Live Jira was not verified. Indexed Jira evidence may be used only as indexed/historical evidence; do not claim it is live. Continue the remaining analysis.",
+            })
+        # A successful live fetch is saved for future attribute -> JIRA lookups.
+        # Indexing failure must not invalidate the authoritative live response.
+        indexed = False
+        indexing_error = None
+        try:
+            from db_models import JiraKnowledge
+            from config import settings
+            project_path = str(settings.JAVA_PROJECT_PATH or "").strip() or None
+            requirement = str(issue.get("description") or "").strip()
+            summary = str(issue.get("summary") or "").strip()
+            if summary or requirement:
+                row = self.db.query(JiraKnowledge).filter(JiraKnowledge.jira_id == issue_key).first()
+                if row is None:
+                    row = JiraKnowledge(jira_id=issue_key, requirement=requirement or summary,
+                                        title=summary, project_path=project_path)
+                    self.db.add(row)
+                else:
+                    row.requirement = requirement or summary
+                    row.title = summary
+                    row.project_path = project_path
+                self.db.commit()
+                indexed = True
+        except Exception as exc:
+            self.db.rollback()
+            indexing_error = str(exc)
         return json.dumps(
             {
+                "indexed_requirement_saved": indexed,
+                "indexing_error": indexing_error,
                 "source": "LIVE_JIRA",
                 "authoritative": True,
                 "issue": issue,
@@ -431,6 +507,7 @@ class KnowledgeToolRegistry:
                 "changed_methods": methods,
                 "structural_attribute_changes": structural_changes,
                 "changed_symbols": symbols,
+                "semantic_analysis": item.get("semantic_analysis") or {},
             })
 
         payload = {
@@ -443,6 +520,12 @@ class KnowledgeToolRegistry:
             "changed_methods": sorted(changed_methods),
             "changed_files": changed_files,
             "knowledge_search_hints": sorted(structural_attributes),
+            "semantic_classification": "Java token comparison against HEAD; whitespace and comments excluded",
+            "constant_value_changes": [
+                {"file_path": item.get("file_path"), **change}
+                for item in result.get("changed_files", []) or []
+                for change in (item.get("semantic_analysis") or {}).get("constant_changes", [])
+            ],
             "analysis_basis": {
                 "source": "git_working_tree_and_staged_changes",
                 "attribute_filter": "semantic_structural_business_fields_only",
@@ -452,6 +535,11 @@ class KnowledgeToolRegistry:
             },
         }
         return json.dumps(payload, default=str)
+
+    def current_change_traceability(self) -> str:
+        """One evidence-preserving current-change report, without LLM-inferred links."""
+        git = json.loads(self.git_change_analysis())
+        return json.dumps(build_current_change_traceability(self.db, git, MappingIntelligenceService()), default=str)
 
     def git_requirement_correlation(self) -> str:
         """Correlate current structural Git changes to explicit requirement/JIRA evidence."""
@@ -513,13 +601,14 @@ class KnowledgeToolRegistry:
     def java_source_search(self, query: str, top_k: int = 10) -> str:
         """Phase 8 discovery plus authoritative exact-symbol verification in active source."""
         import re
+        import hashlib
         from config import settings
 
         root = Path(str(getattr(settings, "JAVA_PROJECT_PATH", "") or "")).expanduser()
         if not root.is_dir():
             return json.dumps({"status": "PROJECT_NOT_ACCESSIBLE", "project_path": str(root)})
         # An exact symbol request must not depend on vector ranking or index freshness.
-        class_match = re.search(r"\b([A-Z][A-Za-z0-9_]*(?:Service|Controller|Mapper|Repository))\b", query)
+        class_match = re.search(r"\b([A-Z][A-Za-z0-9_]*(?:Service|Controller|Mapper|Repository|Request|Entity|Model|Dto|DTO))\b", query)
         class_name = class_match.group(1) if class_match else None
         method_match = re.search(r"\b(?:" + re.escape(class_name) + r"\s*\.\s*)?([a-z][A-Za-z0-9_]*)\s*\(", query) if class_name else None
         method_name = method_match.group(1) if method_match else None
@@ -549,10 +638,10 @@ class KnowledgeToolRegistry:
                                     break
                         matches.append({"class_name": class_name, "method_name": method_name,
                                         "file_path": str(file), "line_number": source.count("\n", 0, hit.start()) + 1,
-                                        "source": source[hit.start():end].strip(), "evidence": "CURRENT_JAVA_SOURCE"})
+                                        "source": source[hit.start():end].strip(), "sha256": hashlib.sha256(file.read_bytes()).hexdigest(), "evidence": "CURRENT_JAVA_SOURCE"})
                 else:
                     matches.append({"class_name": class_name, "file_path": str(file),
-                                    "source": source[:6000], "evidence": "CURRENT_JAVA_SOURCE"})
+                                    "source": source[:6000], "sha256": hashlib.sha256(file.read_bytes()).hexdigest(), "evidence": "CURRENT_JAVA_SOURCE", "excerpt_truncated": len(source) > 6000})
         discovery = None
         try:
             discovery = EnterpriseHybridRagService().search(
@@ -1673,13 +1762,113 @@ class KnowledgeToolRegistry:
             "evidence_rule": "Runtime PASS/FAIL is sourced only from ingested TEST_REPORT documents; baseline history is separate evidence.",
         }, default=str)
 
-    def baseline_history(self, attribute: str) -> str:
-        """Return release/test-baseline history already linked to an attribute's impacted scenarios."""
-        result = AttributeImpactService()._analyze_code_only(str(attribute or "").strip(), self.db)
-        history = result.get("historical_traceability") or []
-        payload = {
-            "attribute": result.get("attribute"),
+    def baseline_history(self, attribute: str = "", jira_key: str = "") -> str:
+        """Attribute history and explicitly JIRA-linked captured baselines are separate."""
+        attribute = str(attribute or "").strip()
+        jira_key = str(jira_key or "").strip().upper()
+        history = []
+        if attribute:
+            result = AttributeImpactService()._analyze_code_only(attribute, self.db)
+            history = result.get("historical_traceability") or []
+        linked = []
+        if jira_key:
+            audit = json.loads(self.sdlc_audit_history(jira_key))
+            linked = audit.get("captured_test_baselines") or []
+        return json.dumps({
+            "attribute": attribute or None,
+            "jira_key": jira_key or None,
             "historical_traceability": history,
+            "jira_linked_baselines": linked,
             "history_count": len(history),
-        }
-        return json.dumps(payload, default=str)
+            "jira_linked_count": len(linked),
+            "scope": "Attribute traceability plus explicit captured JIRA associations; zero is scoped to these lookups.",
+        }, default=str)
+
+    def git_history(self, jira_key: str = "") -> str:
+        """Read historical commits without treating a clean working tree as no history."""
+        jira_key = str(jira_key or "").strip().upper()
+        project = self._active_project_scope()
+        try:
+            check = subprocess.run(
+                ["git", "-C", project, "rev-parse", "--show-toplevel"],
+                capture_output=True, text=True, timeout=8,
+            )
+            if check.returncode:
+                return json.dumps({"status": "ERROR", "error": "Active project is not a readable Git repository"})
+            proc = subprocess.run(
+                ["git", "-C", project, "log", "--all", "-n", "100", "--format=%H%x1f%aI%x1f%s"],
+                capture_output=True, text=True, timeout=15,
+            )
+            if proc.returncode:
+                return json.dumps({"status": "ERROR", "error": proc.stderr[:300]})
+            rows = []
+            for line in proc.stdout.splitlines():
+                parts = line.split("\\x1f", 2)
+                if len(parts) == 3:
+                    rows.append({"commit": parts[0], "date": parts[1], "subject": parts[2]})
+            matches = [r for r in rows if jira_key in r["subject"].upper()] if jira_key else rows
+            return json.dumps({"status": "FOUND" if matches else "NO_MATCH",
+                               "jira_key": jira_key or None, "scanned_commits": len(rows),
+                               "matches": matches[:30],
+                               "scope": "Latest 100 commits across all local refs; matching a key in a commit subject is not proof of complete SDLC linkage."})
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            return json.dumps({"status": "ERROR", "error": str(exc)[:300]})
+
+    def project_version_comparison(self) -> str:
+        """Read persisted operation snapshots; no live source or mapping diff."""
+        scope = self._active_project_scope().replace("\\", "/").rstrip("/").casefold()
+        rows = self.db.query(OperationBaseline).order_by(OperationBaseline.created_at.desc(), OperationBaseline.id.desc()).all()
+        rows = [x for x in rows if str(x.project_path or "").replace("\\", "/").rstrip("/").casefold() == scope]
+        groups = {}
+        for x in rows:
+            groups.setdefault(x.operation_key, []).append(x)
+        compared = []
+        insufficient = []
+        for operation, versions in sorted(groups.items()):
+            # Capture sequence is per operation; a repeated version is not a new capture.
+            unique = {}
+            for x in versions:
+                unique.setdefault(x.baseline_version, x)
+            latest = sorted(unique.values(), key=lambda x: (x.baseline_version, x.id), reverse=True)[:2]
+            if len(latest) < 2:
+                insufficient.append({"operation": operation, "captured_versions": [x.baseline_version for x in latest]})
+                continue
+            current, previous = latest
+            snapshots = {x.baseline_id: x for x in self.db.query(OperationBaselineSourceSnapshot).filter(OperationBaselineSourceSnapshot.baseline_id.in_([current.id, previous.id])).all()}
+            old = snapshots.get(previous.id)
+            new = snapshots.get(current.id)
+            if old is None or new is None or not isinstance(old.source_snapshot, dict) or not isinstance(new.source_snapshot, dict):
+                compared.append({"operation": operation, "versions": [previous.baseline_version, current.baseline_version], "status": "SNAPSHOT_UNAVAILABLE", "changed_methods": None, "changed_attributes": None})
+                continue
+            old_files, new_files = old.source_snapshot, new.source_snapshot
+            changed = sorted(k for k in old_files.keys() | new_files.keys() if old_files.get(k) != new_files.get(k))
+            compared.append({"operation": operation, "versions": [previous.baseline_version, current.baseline_version], "baseline_ids": [previous.id, current.id], "status": "CHANGED" if changed else "UNCHANGED", "changed_snapshot_keys": changed, "source_changes": new.source_changes or [], "scenario_codes": current.scenario_codes or [], "method_attribute_proof": "Only structured source_changes provide method/attribute-level evidence; changed snapshot keys are not themselves verified changed methods."})
+        diagnostic = (
+            "NO_CAPTURED_OPERATIONS_FOR_ACTIVE_PROJECT" if not groups
+            else "FEWER_THAN_TWO_VERSIONS_PER_OPERATION" if not compared
+            else "SNAPSHOT_UNAVAILABLE" if any(x.get("status") == "SNAPSHOT_UNAVAILABLE" for x in compared)
+            else "COMPARISON_AVAILABLE"
+        )
+        return json.dumps({"project_path": self._active_project_scope(),
+                           "status": "COMPARED" if compared else "INSUFFICIENT_CAPTURED_VERSIONS",
+                           "diagnostic": diagnostic, "captured_operation_count": len(groups),
+                           "captured_baseline_count": len(rows),
+                           "comparisons": compared, "insufficient": insufficient,
+                           "scope": "operation baseline versions; not a global release diff"}, default=str)
+
+    def sdlc_audit_history(self, jira_key: str = "") -> str:
+        """Query actual captured test/release records; preserve zero vs unqueried."""
+        jira_key = str(jira_key or "").strip().upper()
+        scope = self._active_project_scope().replace("\\", "/").rstrip("/").casefold()
+        operations = self.db.query(OperationBaseline).all()
+        scoped = [o for o in operations if str(o.project_path or "").replace("\\", "/").rstrip("/").casefold() == scope]
+        # ScenarioBaseline has no project_path; restrict through project-scoped operation keys.
+        op_pairs = {(x.http_method.upper(), x.endpoint) for x in scoped}
+        baselines = [x for x in self.db.query(ScenarioBaseline).all() if (x.http_method.upper(), x.endpoint) in op_pairs]
+        ids = {x.id for x in baselines}
+        scenario_ids = {x.scenario_id for x in baselines}
+        tests = [x for x in self.db.query(ScenarioTestBaseline).all() if x.scenario_id in scenario_ids and (x.http_method.upper(), x.endpoint) in op_pairs]
+        if jira_key:
+            tests = [x for x in tests if jira_key in {str(j).upper() for j in (x.jira_ids or [])}]
+        archives = [x for x in self.db.query(ScenarioReleaseArchive).all() if x.baseline_id in ids]
+        return json.dumps({"project_path": self._active_project_scope(), "jira_key": jira_key or None, "captured_test_baselines": [{"id": t.id, "scenario_id": t.scenario_id, "baseline_id": t.baseline_id, "jira_ids": t.jira_ids, "status": t.status, "baseline_name": t.baseline_name, "code_baseline_version": t.code_baseline_version} for t in tests], "release_archives": [{"id": a.id, "baseline_id": a.baseline_id, "release_version": a.release_version, "snapshot_hash": a.snapshot_hash, "baseline_name": a.baseline_name} for a in archives], "counts": {"captured_test_baselines": len(tests), "release_archives": len(archives)}, "evidence_note": "Release archives are project-scoped via captured baseline endpoint; an archive is not automatically linked to the requested JIRA."}, default=str)

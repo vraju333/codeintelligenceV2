@@ -22,7 +22,7 @@ class JiraLiveClient:
             raise ValueError("JIRA_BASE_URL is required")
 
         # Jira Cloud REST v3. The fields list keeps the first integration focused.
-        fields = "summary,description,status,issuetype,components,labels,priority,assignee,reporter"
+        fields = "summary,description,status,issuetype,components,labels,priority,assignee,reporter,created,updated"
         url = (
             f"{settings.JIRA_BASE_URL}/rest/api/3/issue/{quote(issue_key)}"
             f"?fields={fields}"
@@ -79,6 +79,8 @@ class JiraLiveClient:
             "id": payload.get("id"),
             "key": payload.get("key"),
             "summary": fields.get("summary"),
+            "created_at": fields.get("created"),
+            "updated_at": fields.get("updated"),
             "description": JiraLiveClient._adf_to_text(fields.get("description")),
             "status": JiraLiveClient._named(fields.get("status")),
             "issue_type": JiraLiveClient._named(fields.get("issuetype")),

@@ -48,6 +48,42 @@ def jira_projects():
     except Exception as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
+
+@router.get("/jira/issues")
+def jira_issues(project_key: str, query: str = ""):
+    """Browse Jira issues in a selected project, with optional text filtering."""
+    import re
+    from urllib.parse import quote
+    if not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]*", project_key):
+        raise HTTPException(400, "Invalid Jira project key")
+    jql = f'project = "{project_key.upper()}" ORDER BY updated DESC'
+    if query.strip():
+        safe = query.strip().replace('\\', '\\\\').replace('"', '\\"')
+        jql = f'project = "{project_key.upper()}" AND text ~ "{safe}" ORDER BY updated DESC'
+    try:
+        result = service._jira_request("/rest/api/3/search/jql?maxResults=100&fields=summary,attachment&jql=" + quote(jql, safe=""))
+        return {"issues": [{"key": x.get("key"), "summary": (x.get("fields") or {}).get("summary", ""),
+                            "attachment_count": len((x.get("fields") or {}).get("attachment") or [])}
+                           for x in result.get("issues", [])]}
+    except Exception as exc:
+        raise HTTPException(502, str(exc)) from exc
+
+@router.get("/jira/issues/{issue_key}/attachments")
+def jira_issue_attachments(issue_key: str):
+    import re
+    if not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]*-\d+", issue_key):
+        raise HTTPException(400, "Invalid Jira issue key")
+    try:
+        result = service._jira_request(f"/rest/api/3/issue/{issue_key.upper()}?fields=summary,attachment")
+        fields = result.get("fields") or {}
+        from services.knowledge.test_suite_service import SUPPORTED
+        return {"issue": issue_key.upper(), "summary": fields.get("summary", ""),
+                "attachments": [{"id": str(a.get("id")), "filename": a.get("filename"),
+                                 "size": a.get("size"), "supported": str(a.get("filename") or "").lower().endswith(tuple(SUPPORTED))}
+                                for a in fields.get("attachment") or []]}
+    except Exception as exc:
+        raise HTTPException(502, str(exc)) from exc
+
 @router.patch("/sources/{source_id}")
 def update_source(source_id: int, payload: SourceRequest, db: Session = Depends(get_db)):
     from db_models import KnowledgeSyncSource

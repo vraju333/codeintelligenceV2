@@ -11,6 +11,7 @@ from baseline_models import ScenarioBaseline, ScenarioReleaseArchive, ScenarioTe
 from services.release_intelligence.regression_release_intelligence_service import RegressionReleaseIntelligenceService
 from services.lineage.mapping_intelligence_service import MappingIntelligenceService
 from services.jira.jira_change_correlation_service import jira_change_correlation_service
+from services.jira.attribute_jira_lookup_service import lookup as lookup_attribute_jiras
 
 
 class EngineeringAssistantService:
@@ -137,11 +138,46 @@ class EngineeringAssistantService:
 
 
     @staticmethod
+    def _meaningful_change_attributes(result: dict[str, Any]) -> list[str]:
+        """Avoid promoting arbitrary Java identifiers to business attributes.
+
+        The legacy regression extractor includes method names and JDK calls. Only
+        retain actual field-like names with explicit source/behavior evidence.
+        """
+        summary = result.get("change_summary") or {}
+        raw = [str(a).strip() for a in summary.get("changed_attributes") or []]
+        symbols = summary.get("changed_symbols") or []
+        field_names = {
+            str(s.get("symbol") or "").strip()
+            for s in symbols if isinstance(s, dict) and s.get("symbol_type") == "ATTRIBUTE"
+        }
+        for behavior in result.get("behavioral_changes") or []:
+            if isinstance(behavior, dict) and behavior.get("attribute"):
+                field_names.add(str(behavior["attribute"]).strip())
+        # A camelCase name is not sufficient evidence on its own; source symbols
+        # and validated behavioral changes are the primary evidence.
+        candidates = raw + sorted(field_names)
+        excluded = {"all", "argument", "blank", "compile", "contains", "create", "email", "get", "set", "matches", "require", "validate", "pattern", "matcher"}
+        result_attrs = []
+        for name in candidates:
+            match = re.fullmatch(r"(?:get|set|is)([A-Z].*)", name)
+            if match:
+                name = match.group(1)
+                name = name[0].lower() + name[1:]
+            if (not re.fullmatch(r"[a-z][A-Za-z0-9]*", name)
+                    or name.lower() in excluded or name not in field_names and name not in raw):
+                continue
+            if name in field_names or (re.search(r"[A-Z]", name) and name in raw):
+                if name not in result_attrs:
+                    result_attrs.append(name)
+        return result_attrs
+
+    @staticmethod
     def _class_change_groups(result: dict[str, Any]) -> list[dict[str, Any]]:
         """Group current-change evidence by changed class for IDE presentation."""
         summary = result.get("change_summary") or {}
         methods = summary.get("changed_methods") or []
-        attributes = summary.get("changed_attributes") or []
+        attributes = EngineeringAssistantService._meaningful_change_attributes(result)
         symbols = summary.get("changed_symbols") or []
         scenarios = result.get("affected_scenarios") or []
         groups = []
@@ -185,6 +221,7 @@ class EngineeringAssistantService:
                     raw = raw[:1].lower() + raw[1:]
                 if raw and raw not in class_attrs:
                     class_attrs.append(raw)
+            class_attrs = [a for a in class_attrs if a in attributes]
             if not class_attrs and len(summary.get("changed_classes") or []) == 1:
                 class_attrs = list(attributes)
 
@@ -322,6 +359,29 @@ class EngineeringAssistantService:
                         "note": "Discovery evidence only; not promoted to an authoritative Jira relationship.",
                     })
 
+        # Reuse the exact indexed reverse-attribute lookup used by Ask. RAG
+        # retrieval can miss a relevant JIRA; this lookup is deterministic and
+        # project-scoped. Never promote a mention to an authoritative link.
+        for attribute in EngineeringAssistantService._meaningful_change_attributes(result):
+            try:
+                lookup_result = lookup_attribute_jiras(db, attribute, project_path=project_path)
+            except Exception:
+                continue
+            for match in lookup_result.get("matches") or []:
+                jira_id = str(match.get("jira_id") or "")
+                key = (jira_id, "INDEXED_ATTRIBUTE_LOOKUP")
+                if not jira_id or jira_id in confirmed_ids or key in seen_discovered:
+                    continue
+                seen_discovered.add(key)
+                discovered.append({
+                    "jira_id": jira_id,
+                    "source_type": "INDEXED_JIRA_REQUIREMENT",
+                    "source_title": match.get("summary"),
+                    "evidence": f"ATTRIBUTE_MENTION: {attribute} ({match.get('matched_in')})",
+                    "authoritative": False,
+                    "note": "Requirement-level attribute match; not a verified commit or baseline association.",
+                })
+
         requirements = []
         for mismatch in result.get("requirement_code_mismatches") or []:
             requirements.append({
@@ -335,9 +395,11 @@ class EngineeringAssistantService:
                 "evidence_rule": mismatch.get("evidence_rule"),
             })
 
+        correlation_result = deepcopy(result)
+        correlation_result.setdefault("change_summary", {})["changed_attributes"] = EngineeringAssistantService._meaningful_change_attributes(result)
         correlation = jira_change_correlation_service.correlate(
             db,
-            result,
+            correlation_result,
             historical_jira_ids=confirmed_ids,
         )
 
@@ -597,6 +659,7 @@ class EngineeringAssistantService:
 
     def analyse_current_change(self, db) -> dict[str, Any]:
         result = self._reconcile_captured_baseline_evidence(db, self.release_intelligence.analyse(db))
+        result.setdefault("change_summary", {})["changed_attributes"] = self._meaningful_change_attributes(result)
         change_summary = result.get("change_summary") or {}
         readiness = result.get("release_readiness") or {}
 

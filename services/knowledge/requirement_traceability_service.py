@@ -168,6 +168,19 @@ class RequirementTraceabilityService:
             key_re = re.compile(r"(?<![A-Z0-9])" + re.escape(jira_key) + r"(?![A-Z0-9])", re.I)
             words = _tokens((issue.title or "") + " " + (issue.requirement or ""))
             requested = {k for k, synonyms in behavior_groups.items() if words & synonyms}
+            # Attribute names are stronger evidence than generic domain/action words.
+            # Join requirement language to project-scoped mapping definitions.
+            issue_text = (issue.title or "") + " " + (issue.requirement or "")
+            normalized_issue = re.sub(r"[^a-z0-9]", "", issue_text.casefold())
+            relevant_attributes = set()
+            for mapping in mapping_rows:
+                attr = str(mapping.target_attribute or "")
+                source_leaf = str(mapping.source_path or "").rsplit("/", 1)[-1]
+                aliases = [attr, source_leaf]
+                if any(len(re.sub(r"[^a-z0-9]", "", a.casefold())) >= 5 and
+                       re.sub(r"[^a-z0-9]", "", a.casefold()) in normalized_issue
+                       for a in aliases):
+                    relevant_attributes.add(attr.casefold())
             # XML ingestion implies parsing, validation and persistence only when the
             # requirement itself describes these operations.
             candidates = []
@@ -186,16 +199,22 @@ class RequirementTraceabilityService:
                 boilerplate = bool(re.match(r"^(get|set|is)[A-Z]", name)) or name == "main"
                 unrelated = bool(re.search(r"^(delete|replace|update|remove)", name, re.I)
                                  and "update" not in words and "delete" not in words)
-                if not direct and not overlap and not behaviors:
+                # Match an exact attribute identifier in method name or body, not
+                # merely an owner class such as CustomerService.
+                method_source = re.sub(r"[^a-z0-9]", "", (name + " " + item["body"]).casefold())
+                attribute_matches = sorted(a for a in relevant_attributes
+                                           if re.sub(r"[^a-z0-9]", "", a) in method_source)
+                if not direct and not overlap and not behaviors and not attribute_matches:
                     continue
                 score = (0.22 * min(len(overlap), 4)
                          + 0.18 * len(behaviors)
+                         + (1.1 if attribute_matches else 0)
                          + (0.35 if direct else 0)
                          - (0.65 if boilerplate else 0)
                          - (0.5 if unrelated else 0))
                 if (boilerplate or unrelated) and not direct:
                     continue
-                if not direct and not behaviors and not _tokens(name) & words:
+                if not direct and not behaviors and not _tokens(name) & words and not attribute_matches:
                     continue
                 if score < 0.15 and not direct:
                     continue
@@ -205,6 +224,7 @@ class RequirementTraceabilityService:
                     "method": key, "file": item["file"],
                     "evidence": "EXPLICIT_JIRA_REFERENCE" if direct else "BEHAVIOR_AND_TERM_MATCH",
                     "matched_terms": overlap, "matched_behaviors": behaviors,
+                    "matched_attributes": attribute_matches,
                     "score": round(max(0, score), 3),
                     "classification": "REFERENCED" if direct else "CANDIDATE",
                     "call_depth": 0,

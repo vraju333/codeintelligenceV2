@@ -23,7 +23,7 @@ class KnowledgeHubOnboardingService:
         location = str(payload.get("location") or "").strip()
         if source_type == "JIRA" and not str(config.get("project_key") or "").strip():
             raise ValueError("Select a Jira project key")
-        if source_type in {"DOCUMENT_FOLDER", "MAPPING_FOLDER"} and not Path(location).is_dir():
+        if source_type in {"DOCUMENT_FOLDER", "MAPPING_FOLDER", "TEST_SUITE_FOLDER"} and not Path(location).is_dir():
             raise ValueError("Selected source folder does not exist on the backend host")
         def identity(row):
             if row.source_type != source_type or normalized(row.project_path) != normalized(project):

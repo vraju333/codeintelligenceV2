@@ -23,7 +23,7 @@ from services.lineage.mapping_intelligence_service import MappingIntelligenceSer
 
 
 class EnterpriseKnowledgeSyncService:
-    SOURCE_TYPES = {"JIRA", "DOCUMENT_FOLDER", "MAPPING_FOLDER"}
+    SOURCE_TYPES = {"JIRA", "DOCUMENT_FOLDER", "MAPPING_FOLDER", "TEST_SUITE_FOLDER"}
 
     def __init__(self) -> None:
         self.extractor = FileTextExtractor()
@@ -60,7 +60,7 @@ class EnterpriseKnowledgeSyncService:
                  config: dict[str, Any] | None = None, enabled: bool = True, project_path: str | None = None) -> dict[str, Any]:
         source_type = str(source_type or "").strip().upper()
         if source_type not in self.SOURCE_TYPES:
-            raise ValueError("source_type must be JIRA, DOCUMENT_FOLDER or MAPPING_FOLDER")
+            raise ValueError("source_type must be JIRA, DOCUMENT_FOLDER, MAPPING_FOLDER or TEST_SUITE_FOLDER")
         name = str(name or "").strip()
         if not name:
             raise ValueError("name is required")
@@ -132,7 +132,7 @@ class EnterpriseKnowledgeSyncService:
                 continue
             result = self.sync_source(db, source.id, trigger=trigger, rebuild_indexes=False)
             results.append(result)
-            changed = changed or (result.get("created", 0) + result.get("updated", 0) > 0)
+            changed = changed or (result.get("created", 0) + result.get("updated", 0) + result.get("deactivated", 0) > 0)
         indexes = self._refresh_indexes(db) if changed else {"status": "UNCHANGED"}
         return {"status": "SYNCED", "trigger": trigger, "sources": results, "indexes": indexes}
 
@@ -140,7 +140,7 @@ class EnterpriseKnowledgeSyncService:
         source = db.query(KnowledgeSyncSource).filter(KnowledgeSyncSource.id == source_id).first()
         if source is None:
             raise ValueError(f"Knowledge sync source {source_id} was not found")
-        if source.source_type in {"MAPPING_FOLDER", "DOCUMENT_FOLDER"}:
+        if source.source_type in {"MAPPING_FOLDER", "DOCUMENT_FOLDER", "TEST_SUITE_FOLDER"}:
             others = db.query(KnowledgeSyncSource).filter(
                 KnowledgeSyncSource.id != source.id,
                 KnowledgeSyncSource.source_type == source.source_type,
@@ -154,13 +154,14 @@ class EnterpriseKnowledgeSyncService:
             if source.source_type == "JIRA": result = self._sync_jira(db, source)
             elif source.source_type == "DOCUMENT_FOLDER": result = self._sync_document_folder(db, source)
             elif source.source_type == "MAPPING_FOLDER": result = self._sync_mapping_folder(db, source)
+            elif source.source_type == "TEST_SUITE_FOLDER": result = self._sync_test_suite_folder(db, source)
             else: raise ValueError(f"Unsupported source type {source.source_type}")
             for key in ("discovered", "created", "updated", "skipped", "failed"):
                 setattr(run, "created_count" if key == "created" else "updated_count" if key == "updated" else "skipped_count" if key == "skipped" else "failed_count" if key == "failed" else "discovered", int(result.get(key, 0)))
             run.status = "SUCCESS"; run.details_json = json.dumps(result, default=str, ensure_ascii=False); run.completed_at = datetime.utcnow()
             source.last_sync_at = datetime.utcnow(); source.last_status = "SUCCESS"; source.last_error = None
             db.commit()
-            if rebuild_indexes and result.get("created", 0) + result.get("updated", 0) > 0:
+            if rebuild_indexes and result.get("created", 0) + result.get("updated", 0) + result.get("deactivated", 0) > 0:
                 result["indexes"] = self._refresh_indexes(db)
             if source.source_type == "JIRA" and rebuild_indexes:
                 try:
@@ -236,7 +237,10 @@ class EnterpriseKnowledgeSyncService:
         base_jql = (f"project = {project_key} ORDER BY updated ASC" if project_key
                     else str(config.get("jql") or settings.JIRA_SYNC_JQL or "ORDER BY updated ASC").strip())
         # Cursor is an updated timestamp. Keep the user JQL and add an incremental updated constraint.
-        cursor = source.last_cursor
+        # Manual Refresh is a full project reconciliation. An incremental cursor can
+        # hide newly created Jira issues (e.g. CAS-2) whose timestamps fall
+        # outside the previous window. Checkpoints still avoid unnecessary writes.
+        cursor = source.last_cursor if getattr(self, "_incremental_jira_sync", False) else None
         jql = base_jql
         if cursor:
             constraint = f'updated >= "{cursor}"'
@@ -253,7 +257,7 @@ class EnterpriseKnowledgeSyncService:
             issues.extend(page.get("issues") or [])
             next_token = page.get("nextPageToken")
             if not next_token: break
-        created=updated=skipped=0; newest=cursor
+        created=updated=skipped=0; newest=source.last_cursor
         for issue in issues:
             key=str(issue.get("key") or "").upper(); fields=issue.get("fields") or {}; changed=str(fields.get("updated") or "")
             if not key: continue
@@ -307,6 +311,85 @@ class EnterpriseKnowledgeSyncService:
         db.commit()
         return {"status":"SUCCESS" if not failed else "PARTIAL","discovered":len(files),"created":created,"updated":updated,"skipped":skipped,"failed":failed,
                 "rows_imported":rows_imported,"errors":errors}
+
+    def _sync_test_suite_folder(self, db: Session, source: KnowledgeSyncSource) -> dict[str, Any]:
+        """Reconcile folder membership without deleting historical QA evidence."""
+        from services.knowledge.test_suite_service import TestSuiteService, SUPPORTED
+
+        folder = Path(str(source.location or "")).expanduser()
+        if not folder.is_dir():
+            raise ValueError(f"Test suite folder does not exist: {folder}")
+        files = sorted(p for p in folder.rglob("*")
+                       if p.is_file() and p.suffix.lower() in SUPPORTED
+                       and not p.name.startswith("~$"))
+        service = TestSuiteService()
+        counts = dict(discovered=len(files), created=0, updated=0, skipped=0,
+                      failed=0, rows_imported=0, deactivated=0, reactivated=0)
+        errors = []
+        seen = {str(p.resolve()) for p in files}
+        for file in files:
+            try:
+                data = file.read_bytes()
+                ref = str(file.resolve())
+                cp = self._checkpoint(db, source.id, ref)
+                digest = hashlib.sha256(data).hexdigest()
+                active = db.query(KnowledgeDocument).filter(
+                    KnowledgeDocument.project_path == source.project_path,
+                    KnowledgeDocument.source_ref == ref,
+                    KnowledgeDocument.source_type == "TEST",
+                    KnowledgeDocument.status == "ACTIVE").first()
+                if cp and cp.content_hash == digest and active:
+                    cp.status = "ACTIVE"
+                    cp.last_seen_at = datetime.utcnow()
+                    counts["skipped"] += 1
+                    continue
+                result = service.ingest(
+                    db, filename=file.name, data=data, project_path=source.project_path,
+                    source_ref=ref, source_kind="FOLDER", source_id=source.id)
+                if result["status"] == "NO_TEST_CASES":
+                    counts["skipped"] += 1
+                    continue
+                counts["rows_imported"] += result.get("cases", 0)
+                counts["updated" if cp else "created"] += 1
+                if cp and cp.status == "INACTIVE":
+                    counts["reactivated"] += 1
+                self._save_checkpoint(
+                    db, source.id, ref, str(file.stat().st_mtime_ns), digest,
+                    str(result.get("document_id")))
+                checkpoint = self._checkpoint(db, source.id, ref)
+                if checkpoint:
+                    checkpoint.status = "ACTIVE"
+            except Exception as exc:
+                db.rollback()
+                counts["failed"] += 1
+                errors.append({"file": file.name, "error": str(exc)})
+
+        # Only reconcile after a complete, error-free scan: an unreadable file
+        # must not cause unrelated test evidence to disappear.
+        if not errors:
+            checkpoints = db.query(KnowledgeSyncItem).filter(
+                KnowledgeSyncItem.source_id == source.id).all()
+            missing = [cp for cp in checkpoints if cp.external_id not in seen]
+            for cp in missing:
+                # Checkpoints are scoped to the source, not the entire project.
+                docs = db.query(KnowledgeDocument).filter(
+                    KnowledgeDocument.project_path == source.project_path,
+                    KnowledgeDocument.source_ref == cp.external_id,
+                    KnowledgeDocument.source_type == "TEST",
+                    KnowledgeDocument.status == "ACTIVE").all()
+                for doc in docs:
+                    meta = json.loads(doc.metadata_json or "{}")
+                    # Never deactivate independently imported JIRA evidence.
+                    if meta.get("source_kind") != "FOLDER":
+                        continue
+                    owner = meta.get("source_id")
+                    if owner is not None and str(owner) != str(source.id):
+                        continue
+                    doc.status = "INACTIVE"
+                    counts["deactivated"] += 1
+                cp.status = "INACTIVE"
+        db.commit()
+        return {"status": "PARTIAL" if errors else "SUCCESS", **counts, "errors": errors}
 
     @staticmethod
     def _mapping_identity(file: Path) -> tuple[str, str | None]:

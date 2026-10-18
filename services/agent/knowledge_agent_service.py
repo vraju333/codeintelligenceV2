@@ -12,6 +12,10 @@ from sqlalchemy.orm import Session
 
 from config import settings
 from services.agent.knowledge_tool_registry import KnowledgeToolRegistry
+from services.agent.evidence_integrity import assess, guard_answer
+from services.agent.impact_priority import build_priority_report
+from services.agent.evidence_answer import compose_evidence_answer
+from services.agent.sdlc_evidence import is_sdlc_history_request, is_project_version_request, compose_sdlc_report, sdlc_attribute
 
 
 SYSTEM_PROMPT = """You are the CodeIntelligence Knowledge Agent.
@@ -20,7 +24,7 @@ Choose tools dynamically from their descriptions; do not call every tool by defa
 
 LIVE JIRA RULES:
 - live_jira_issue is authoritative whenever the user explicitly asks about "live Jira", "current Jira", or a live Jira issue key.
-- Never claim a live Jira requirement was analyzed unless live_jira_issue returned that issue.
+- Never claim a live Jira requirement was analyzed unless live_jira_issue returned that issue with authoritative=true. A LIVE_JIRA UNAVAILABLE response is not a live issue. Continue with indexed evidence clearly labeled INDEXED/UNVERIFIED LIVE.
 - After reading a live Jira requirement, analyze its named business attributes against CURRENT source code with static_code_analysis and scenario_impact when source/scenario impact is requested.
 - Treat existing dirty Git changes as separate evidence. They prove implementation of the live Jira only when the changed symbols/attributes actually match the live requirement.
 - If the live Jira introduces an attribute that static_code_analysis cannot find, say NOT IMPLEMENTED / NOT FOUND IN CURRENT SOURCE rather than treating unrelated Git changes as implementation.
@@ -33,6 +37,7 @@ KNOWLEDGE RULES:
 - For "why was <Class> created", "which Jira introduced <Class>", or class-purpose questions, retrieve current Java source, cross-source JIRA/requirement evidence and graph relationships. Do NOT substitute current Git diff for historical authorship.
 - A class matching a Jira requirement is an INFERRED CANDIDATE, not a confirmed creation reason. Only explicit Jira references or verified historical records can establish authorship.
 - Never explain missing scenario coverage as caused by uncommitted Git changes; scenario coverage is independently captured and linked.
+- DIRECT SOURCE vs CALL GRAPH: A method containing a concrete countryCode getter, setter, mapper assignment, transformation, or validation statement is DIRECT_SOURCE even if it occurs downstream. Only separately evidenced caller-to-callee edges are VERIFIED_CALL_GRAPH; unevidenced callers are INFERRED_CANDIDATES. Never label direct mapper/validation source statements as inferred.
 - SCENARIO EVIDENCE LEVELS: a discovered API scenario is VERIFIED AS EXISTING only. It is NOT verified as covering an attribute or Jira. A scenario_impact result is a POTENTIALLY IMPACTED CANDIDATE unless explicit test assertions, captured test evidence or scenario-to-Jira/baseline links prove coverage. Never put such candidates under "Verified Test Scenarios" or say "confirmed coverage".
 - When the Jira scenario/baseline lookup returns no explicit links, retain "confirmed Jira coverage: none found" even if other tools return 6 API operations or attribute-level candidates.
 - A change to input validation does not automatically impact GET, DELETE or account-type PATCH endpoints; require concrete call/data-flow evidence or label as low-confidence candidates.
@@ -42,6 +47,9 @@ KNOWLEDGE RULES:
 - For attribute impact, relevant JIRA requirements are inferred implementation candidates unless an explicit reference is verified.
 - No matches in one tool do not prove that another registry has no evidence.
 - A verified JIRA document is NOT a verified JIRA-to-class link. Label requirement existence VERIFIED and class association INFERRED separately; never summarize an inferred link as "Verified JIRA".
+- IMPACT PRIORITIZATION: Categorize methods as PRIMARY_CHANGE (validation/branch/rule must change), RELATED_REGRESSION (callers/mappers requiring testing), or ATTRIBUTE_REFERENCE_ONLY (plain getters/setters/DTO/entity accessors; no edit implied). These are recommendations based on evidence, not verified Jira implementations.
+- For input validation changes, prioritize POST/PUT only if source/call-path evidence connects them to validation. PATCH account-type requires an evidenced path through validation; GET/DELETE are not automatically impacted. Report uncovered routes as UNVERIFIED rather than treating every discovered scenario as regression-required.
+- NEVER create a "Verified JIRA-to-Code Links" section containing methods merely because source contains the target attribute. If no explicit trusted link exists, say "Verified Jira-to-code implementation links: none established" and put direct source references under "Current source evidence / inferred Jira impact".
 - For attribute impact questions, retrieve exact mapping rows and JIRA/requirement candidates even when no explicit JIRA graph edge exists. Do not claim no related JIRA solely because explicit links are zero.
 - Document metadata (document ID, workbook filename, sheet, row, source path, target) is evidence; do not invent a download URL or claim the original workbook is available without a verified source path.
 - Documented XML-to-Customer mappings must not be silently relabeled as XML-to-CustomerXmlRequest mappings. State the precise source/target of each mapping.
@@ -96,6 +104,12 @@ PHASE 7 DEEP CODE INTELLIGENCE RULES:
 - Use deep_code_intelligence for broad deeper-code/everything-about-flow questions.
 - Phase 7 source evidence is deterministic. Preserve condition expressions, qualified method names, files and line numbers exactly.
 - Never infer a branch or data-flow edge that is not present in Phase 7 tool evidence.
+- Direct references include explicit getter/setter calls, assignments, transformations and validation expressions found in source. Call-graph impact is separate and must have an evidenced call edge.
+- Do not invent numerical confidence percentages; preserve qualitative evidence levels and cite exact file/line or relationship evidence.
+
+UNIFIED CURRENT-CHANGE TRACEABILITY:
+- For requests combining actual uncommitted Java changes, business operations, related JIRAs and mappings, use current_change_traceability as the authoritative joined evidence. Include changed constant before/after, directly evidenced same-class callers, indexed requirement-level JIRAs, and mapping discrepancies. Do not claim controller endpoints are proven by same-class callers alone.
+- Do not say Git before/after evidence was unavailable if current_change_traceability returns constant_value_changes.
 
 CURRENT SOURCE / SDLC RULES:
 - Use static_code_analysis for current source-code impact of an attribute.
@@ -203,6 +217,10 @@ class KnowledgeAgentService:
                 "mapping_source_lineage",
             })
 
+        if is_project_version_request(query):
+            # Project baseline versions and mapping document versions are distinct.
+            # Prevent the LLM from invoking mapping_compare for a project comparison.
+            phase7_dynamic_block.update({"mapping_compare", "mapping_history", "mapping_validation", "mapping_change_impact"})
         dynamic_tools = [
             tool for tool in tools
             if not (deterministic_relative_validation and tool.name == "mapping_validation")
@@ -317,7 +335,59 @@ class KnowledgeAgentService:
                 if final_answer:
                     break
 
+        evidence_integrity = assess(query, tool_results, project_root=str(getattr(settings, "JAVA_PROJECT_PATH", "") or ""))
+        final_answer = guard_answer(query, final_answer, evidence_integrity)
+        priority_report = build_priority_report(tool_results, query)
+        if priority_report:
+            final_answer = compose_evidence_answer(priority_report, final_answer)
+        if is_sdlc_history_request(query):
+            final_answer = compose_sdlc_report(query, tool_results, priority_report)
+        status_results = [r for r in tool_results if r.get("name") == "jira_indexing_status"]
+        if status_results:
+            try:
+                payload = json.loads(status_results[-1].get("content") or "{}")
+                if payload.get("status") == "INDEXED":
+                    final_answer = (f"### Indexed JIRA {payload['jira_id']}\n\n"
+                                    f"**Status:** INDEXED\n\n**Summary:** {payload.get('summary') or ''}\n\n"
+                                    f"**Description:** {payload.get('description') or ''}\n\n"
+                                    f"**Project scope:** {payload.get('project_scope') or 'UNSPECIFIED'}\n\n"
+                                    f"**Indexed attributes:** {', '.join(payload.get('indexed_attributes') or []) or 'Not extracted'}")
+                elif payload.get("status") == "NOT_INDEXED":
+                    final_answer = (f"### JIRA {payload['jira_id']} indexing status\n\n"
+                                    "**NOT_INDEXED** in the local JiraKnowledge store. "
+                                    "This does not mean the issue is absent from live Jira. "
+                                    "Retrieve the live issue to persist it, then repeat the lookup.")
+            except (ValueError, TypeError, KeyError):
+                pass
+        reverse_results = [r for r in tool_results if r.get("name") == "attribute_jira_lookup"]
+        if reverse_results:
+            try:
+                payload = json.loads(reverse_results[-1].get("content") or "{}")
+                if payload.get("status") in {"FOUND", "NO_INDEXED_MATCH"}:
+                    lines = [f"### JIRA requirements mentioning `{payload['attribute']}`"]
+                    for match in payload.get("matches", []):
+                        lines.append(f"- **{match['jira_id']}** — {match['summary']} "
+                                     f"(indexed requirement match; {match['matched_in']}). "
+                                     f"Evidence: {match['evidence_excerpt'][:220]}")
+                    if not payload.get("matches"):
+                        lines.append("No matching indexed JIRA requirement found in the checked scope.")
+                    lines.append("**Evidence boundary:** These are requirement-level mentions, not verified "
+                                 "JIRA-to-code implementation or test-baseline links. "
+                                 "This checks indexed JIRAs, not all live Jira issues.")
+                    final_answer = "\n\n".join(lines)
+            except (ValueError, TypeError, KeyError):
+                pass
+
+
+        if is_sdlc_history_request(query):
+            # Only the deterministic report is authoritative for historical questions.
+            # Protect clients against duplicated report sections.
+            heading = "### SDLC evidence and source coverage"
+            if final_answer.count(heading) > 1:
+                final_answer = heading + final_answer.split(heading, 1)[1].split(heading, 1)[0].rstrip()
+
         return {
+            "evidence_integrity": evidence_integrity,
             "query": query,
             "provider": (settings.LLM_PROVIDER or "ollama").strip().lower(),
             "tools_available": [tool.name for tool in tools],
@@ -425,6 +495,33 @@ class KnowledgeAgentService:
                 if candidate.casefold() not in {"xml", "database", "validation", "required"}:
                     attributes.append(candidate)
 
+        # Requirements often name an existing field in prose rather than saying
+        # "attribute named X": e.g. "Country Code validation" or "`countryCode`".
+        # Match only fields already known from the current project's mapping
+        # vocabulary here; these remain *candidates*, not verified Jira links.
+        known_field_aliases = {
+            "countryCode": (r"\bcountry[\s_-]*code\b",),
+        }
+        for payload in payloads:
+            issue = payload.get("issue") if isinstance(payload, dict) else None
+            if not isinstance(issue, dict):
+                continue
+            requirement = " ".join(str(issue.get(key) or "") for key in ("summary", "description"))
+            for attribute, patterns in known_field_aliases.items():
+                if any(re.search(pattern, requirement, re.IGNORECASE) for pattern in patterns):
+                    attributes.append(attribute)
+
+        # Explicit Java-style identifiers in Jira text are general-purpose
+        # candidates, including fields not previously known to CodeIntelligence.
+        # Do not infer a verified implementation link from these names.
+        for payload in payloads:
+            issue = payload.get("issue") if isinstance(payload, dict) else None
+            if not isinstance(issue, dict):
+                continue
+            requirement = " ".join(str(issue.get(key) or "") for key in ("summary", "description"))
+            for identifier in re.findall(r"`([a-z][A-Za-z0-9_]*[A-Z][A-Za-z0-9_]*)`", requirement):
+                attributes.append(identifier)
+
         # Preserve order and spelling while preventing duplicate tool calls.
         attributes = list(dict.fromkeys(attributes))[:20]
         calls: list[dict[str, Any]] = []
@@ -441,6 +538,12 @@ class KnowledgeAgentService:
                     "name": "scenario_impact",
                     "args": {"attribute": attribute},
                     "id": f"live_jira_scenario_{index}_{safe_id}",
+                })
+            if "mapping_lineage" in available:
+                calls.append({
+                    "name": "mapping_lineage",
+                    "args": {"attribute": attribute},
+                    "id": f"live_jira_mapping_{index}_{safe_id}",
                 })
         return calls
 
@@ -560,6 +663,64 @@ class KnowledgeAgentService:
         available = {tool.name for tool in tools}
         calls: list[dict[str, Any]] = []
 
+        # Combined current-change + JIRA/operations/mapping questions require a
+        # single deterministic evidence join, not separate uncorrelated summaries.
+        current_git = any(x in lowered for x in ("uncommitted", "working tree", "git changes", "against head", "actual code changes", "current java changes"))
+        cross_source = sum(any(x in lowered for x in group) for group in (
+            ("jira", "requirement"), ("operation", "scenario", "endpoint"), ("mapping", "xml"))) >= 2
+        if current_git and cross_source and "current_change_traceability" in available:
+            return [{"name": "current_change_traceability", "args": {}, "id": "mandatory_current_change_traceability"}]
+
+        # Exact indexed-store diagnostics must not be routed to scenario impact.
+        issue_match = re.search(r"\b[A-Z][A-Z0-9]+-\d+\b", text.upper())
+        indexing_question = bool(issue_match) and any(phrase in lowered for phrase in (
+            "indexed", "indexing status", "requirement store", "stored jira", "stored requirement"))
+        if indexing_question and "jira_indexing_status" in available:
+            return [{"name": "jira_indexing_status", "args": {"issue_key": issue_match.group(0)},
+                     "id": "mandatory_jira_indexing_status"}]
+
+        # Attribute -> Jira reverse lookup is an indexed-requirement question,
+        # not a baseline/history absence check. Always execute the exact lookup.
+        reverse_jira = bool(re.search(r"\b(?:jira|jiras|issues?|requirements?)\b", lowered)) and bool(
+            re.search(r"\b(?:linked to|related to|associated with|for|mention|affect|impact)\b", lowered)
+        )
+        reverse_attr = sdlc_attribute(text)
+        if reverse_jira and reverse_attr and "attribute_jira_lookup" in available:
+            calls.append({"name": "attribute_jira_lookup", "args": {"attribute": reverse_attr},
+                          "id": "mandatory_attribute_jira_reverse_lookup"})
+
+        # Historical SDLC questions must query historical records, not current Git
+        # changes or a mapping-document version comparison.
+        if is_sdlc_history_request(text):
+            if is_project_version_request(text) and "project_version_comparison" in available:
+                calls.append({"name": "project_version_comparison", "args": {}, "id": "mandatory_project_version_comparison"})
+            if any(k in lowered for k in ("baseline", "release", "audit", "history", "end-to-end")) and "sdlc_audit_history" in available:
+                jira_match = re.search(r"\b[A-Z][A-Z0-9]+-\d+\b", text.upper())
+                calls.append({"name": "sdlc_audit_history", "args": {"jira_key": jira_match.group(0) if jira_match else ""}, "id": "mandatory_sdlc_audit_history"})
+            attribute = sdlc_attribute(text)
+            if (attribute or "baseline" in lowered or "release" in lowered or "audit" in lowered) and "baseline_history" in available:
+                jira_for_history = re.search(r"\\b[A-Z][A-Z0-9]+-\\d+\\b", text.upper())
+                calls.append({"name": "baseline_history", "args": {"attribute": attribute or "", "jira_key": jira_for_history.group(0) if jira_for_history else ""},
+                              "id": "mandatory_sdlc_baseline_history"})
+            if attribute and "scenario_impact" in available:
+                calls.append({"name": "scenario_impact", "args": {"attribute": attribute},
+                              "id": "mandatory_sdlc_scenario_impact"})
+            if attribute and "mapping_lineage" in available and "mapping" in lowered:
+                calls.append({"name": "mapping_lineage", "args": {"attribute": attribute},
+                              "id": "mandatory_sdlc_mapping_lineage"})
+            jira = re.search(r"\b[A-Z][A-Z0-9]+-\d+\b", text.upper())
+            if jira and "graph_search" in available:
+                calls.append({"name": "graph_search", "args": {"entity": jira.group(0)},
+                              "id": "mandatory_sdlc_jira_graph"})
+            if jira and "live_jira_issue" in available:
+                calls.append({"name": "live_jira_issue", "args": {"issue_key": jira.group(0)},
+                              "id": "mandatory_sdlc_jira"})
+            if "unified_knowledge_search" in available:
+                calls.append({"name": "unified_knowledge_search", "args": {"query": text, "top_k": 10},
+                              "id": "mandatory_sdlc_unified"})
+            if "git_history" in available and any(x in lowered for x in ("git", "commit", "change records", "audit", "release history")):
+                calls.append({"name": "git_history", "args": {"jira_key": jira.group(0) if jira else ""},
+                              "id": "mandatory_sdlc_git_history"})
         # Deterministic routing for the developer-facing Engineering Assistant.
         engineering_assistant_markers = (
             "engineering assistant", "developer assistant", "review my current changes",
@@ -1189,7 +1350,16 @@ class KnowledgeAgentService:
                 "id": "mandatory_current_git_sdlc",
             })
 
-        return calls
+        if is_project_version_request(text):
+            calls = [call for call in calls if call["name"] not in {
+                "mapping_compare", "mapping_history", "mapping_validation", "mapping_change_impact"
+            }]
+        # Duplicate calls to the same tool with the same args are redundant.
+        unique = {}
+        for call in calls:
+            key = (call["name"], json.dumps(call.get("args") or {}, sort_keys=True))
+            unique.setdefault(key, call)
+        return list(unique.values())
 
     @staticmethod
     def _message_text(message: AIMessage) -> str:

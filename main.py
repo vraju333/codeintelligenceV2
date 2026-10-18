@@ -1,3 +1,4 @@
+from routers.jira_code_evidence_router import router as jira_code_evidence_router
 from sqlalchemy import inspect, text
 
 from fastapi import FastAPI
@@ -9,6 +10,7 @@ from database import engine, initialize_storage, storage_status, SessionLocal
 # creates both scenario and baseline tables correctly.
 import db_models  # noqa: F401
 import baseline_models  # noqa: F401
+import sdlc_models  # noqa: F401  # Cycle 1B additive evidence tables
 # KnowledgeDocument is defined in db_models and is therefore created by initialize_storage.
 
 from pathlib import Path
@@ -237,12 +239,17 @@ def dashboard():
 def get_storage_status():
     """Shows which persistence mode is active without exposing DB credentials."""
     return storage_status()
+from routers.test_suite_router import router as test_suite_router
+from routers.sdlc_report_router import router as sdlc_report_router
+app.include_router(test_suite_router)
+app.include_router(sdlc_report_router)
 app.include_router(project_router)
 
 app.include_router(
     jira_impact_router
 )
 app.include_router(jira_knowledge_router)
+app.include_router(jira_code_evidence_router)
 app.include_router(jira_live_router)
 app.include_router(scenario_rag_registry_router)
 app.include_router(cross_project_router)

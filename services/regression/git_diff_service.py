@@ -49,21 +49,30 @@ class GitDiffService:
             )
 
             methods = []
-
+            semantic = self._semantic_java_comparison(relative_path, file_path)
             if file_path.exists():
-
-                methods = (
-                    self._find_changed_methods(
-                        file_path,
-                        changed_lines
-                    )
-                )
+                methods = [
+                    method for method in self._find_changed_methods(file_path, changed_lines)
+                    if method["method_name"] in semantic["functional_methods"]
+                ]
 
             source_changes = self._analyse_source_changes(
                 relative_path=relative_path,
                 file_path=file_path,
                 changed_methods=methods
             )
+
+            source_changes["changes"] = [
+                change for change in source_changes["changes"]
+                if change.get("change_type") != "METHOD_MODIFIED"
+                or change.get("symbol") in semantic["functional_methods"]
+            ]
+            source_changes["changes"].extend(semantic["constant_changes"])
+            if not semantic["functional_methods"] and not semantic["constant_changes"]:
+                source_changes["changes"] = [
+                    change for change in source_changes["changes"]
+                    if change.get("change_type") != "SOURCE_MODIFIED"
+                ]
 
             changed_symbols = self._build_changed_symbols(
                 class_name=Path(relative_path).stem,
@@ -87,6 +96,7 @@ class GitDiffService:
                     "changed_methods": methods,
                     "changed_symbols": changed_symbols,
                     "source_changes": source_changes["changes"],
+                    "semantic_analysis": semantic,
                     "raw_diff": source_changes["raw_diff"]
                 }
             )
@@ -1016,3 +1026,64 @@ class GitDiffService:
             index = method_end + 1
 
         return methods
+    @staticmethod
+    def _java_tokens(source: str) -> tuple[str, ...]:
+        """Ignore Java whitespace/comments while retaining literals and operators."""
+        token_re = re.compile(r'"(?:\\.|[^"\\])*"|\'(?:\\.|[^\'\\])*\'|//[^\n]*|/\*[\s\S]*?\*/|[A-Za-z_$][\w$]*|\d+|\S')
+        return tuple(t for t in token_re.findall(source) if not t.startswith(("//", "/*")))
+
+    def _method_tokens(self, content: str) -> dict[str, tuple[str, ...]]:
+        lines = content.splitlines()
+        return {
+            m["method_name"]: self._java_tokens("\n".join(lines[m["start_line"]-1:m["end_line"]]))
+            for m in self._extract_method_ranges(lines)
+        }
+
+    def _semantic_java_comparison(self, relative_path: str, file_path: Path) -> dict:
+        """Compare complete HEAD/working-tree Java symbols, not diff hunk line spans.
+
+        This conservative classifier reports method-body token changes and constant
+        initializer changes; it never treats formatting-only hunks as functional.
+        """
+        before = self._get_head_file_content(relative_path)
+        after = file_path.read_text(encoding="utf-8") if file_path.exists() else ""
+        old_methods = self._method_tokens(before)
+        new_methods = self._method_tokens(after)
+        changed_methods = sorted(
+            name for name in old_methods.keys() | new_methods.keys()
+            if old_methods.get(name) != new_methods.get(name)
+        )
+        # Capture multiline static-final declarations, including Pattern.compile.
+        constant_re = re.compile(
+            r'\b(?:private|public|protected)\s+static\s+final\s+'
+            r'[\w<>\[\],.?]+\s+(?P<name>\w+)\s*=\s*(?P<value>[^;]+);',
+            re.S,
+        )
+        def constants(content):
+            return {m.group("name"): (self._java_tokens(m.group("value")), m.group("value").strip())
+                    for m in constant_re.finditer(content)}
+        old_constants, new_constants = constants(before), constants(after)
+        changes = []
+        for name in sorted(old_constants.keys() | new_constants.keys()):
+            old = old_constants.get(name)
+            new = new_constants.get(name)
+            if (old or (None,))[0] == (new or (None,))[0]:
+                continue
+            changes.append({
+                "change_type": "CONSTANT_VALUE_CHANGED",
+                "symbol": name,
+                "before": old[1] if old else None,
+                "after": new[1] if new else None,
+                "label": "Changed constant initializer",
+                "business_attribute_candidate": False,
+            })
+        return {
+            "functional_methods": changed_methods,
+            "constant_changes": changes,
+            "formatting_only_methods": sorted(
+                name for name in new_methods.keys() & old_methods.keys()
+                if name not in changed_methods
+            ),
+            "classification_basis": "HEAD versus working-tree Java tokens (comments and whitespace ignored)",
+            "limitations": "Token comparison is not a complete Java AST/data-flow analysis; constant consumers and endpoints require separate call-path verification.",
+        }
