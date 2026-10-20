@@ -53,9 +53,10 @@ def lineage(attribute: str = Query(..., min_length=1), db: Session = Depends(get
 def graph_lineage(
     attribute: str = Query(..., min_length=1),
     project: str | None = Query(None),
+    db: Session = Depends(get_db),
 ):
     try:
-        return service.graph_lineage(attribute, project)
+        return service.graph_lineage(attribute, project, db=db)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:

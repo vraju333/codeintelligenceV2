@@ -370,7 +370,66 @@ class MappingIntelligenceService:
                 "evidence_rule": "Every mapping includes document, sheet and row provenance."}
 
 
-    def graph_lineage(self, attribute: str, project: str | None = None) -> dict:
+    def graph_lineage(self, attribute: str, project: str | None = None, db: Session | None = None) -> dict:
+        """Return Neo4j graph evidence AND independently sourced SQL workbook evidence.
+
+        Imported Excel rows do not establish Neo4j MAPS_TO edges or code impact.
+        A missing graph edge must not conceal an existing workbook mapping.
+        """
+        if db is None:
+            return self._graph_lineage_neo4j(attribute, project)
+        value = str(attribute or "").strip()
+        if not value:
+            raise ValueError("attribute is required")
+        requested_project = str(project or "").strip()
+        effective_project = requested_project or self._project_path()
+        # Only auto-discover workbooks for the configured active project. An
+        # explicitly requested different project must not import unrelated files.
+        if self._canonical_project_key(effective_project) == self._canonical_project_key(self._project_path()):
+            self.ensure_active_project_workbooks(db)
+        key = self._canonical_project_key(effective_project)
+        documents = db.query(MappingDocument).filter(MappingDocument.status == "ACTIVE").all()
+        project_docs = {doc.id: doc for doc in documents
+                        if self._canonical_project_key(doc.project_path) == key}
+        rows = []
+        if project_docs:
+            definitions = db.query(MappingDefinition).filter(
+                MappingDefinition.document_id.in_(list(project_docs)),
+                MappingDefinition.status == "ACTIVE",
+            ).all()
+            normalized = re.sub(r"[^a-z0-9]", "", value.casefold())
+            for definition in definitions:
+                candidates = (definition.target_attribute, definition.target_expression,
+                              definition.source_path)
+                if any(normalized and normalized in re.sub(r"[^a-z0-9]", "", str(c or "").casefold())
+                       for c in candidates):
+                    rows.append(self._mapping_dict(definition, project_docs[definition.document_id]))
+        used_docs = sorted({row["provenance"]["document_id"] for row in rows})
+        mapping_docs = [self._document_dict(project_docs[doc_id]) for doc_id in used_docs]
+        try:
+            graph = self._graph_lineage_neo4j(value, effective_project)
+        except Exception as exc:
+            if not rows:
+                raise
+            graph = {"status": "UNAVAILABLE", "attribute": value, "project": effective_project,
+                     "mappings": [], "mapping_count": 0, "engineering_impact": None,
+                     "graph_error": type(exc).__name__}
+        graph = dict(graph)
+        graph["project"] = effective_project
+        graph["mapping_rows"] = rows
+        graph["mapping_documents"] = mapping_docs
+        graph["document_mapping_count"] = len(rows)
+        graph["graph_mapping_count"] = len(graph.get("mappings") or [])
+        graph["evidence_sources"] = (["NEO4J_MAPS_TO"] if graph["graph_mapping_count"] else []) + \
+                                    (["MAPPING_DOCUMENT_EVIDENCE"] if rows else [])
+        if rows and not graph["graph_mapping_count"]:
+            graph["status"] = "PARTIAL_MATCH"
+            graph["note"] = ("Imported workbook mappings found; Neo4j MAPS_TO relationship "
+                             "and engineering impact are not established.")
+            # Keep existing mappings/mapping_count reserved for graph evidence.
+        return graph
+
+    def _graph_lineage_neo4j(self, attribute: str, project: str | None = None) -> dict:
         """Traverse Phase-6 MAPS_TO evidence into the Phase-5 engineering graph.
 
         This is intentionally Neo4j-backed (unlike lineage(), whose source of truth

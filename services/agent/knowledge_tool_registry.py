@@ -858,7 +858,7 @@ class KnowledgeToolRegistry:
         service = MappingIntelligenceService()
         project_value = service._project_path()  # Ignore untrusted cross-project tool arguments.
         service.ensure_active_project_workbooks(self.db)
-        result = service.graph_lineage(value, project_value)
+        result = service.graph_lineage(value, project_value, db=self.db)
         return json.dumps(result, default=str)
 
     def mapping_history(self, attribute: str, mapping_family: str | None = None) -> str:

@@ -194,6 +194,7 @@ from routers.excel_report_router import (
 )
 from routers.jira_impact_router import router as jira_impact_router
 from routers.jira_knowledge_router import router as jira_knowledge_router
+from routers.requirement_impact_router import router as requirement_impact_router
 from routers.jira_live_router import router as jira_live_router
 from routers.scenario_rag_registry_router import router as scenario_rag_registry_router
 from routers.cross_project_router import router as cross_project_router
@@ -249,6 +250,7 @@ app.include_router(
     jira_impact_router
 )
 app.include_router(jira_knowledge_router)
+app.include_router(requirement_impact_router)
 app.include_router(jira_code_evidence_router)
 app.include_router(jira_live_router)
 app.include_router(scenario_rag_registry_router)

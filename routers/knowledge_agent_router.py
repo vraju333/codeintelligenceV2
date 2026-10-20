@@ -106,6 +106,28 @@ def ask_knowledge_agent(payload: KnowledgeAgentRequest, db: Session = Depends(ge
         from config import settings
         from services.knowledge.test_suite_service import TestSuiteService
         query = payload.query
+        # Explicit commit-to-Jira correlation request; do not intercept ordinary Jira ASK.
+        correlation_query = bool(re.search(r"\b(?:possible|potential|suggest|likely|related|associate|correlat)\w*\b", query, re.I)) and bool(re.search(r"\b(?:jira|issue|ticket)\b", query, re.I)) and bool(re.search(r"\b(?:commit|sha|git)\b", query, re.I))
+        if correlation_query:
+            sha_match = re.search(r"\b[0-9a-fA-F]{7,40}\b", query)
+            if sha_match:
+                from services.agent.jira_git_suggestion_service import correlate_commit
+                result = correlate_commit(db, sha_match.group(0))
+                links = result['explicit_links']
+                suggestions = result['possible_related_jiras']
+                lines = ["JIRA / Git correlation for " + result['commit'][:10]]
+                lines += ["Explicit reference: " + item['jira'] + " (" + ', '.join(e['source'] for e in item['evidence']) + ")" for item in links]
+                lines += ["Possible related JIRA: " + item['jira'] + " (" + str(item['days_apart']) + " days; shared terms: " + ', '.join(item['matching_terms']) + ")" for item in suggestions]
+                if not links and not suggestions:
+                    lines.append("No supported JIRA association found in available evidence.")
+                lines.append("PR lookup: " + result['github_pr_status'] + "; Jira dates: " + result['jira_date_lookup_status'])
+                result['answer'] = '\n'.join(lines)
+                return result
+        # Mapping-document intent takes precedence over attribute historical-change routing.
+        # Never substitute a Git commit when the user requests mapping workbooks.
+        from services.agent.ask_mapping_documents_service import mapping_document_intent, mapping_documents_answer
+        if mapping_document_intent(query):
+            return mapping_documents_answer(db, query)
         # Recency of Jira requirements must be decided by Jira creation timestamps,
         # not by whichever Jira has a verified Git commit.
         from services.agent.latest_attribute_jira_service import is_latest_jira_question, latest_attribute_jira
