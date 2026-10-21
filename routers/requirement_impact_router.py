@@ -129,6 +129,64 @@ def analyze(request: ImpactRequest, db: Session = Depends(get_db)):
             code_impact = {'status': 'ERROR', 'candidates': [], 'verified_associations': [],
                            'note': f'Java source analysis failed: {type(exc).__name__}'}
 
+    # Evidence enrichment: project-scoped, read-only, and provenance-preserving.
+    # Exact issue-key commit messages are verified Git links; generic Java source
+    # keyword matches remain suggestions, never implementation proof.
+    git_commits = []
+    verified_code = []
+    test_cases = []
+    evidence_warnings = []
+    if request.project:
+        try:
+            from services.knowledge.test_suite_service import TestSuiteService
+            tests = TestSuiteService()
+            queries = []
+            if jira:
+                queries.append((jira['jira_id'], ''))
+            else:
+                queries.extend(('', attr) for attr in attrs)
+            seen_tests = set()
+            for issue_key, attribute in queries:
+                result = tests.search(db, project_path=request.project,
+                                      jira=issue_key, attribute=attribute, limit=500)
+                for case in result.get('test_cases', []):
+                    identity = (str(case.get('test_id') or ''),
+                                str(case.get('document_id') or ''),
+                                str(case.get('source_ref') or ''))
+                    if identity not in seen_tests:
+                        seen_tests.add(identity)
+                        test_cases.append({**case, 'execution_verified': False,
+                                           'classification': 'IMPORTED_TEST_PLAN'})
+        except Exception as exc:
+            evidence_warnings.append('Test evidence unavailable: ' + type(exc).__name__)
+        if jira:
+            try:
+                from services.agent.jira_commit_trace_service import JiraCommitTraceService
+                trace = JiraCommitTraceService(request.project).analyse(jira['jira_id'])
+                seen_sha = set()
+                seen_method = set()
+                for commit in trace.get('commits', []):
+                    sha = commit.get('sha')
+                    if not sha or sha in seen_sha:
+                        continue
+                    seen_sha.add(sha)
+                    git_commits.append({'sha': sha, 'subject': commit.get('subject'),
+                                        'changed_files': commit.get('changed_files', []),
+                                        'relationship': 'EXPLICIT_JIRA_COMMIT_MESSAGE'})
+                    for file in commit.get('java_files', []):
+                        for method in file.get('changed_methods', []):
+                            key = (file.get('file'), method.get('method'), sha)
+                            if key in seen_method:
+                                continue
+                            seen_method.add(key)
+                            verified_code.append({'file': file.get('file'),
+                                'method': method.get('method'), 'line': method.get('line'),
+                                'change': method.get('change'), 'commit_sha': sha,
+                                'classification': 'COMMIT_SCOPED_METHOD_CHANGE',
+                                'relationship': 'EXPLICIT_JIRA_COMMIT_MESSAGE'})
+            except Exception as exc:
+                evidence_warnings.append('Git history unavailable: ' + type(exc).__name__)
+
     # Compare explicitly stated two-letter requirement against imported rule.
     # A potential mismatch is documentary, not proof of runtime behavior.
     conflicts = []
@@ -158,7 +216,9 @@ def analyze(request: ImpactRequest, db: Session = Depends(get_db)):
             'project': request.project, 'jira': jira, 'attributes': attrs,
             'historical_jiras': historical, 'mappings': mappings,
             'mapping_documents': list(mapping_docs.values()), 'scenarios': scenarios,
-            'code_impact': code_impact, 'mapping_conflicts': conflicts,
+            'code_impact': code_impact, 'git_commits': git_commits,
+            'verified_code_changes': verified_code, 'test_cases': test_cases,
+            'evidence_warnings': evidence_warnings, 'mapping_conflicts': conflicts,
             'regression_recommendations': regression_recommendations,
             'evidence_boundary': 'Historical JIRA matches are requirement mentions, not verified Git/PR links. Mapping rows are imported documentary evidence; scenario matches are text matches, not test execution.',
-            'unavailable': ['Verified Git/PR relationships unless explicitly supplied by a trusted source', 'Verified Neo4j dependency traversal', 'Project-scoped test baseline and release impact']}
+            'unavailable': ['Verified Neo4j dependency traversal', 'Test execution verification', 'Release baseline impact not composed']}

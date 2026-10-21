@@ -56,16 +56,20 @@ class JiraCommitTraceService:
         if not self.root.is_dir():
             return {'jira': jira, 'status': 'PROJECT_UNAVAILABLE', 'commits': []}
         # Search full reachable local history; only an explicit commit-message key is a verified link.
-        log = self.git('log', '--all', '--format=%H%x09%s', '--regexp-ignore-case', '--grep', jira)
+        log = self.git('log', '--all', '--format=%H%x09%B%x00', '--regexp-ignore-case', '--fixed-strings', '--grep', jira)
         matches = []
-        for line in log.splitlines():
-            if '\t' not in line:
+        for record in log.split('\x00'):
+            record = record.strip()
+            if '\t' not in record:
                 continue
-            sha, subject = line.split('\t', 1)
-            if re.search(r'(?<![A-Z0-9_])' + re.escape(jira) + r'(?![A-Z0-9_\-])', subject, re.I):
-                matches.append((sha, subject))
+            sha, message = record.split('\t', 1)
+            if not re.fullmatch(r'[0-9a-f]{40}', sha.strip()):
+                continue
+            # The issue key may appear in the subject OR commit body.
+            if re.search(r'(?<![A-Z0-9_])' + re.escape(jira) + r'(?![A-Z0-9_\-])', message, re.I):
+                matches.append((sha.strip(), message.splitlines()[0].strip()))
         commits = []
-        for sha, subject in matches[:10]:
+        for sha, subject in matches[:50]:
             parent_line = self.git('rev-list', '--parents', '-n', '1', sha).strip().split()
             parent = parent_line[1] if len(parent_line) > 1 else None
             changed = self.git('diff-tree', '--root', '--no-commit-id', '--name-only', '-r', sha).splitlines()
@@ -92,7 +96,7 @@ class JiraCommitTraceService:
                              'diff_lines': [x for x in diff.splitlines() if x.startswith(('+', '-')) and not x.startswith(('+++', '---'))][:30]})
             commits.append({'sha': sha, 'subject': subject, 'parent': parent, 'java_files': java, 'changed_files': changed})
         return {'jira': jira, 'status': 'MATCHED_COMMIT_MESSAGE' if commits else 'NO_EXPLICIT_COMMIT_LINK', 'commits': commits,
-                'link_rule': 'Exact JIRA issue key in Git commit subject; no inferred association', 'endpoint_proof': 'NOT_RESOLVED_BY_GIT_DIFF'}
+                'link_rule': 'Exact JIRA issue key in Git commit subject or body; no inferred association', 'endpoint_proof': 'NOT_RESOLVED_BY_GIT_DIFF'}
 
 
 def format_trace(evidence: dict) -> str:

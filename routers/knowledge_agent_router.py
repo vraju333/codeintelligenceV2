@@ -98,14 +98,175 @@ def historical_jira_answer(db: Session, query: str, jira_keys: tuple[str, ...], 
     }
 
 
-@router.post("/ask")
-def ask_knowledge_agent(payload: KnowledgeAgentRequest, db: Session = Depends(get_db)):
+def combined_attribute_impact(db: Session, query: str, attribute: str, jira: str = "") -> dict:
+    """Aggregate independent evidence for multi-domain ASK; never manufacture links."""
+    from config import settings
+    from services.agent.ask_mapping_documents_service import mapping_documents_answer
+    from services.knowledge.test_suite_service import TestSuiteService
+    from services.scenario.scenario_baseline_service import ScenarioBaselineService
+    from services.agent.ask_evidence_service import attribute_change_history
+
+    result = {"query": query, "attribute": attribute, "source": "COMBINED_ATTRIBUTE_EVIDENCE",
+              "status": "PARTIAL_MATCH", "evidence_warnings": []}
+    parts = []
+    def collect(label, fn):
+        try:
+            return fn()
+        except Exception as exc:
+            result["evidence_warnings"].append(f"{label} unavailable: {type(exc).__name__}")
+            return None
+
+    mapping = collect("Mapping", lambda: mapping_documents_answer(db, f"mapping documents for {attribute}"))
+    if isinstance(mapping, dict):
+        result["mapping_rows"] = mapping.get("mapping_rows") or []
+        result["mapping_documents"] = mapping.get("mapping_documents") or []
+        parts.append(str(mapping.get("answer") or ""))
+
+    code = collect("Engineering", lambda: attribute_change_history(db, query, attribute, include_qa=False))
+    if isinstance(code, dict):
+        result["engineering_evidence"] = code
+        for key in ("git_evidence", "git_commit_evidence", "commit_call_paths", "jira_issues", "historical_jiras", "affected_methods", "affected_apis"):
+            if key in code:
+                result[key] = code[key]
+        parts.append(str(code.get("answer") or ""))
+
+    project = str(getattr(settings, "JAVA_PROJECT_PATH", "") or getattr(settings, "PYTHON_PROJECT_PATH", "") or "")
+    result["qa_project_scope"] = project
+    if project:
+        qa = collect("Imported QA", lambda: TestSuiteService().search(
+            db, project_path=project, jira=jira, attribute=attribute, limit=500))
+        if isinstance(qa, dict):
+            result["test_suites"] = qa
+            parts.append(format_qa_evidence(qa, db=db, project=project, jira=jira) if qa.get("count") else
+                         "No matching imported QA documents in the configured project.")
+    else:
+        result["evidence_warnings"].append("QA search requires a configured project path")
+
+    baseline_service = ScenarioBaselineService()
+    overview = collect("Scenario baselines", lambda: baseline_service.get_overview(db))
+    if isinstance(overview, list):
+        # The overview is already restricted to the active project by the existing service.
+        # These are project baselines, NOT verified attribute-linked baselines.
+        result["project_release_baselines"] = overview
+        result["project_release_baseline_scope"] = "ACTIVE_PROJECT_NOT_ATTRIBUTE_VERIFIED"
+        parts.append(f"Active-project scenario baselines: {len(overview)} (not verified as related to {attribute}).")
+    if jira:
+        coverage = collect("JIRA test baseline coverage", lambda: baseline_service.get_jira_coverage(db, jira))
+        if isinstance(coverage, dict):
+            result["jira_test_baselines"] = coverage.get("items") or []
+            parts.append(f"JIRA-linked testing baselines for {jira}: {coverage.get('covered_count', 0)}.")
+    result["execution_verified"] = False
+    result["answer"] = "\n\n".join(p for p in parts if p)
+    result["status"] = "FOUND" if any((result.get("mapping_rows"), result.get("test_suites", {}).get("count") if isinstance(result.get("test_suites"), dict) else 0, result.get("jira_test_baselines"), result.get("engineering_evidence", {}).get("status") == "FOUND" if isinstance(result.get("engineering_evidence"), dict) else False)) else "NOT_FOUND"
+    return result
+
+
+def _canonical_jira(query: str) -> str:
+    """Accept CAS-2, CAS2 and CAS 2 without changing unrelated words."""
+    import re
+    match = re.search(r"(?<![A-Za-z0-9])([A-Za-z][A-Za-z0-9_]{1,9})[\s-]?(\d{1,7})(?![A-Za-z0-9])", query)
+    return f"{match.group(1).upper()}-{match.group(2)}" if match else ""
+
+
+def _requested_evidence(query: str) -> set[str]:
+    import re
+    terms = {
+        "jira": r"\b(?:jira|issues?|tickets?|requirements?)\b",
+        "git": r"\b(?:git|commits?|changes?|code|methods?|classes?|apis?|endpoints?)\b",
+        "mapping": r"\b(?:mappings?|mapped|documents?|workbooks?|excel|xml)\b",
+        "test": r"\b(?:tests?|testing|qa|coverage|regression|test\s+cases?)\b",
+        "release": r"\b(?:releases?|versions?|baselines?|history|historical)\b",
+    }
+    return {key for key, pattern in terms.items() if re.search(pattern, query, re.I)}
+
+
+def _jira_combined_evidence(db: Session, query: str, jira: str, requested: set[str]) -> dict:
+    """Deterministic JIRA-first retrieval; graph absence does not erase SQL/Git evidence."""
+    from config import settings
+    from services.agent.ask_evidence_service import jira_impact, detect_attribute
+    from services.knowledge.test_suite_service import TestSuiteService
+    from services.scenario.scenario_baseline_service import ScenarioBaselineService
+    from services.agent.jira_commit_trace_service import JiraCommitTraceService, format_trace
+    from services.agent.commit_call_path_service import analyse_commit_paths, format_commit_paths
+
+    output = {"status": "PARTIAL_MATCH", "query": query, "jira": jira,
+              "source": "JIRA_COMBINED_EVIDENCE", "evidence_warnings": [], "execution_verified": False}
+    answers = []
+    def fetch(label, fn):
+        try:
+            return fn()
+        except Exception as exc:
+            output["evidence_warnings"].append(f"{label}: {type(exc).__name__}")
+            return None
+
+    engineering = fetch("Git and Java", lambda: jira_impact(db, (jira,), include_qa=False))
+    if isinstance(engineering, dict):
+        output["engineering_evidence"] = engineering
+        answers.append(str(engineering.get("answer") or ""))
+        for entry in engineering.get("evidence") or []:
+            output.setdefault("affected_methods", []).extend(
+                sorted({x.get("method") for x in entry.get("semantic_changes") or [] if x.get("method")}))
+            output.setdefault("affected_apis", []).extend(entry.get("source_verified_endpoints") or [])
+            output.setdefault("git_commits", []).extend(entry.get("git_commits") or [])
+    trace_service = JiraCommitTraceService()
+    trace = fetch("Commit trace", lambda: trace_service.analyse(jira))
+    if isinstance(trace, dict):
+        output["git_commit_evidence"] = {jira: trace}
+        if trace.get("commits"):
+            answers.append(format_trace(trace))
+            paths = fetch("Commit call paths", lambda: analyse_commit_paths(trace_service, trace))
+            if isinstance(paths, dict):
+                output["commit_call_paths"] = {jira: paths}
+                answers.append(format_commit_paths(paths))
+
+    attribute = detect_attribute(query)
+    project = str(getattr(settings, "JAVA_PROJECT_PATH", "") or getattr(settings, "PYTHON_PROJECT_PATH", "") or "")
+    if "mapping" in requested and attribute:
+        from services.agent.ask_mapping_documents_service import mapping_documents_answer
+        mapping = fetch("Mapping", lambda: mapping_documents_answer(db, f"mapping documents for {attribute}"))
+        if isinstance(mapping, dict):
+            output["mapping_rows"] = mapping.get("mapping_rows") or []
+            output["mapping_documents"] = mapping.get("mapping_documents") or []
+    if project and ("test" in requested or "release" in requested):
+        qa = fetch("Imported QA", lambda: TestSuiteService().search(db, project_path=project, jira=jira, limit=500))
+        if isinstance(qa, dict):
+            output["test_suites"] = qa
+            answers.append(format_qa_evidence(qa, db=db, project=project, jira=jira))
+    if "release" in requested or "test" in requested:
+        baseline = ScenarioBaselineService()
+        coverage = fetch("JIRA test baselines", lambda: baseline.get_jira_coverage(db, jira))
+        if isinstance(coverage, dict):
+            output["jira_test_baselines"] = coverage.get("items") or []
+            output["jira_baseline_coverage"] = coverage
+        if "release" in requested:
+            overview = fetch("Project release baselines", lambda: baseline.get_overview(db))
+            if isinstance(overview, list):
+                output["project_release_baselines"] = overview
+                output["project_release_baseline_scope"] = "ACTIVE_PROJECT_NOT_JIRA_VERIFIED"
+    output["answer"] = "\n\n".join(x for x in answers if x)
+    if output.get("git_commits") or (trace or {}).get("commits") or output.get("jira_test_baselines"):
+        output["status"] = "FOUND"
+    output["note"] = "Project-wide baselines are not verified JIRA coverage; QA imports are not test execution."
+    return output
+
+
+def _ask_knowledge_agent_impl(payload: KnowledgeAgentRequest, db: Session = Depends(get_db)):
     try:
         # Historical QA test questions return actual imported records, never generated evidence.
         import re
         from config import settings
         from services.knowledge.test_suite_service import TestSuiteService
         query = payload.query
+        requested = _requested_evidence(query)
+        jira_key = _canonical_jira(query)
+        # Normalize informal JIRA keys before any DSL, graph or LLM route.
+        # An explicit JIRA request must not fall through to graph-only search.
+        if jira_key and not re.search(r"\b(?:latest|last)\s+(?:commit|committed)\b", query, re.I):
+            return _jira_combined_evidence(db, query, jira_key, requested)
+        from services.agent.ask_evidence_service import detect_attribute
+        impact_attribute = detect_attribute(query)
+        if impact_attribute and ("release" in requested or "test" in requested) and len(requested) >= 2:
+            return combined_attribute_impact(db, query, impact_attribute)
         # Explicit commit-to-Jira correlation request; do not intercept ordinary Jira ASK.
         correlation_query = bool(re.search(r"\b(?:possible|potential|suggest|likely|related|associate|correlat)\w*\b", query, re.I)) and bool(re.search(r"\b(?:jira|issue|ticket)\b", query, re.I)) and bool(re.search(r"\b(?:commit|sha|git)\b", query, re.I))
         if correlation_query:
@@ -123,6 +284,19 @@ def ask_knowledge_agent(payload: KnowledgeAgentRequest, db: Session = Depends(ge
                 lines.append("PR lookup: " + result['github_pr_status'] + "; Jira dates: " + result['jira_date_lookup_status'])
                 result['answer'] = '\n'.join(lines)
                 return result
+        # Broad impact questions must not be hijacked by the mapping-only or QA-only fast paths.
+        from services.agent.ask_evidence_service import detect_attribute
+        impact_attribute = detect_attribute(query)
+        requested_domains = sum(bool(re.search(pattern, query, re.I)) for pattern in (
+            r"\b(?:mapping|mappings|mapped|workbook|excel)\b",
+            r"\b(?:jira|requirements?|issues?)\b",
+            r"\b(?:git|commits?|methods?|apis?|code)\b",
+            r"\b(?:tests?|qa|baselines?|releases?|regression)\b",
+        ))
+        if impact_attribute and requested_domains >= 3 and re.search(r"\b(?:impact|complete|full|including|all|traceability)\b", query, re.I):
+            jira_key_match = re.search(r"\b[A-Z][A-Z0-9_]+-\d+\b", query, re.I)
+            return combined_attribute_impact(db, query, impact_attribute,
+                                             jira=jira_key_match.group(0).upper() if jira_key_match else "")
         # Mapping-document intent takes precedence over attribute historical-change routing.
         # Never substitute a Git commit when the user requests mapping workbooks.
         from services.agent.ask_mapping_documents_service import mapping_document_intent, mapping_documents_answer
@@ -215,3 +389,15 @@ def ask_knowledge_agent(payload: KnowledgeAgentRequest, db: Session = Depends(ge
         raise HTTPException(status_code=400, detail=str(exc))
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
+
+
+@router.post("/ask")
+def ask_knowledge_agent(payload: KnowledgeAgentRequest, db: Session = Depends(get_db)):
+    """Keep established evidence retrieval, add a validated presentation contract."""
+    from services.agent.ask_presentation_planner import plan_presentation
+    result = _ask_knowledge_agent_impl(payload, db)
+    if not isinstance(result, dict):
+        return result
+    # Presentation only: never change the underlying evidence or imply verified links.
+    result["presentation_plan"] = plan_presentation(payload.query, result)
+    return result

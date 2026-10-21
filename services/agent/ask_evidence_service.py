@@ -36,13 +36,17 @@ def _summary(report: dict, *, attribute: str | None = None, include_qa: bool = F
     changed = [s for s in matching if s.get('kind') == 'PATTERN_CHANGED']
     methods = sorted({s['method'] for s in matching if s.get('method')})
     commits = report['git']['commits']
-    # Attribute scope: only commit-scoped paths for matching semantic changes.
-    sha_set = {s['commit'] for s in matching} if attribute else {c['sha'] for c in commits}
-    paths = sorted({p['endpoint'] for p in report['source_verified_paths'] if p['commit'] in sha_set})
+    # Attribute-to-code verification is semantic; Git/JIRA history is a separate,
+    # explicitly linked evidence category. Do not discard non-pattern commits
+    # (e.g. null-check changes) merely because they lack PATTERN_CHANGED.
+    semantic_shas = {s['commit'] for s in matching} if attribute else {c['sha'] for c in commits}
+    paths = sorted({p['endpoint'] for p in report['source_verified_paths'] if p['commit'] in semantic_shas})
     tests = report['qa']['test_cases'] if include_qa else []
-    relevant_commits = [c for c in commits if c['sha'] in sha_set]
+    relevant_commits = commits  # Exact JIRA key in commit message, not inferred attribute change
     enriched = enrich_commits(report.get('project_path') or '', relevant_commits)
     lines = [f"JIRA: {report['jira']}", *format_commit_history(enriched)]
+    if attribute:
+        lines.append('Commit association: exact JIRA-key reference; only separately listed semantic changes prove an attribute-level modification.')
     for c in changed:
         lines.append(f"{c['constant']} validation: {c.get('before')} → {c.get('after')}")
     if attribute and not changed:
@@ -55,7 +59,9 @@ def _summary(report: dict, *, attribute: str | None = None, include_qa: bool = F
             lines.append(f"- {case['test_id']}: {case.get('scenario') or ''} | input={case.get('input') or '(blank)'} | expected={case.get('expected') or ''} | execution={case['execution_status']} | sources={len(case['sources'])}")
     lines.append('Evidence boundary: Git/Java paths are source-verified; QA imports are plans, not execution or approval. Recorded executions are user-supplied evidence.')
     return {'answer': '\n'.join(lines), 'semantic_changes': matching, 'source_verified_endpoints': paths,
-            'qa': report['qa'] if include_qa else None, 'git_commits': enriched, 'matched_change': bool(changed) if attribute else bool(commits)}
+            'qa': report['qa'] if include_qa else None, 'git_commits': enriched,
+            'jira': report['jira'], 'matched_change': bool(changed) if attribute else bool(commits),
+            'explicit_jira_commit_count': len(enriched)}
 
 
 def jira_impact(db, jira_keys: tuple[str, ...], *, attribute: str | None = None, include_qa: bool = False) -> dict:
@@ -85,9 +91,18 @@ def attribute_change_history(db, query: str, attribute: str, *, include_qa: bool
         answer = f'No historical {attribute} validation modification verified among {len(examined)} indexed Jira candidates. This is not proof that none exists outside indexed scope.'
     else:
         answer = '\n\n'.join(entry['answer'] for _, entry in verified)
+    all_commits = []
+    seen_shas = set()
+    for _, entry in verified:
+        for commit in entry['git_commits']:
+            if commit['sha'] not in seen_shas:
+                seen_shas.add(commit['sha'])
+                all_commits.append(commit)
     return {'status': 'FOUND' if verified else 'NOT_VERIFIED', 'query': query,
             'source': 'ATTRIBUTE_TO_JIRA_TO_COMMIT_SEMANTIC', 'attribute': attribute,
             'candidate_jiras': examined, 'verified_change_jiras': [key for key, _ in verified],
             'answer': answer, 'evidence': [entry for _, entry in verified],
+            'git_commits': all_commits,
+            'git_commit_evidence': {key: {'commits': entry['git_commits'], 'association': 'EXPLICIT_JIRA_COMMIT_MESSAGE', 'attribute_semantic_change_verified': entry['matched_change']} for key, entry in verified},
             'coverage': candidates.get('coverage'),
             'note': 'Only a matching commit-scoped semantic modification qualifies; requirement mentions alone do not.'}
