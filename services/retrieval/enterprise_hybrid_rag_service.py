@@ -6,6 +6,7 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+from collections import defaultdict
 
 from langchain_huggingface import HuggingFaceEmbeddings
 from rank_bm25 import BM25Okapi
@@ -177,7 +178,7 @@ class EnterpriseHybridRagService:
                 if not chunk.strip():
                     continue
                 docs.append(RetrievalDocument(
-                    self._doc_id("CODE", f"{relative}:{index}"), "CODE", f"{relative} chunk {index}", chunk,
+                    self._doc_id("CODE", f"{root.resolve()}:{relative}:{index}"), "CODE", f"{relative} chunk {index}", chunk,
                     str(root.resolve()), {"relative_path": relative, "chunk": index, "language": "java"}
                 ))
         return docs
@@ -193,13 +194,21 @@ class EnterpriseHybridRagService:
         vectors = self.embeddings.embed_documents(texts) if texts else []
         engine = self._engine()
         with engine.begin() as conn:
-            conn.execute(text(f"DELETE FROM {self.TABLE}"))
             statement = text(f"""
                 INSERT INTO {self.TABLE}
                     (document_id, source_type, title, content, project_path, metadata_json, content_hash, embedding, updated_at)
                 VALUES
                     (:document_id, :source_type, :title, :content, :project_path,
                      CAST(:metadata_json AS jsonb), :content_hash, CAST(:embedding AS vector), NOW())
+                ON CONFLICT (document_id) DO UPDATE SET
+                    source_type = EXCLUDED.source_type,
+                    title = EXCLUDED.title,
+                    content = EXCLUDED.content,
+                    project_path = EXCLUDED.project_path,
+                    metadata_json = EXCLUDED.metadata_json,
+                    content_hash = EXCLUDED.content_hash,
+                    embedding = EXCLUDED.embedding,
+                    updated_at = NOW()
             """)
             for doc, vector in zip(documents, vectors):
                 conn.execute(statement, {
@@ -209,6 +218,12 @@ class EnterpriseHybridRagService:
                     "content_hash": hashlib.sha256(doc.content.encode("utf-8", errors="ignore")).hexdigest(),
                     "embedding": self._vector_literal(vector),
                 })
+            # Remove obsolete records only after the new corpus has been written.
+            ids = [d.document_id for d in documents]
+            if ids:
+                conn.execute(text(f"DELETE FROM {self.TABLE} WHERE NOT (document_id = ANY(:ids))"), {"ids": ids})
+            else:
+                conn.execute(text(f"DELETE FROM {self.TABLE}"))
         counts: dict[str, int] = {}
         for doc in documents:
             counts[doc.source_type] = counts.get(doc.source_type, 0) + 1
@@ -262,30 +277,42 @@ class EnterpriseHybridRagService:
         dense_score = {r["document_id"]: max(0.0, float(r["similarity"] or 0.0)) for r in dense}
 
         corpus = [self._tokens(f"{r['title']} {r['content']}") for r in rows]
-        bm25 = BM25Okapi(corpus)
-        lexical_values = bm25.get_scores(self._tokens(query))
+        query_tokens = self._tokens(query)
+        # BM25Okapi can produce unstable values for tiny/empty corpora.
+        if query_tokens and any(corpus):
+            bm25 = BM25Okapi(corpus)
+            lexical_values = bm25.get_scores(query_tokens)
+        else:
+            lexical_values = [0.0] * len(rows)
         lexical_order = sorted(range(len(rows)), key=lambda i: lexical_values[i], reverse=True)
-        bm25_rank = {rows[idx]["document_id"]: rank + 1 for rank, idx in enumerate(lexical_order)}
+        # Zero-scoring documents must not receive artificial lexical RRF credit.
+        bm25_rank = {rows[idx]["document_id"]: rank + 1 for rank, idx in enumerate(lexical_order)
+                     if lexical_values[idx] > 0}
         max_bm25 = max(lexical_values) if len(lexical_values) else 0.0
 
         query_lower = query.lower()
+        identifiers = set(re.findall(r"[A-Za-z][A-Za-z0-9_]*-\d+|[A-Za-z_][A-Za-z0-9_]*", query))
         ranked = []
         for idx, row in enumerate(rows):
             did = row["document_id"]
             dr = dense_rank.get(did, 10000)
             br = bm25_rank.get(did, 10000)
-            rrf = (1.0 / (60 + dr)) + (1.0 / (60 + br))
+            rrf = ((1.0 / (60 + dr)) if did in dense_rank else 0.0) + ((1.0 / (60 + br)) if did in bm25_rank else 0.0)
             exact = 0.0
             haystack = f"{row['title']} {row['content']}".lower()
             if query_lower in haystack:
                 exact += 0.03
             for token in set(self._tokens(query)):
-                if len(token) > 2 and token in haystack:
+                if len(token) > 2 and re.search(r"(?<![\w])" + re.escape(token) + r"(?![\w])", haystack):
                     exact += 0.003
-            score = rrf + min(exact, 0.06)
+            # Exact JIRA/identifier matches matter more than broad text similarity.
+            for identifier in identifiers:
+                if re.search(r"(?<![\w])" + re.escape(identifier) + r"(?![\w])", haystack, re.I):
+                    exact += 0.012
+            score = rrf + min(exact, 0.09)
             ranked.append((score, row, dense_score.get(did, 0.0),
                            (float(lexical_values[idx]) / max_bm25) if max_bm25 > 0 else 0.0))
-        ranked.sort(key=lambda x: x[0], reverse=True)
+        ranked.sort(key=lambda x: (-x[0], x[1]["document_id"]))
 
         results = []
         for score, row, semantic, lexical in ranked[:max(1, min(int(top_k), 50))]:

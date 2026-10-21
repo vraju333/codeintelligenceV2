@@ -48,6 +48,45 @@ def attributes_from(text: str, mapping_rows: list[MappingDefinition]) -> list[st
     return sorted(found, key=str.casefold)
 
 
+def proposed_http_operations(project: str, attributes: list[str]) -> list[dict]:
+    """Read-only HTTP entry-point candidates; no claim of a resolved call graph."""
+    from pathlib import Path
+    import re
+    root = Path(project).expanduser().resolve()
+    if not root.is_dir():
+        return []
+    result = []
+    verbs = {'PostMapping': 'POST', 'PutMapping': 'PUT', 'PatchMapping': 'PATCH',
+             'DeleteMapping': 'DELETE', 'GetMapping': 'GET'}
+    # Only actual annotated endpoints are returned; method-level dependency
+    # remains INFERRED until AST/call-graph analysis confirms it.
+    for file in sorted(root.rglob('*.java')):
+        if any(part in {'.git', 'build', 'target', 'out', '.gradle'} for part in file.relative_to(root).parts):
+            continue
+        if not file.is_file() or not file.resolve().is_relative_to(root) or file.stat().st_size > 1_000_000:
+            continue
+        text = file.read_text(encoding='utf-8', errors='replace')
+        if '@RestController' not in text and '@Controller' not in text:
+            continue
+        base = re.search(r'@RequestMapping\s*\(\s*(?:value\s*=\s*|path\s*=\s*)?"([^"]+)"', text)
+        prefix = base.group(1) if base else ''
+        for match in re.finditer(r'@(PostMapping|PutMapping|PatchMapping|DeleteMapping|GetMapping)\s*(?:\(([^)]*)\))?', text):
+            method_match = re.search(r'\b(?:public|protected)\s+[\w<>?, \[\]]+\s+(\w+)\s*\(', text[match.end():match.end()+900])
+            if not method_match:
+                continue
+            annotation = match.group(2) or ''
+            path_match = re.search(r'"([^"]+)"', annotation)
+            suffix = path_match.group(1) if path_match else ''
+            endpoint = ('/' + '/'.join(x.strip('/') for x in (prefix, suffix) if x)).replace('//', '/')
+            result.append({'http_method': verbs[match.group(1)], 'endpoint': endpoint or '/',
+                           'controller_method': method_match.group(1),
+                           'controller_file': str(file.relative_to(root)),
+                           'classification': 'INFERRED',
+                           'reason': 'Controller entry point; attribute-to-operation call path not verified',
+                           'attribute_candidates': attributes})
+    return result[:100]
+
+
 @router.post('/analyze')
 def analyze(request: ImpactRequest, db: Session = Depends(get_db)):
     mode = request.mode.strip().lower()
@@ -128,6 +167,13 @@ def analyze(request: ImpactRequest, db: Session = Depends(get_db)):
         except Exception as exc:
             code_impact = {'status': 'ERROR', 'candidates': [], 'verified_associations': [],
                            'note': f'Java source analysis failed: {type(exc).__name__}'}
+
+    affected_operations = []
+    if request.project and mode == 'jira' and jira:
+        try:
+            affected_operations = proposed_http_operations(request.project, attrs)
+        except (OSError, ValueError):
+            pass
 
     # Evidence enrichment: project-scoped, read-only, and provenance-preserving.
     # Exact issue-key commit messages are verified Git links; generic Java source
@@ -216,7 +262,7 @@ def analyze(request: ImpactRequest, db: Session = Depends(get_db)):
             'project': request.project, 'jira': jira, 'attributes': attrs,
             'historical_jiras': historical, 'mappings': mappings,
             'mapping_documents': list(mapping_docs.values()), 'scenarios': scenarios,
-            'code_impact': code_impact, 'git_commits': git_commits,
+            'code_impact': code_impact, 'affected_operations': affected_operations, 'git_commits': git_commits,
             'verified_code_changes': verified_code, 'test_cases': test_cases,
             'evidence_warnings': evidence_warnings, 'mapping_conflicts': conflicts,
             'regression_recommendations': regression_recommendations,

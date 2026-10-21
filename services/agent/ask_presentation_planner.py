@@ -50,6 +50,13 @@ def _model_plan(query: str) -> dict[str, Any] | None:
 def plan_presentation(query: str, evidence: dict[str, Any]) -> dict[str, Any]:
     # A non-authoritative display plan; the frontend must never infer coverage
     # from a section's presence or absence.
+    # Requirement impact is not a release query. Never let the display LLM
+    # suppress structured requirement evidence for this deterministic intent.
+    if evidence.get("intent") == "JIRA_IMPACT_ANALYSIS" or evidence.get("source") == "JIRA_REQUIREMENT_IMPACT":
+        return {"schema_version": SCHEMA_VERSION, "planner": "DETERMINISTIC_REQUIREMENT_IMPACT",
+                "primary_sections": ["JIRA", "CODE", "MAPPINGS", "TESTS", "GIT"],
+                "secondary_sections": ["RELEASES"], "complete_impact": True,
+                "evidence_preserved": True}
     parsed = _model_plan(query)
     if parsed is None:
         return {

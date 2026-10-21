@@ -12,6 +12,7 @@ service = KnowledgeAgentService()
 
 class KnowledgeAgentRequest(BaseModel):
     query: str = Field(..., min_length=1)
+    project_path: str | None = None
 
 
 def format_git_evidence(evidence: dict) -> str:
@@ -83,7 +84,7 @@ def historical_jira_answer(db: Session, query: str, jira_keys: tuple[str, ...], 
             records = TestSuiteService().search(db, project_path=project, jira=jira, limit=500)
             qa_results[jira] = records
             sections.append('IMPORTED QA EVIDENCE FOR ' + jira + '\n' +
-                            (format_qa_evidence(records, db=db, project=project, jira=jira_match.group(0)) if records.get('count') else
+                            (format_qa_evidence(records, db=db, project=project, jira=jira) if records.get('count') else
                              'No imported QA records found for this Jira and project.'))
     return {
         'status': 'FOUND' if any(t.get('commits') for t in traces.values()) else 'NOT_VERIFIED',
@@ -250,6 +251,50 @@ def _jira_combined_evidence(db: Session, query: str, jira: str, requested: set[s
     return output
 
 
+def _jira_requirement_impact(db: Session, query: str, jira: str, selected_project: str | None = None) -> dict:
+    """Read-only, selected-project JIRA impact, including unimplemented requirements."""
+    from config import settings
+    from routers.requirement_impact_router import ImpactRequest, analyze
+
+    project = str(selected_project or getattr(settings, "JAVA_PROJECT_PATH", "") or
+                  getattr(settings, "PYTHON_PROJECT_PATH", "") or "")
+    if not project:
+        return {"status": "PROJECT_REQUIRED", "query": query, "jira": jira,
+                "source": "JIRA_REQUIREMENT_IMPACT",
+                "answer": "Select an indexed project before analyzing this JIRA."}
+    result = analyze(ImpactRequest(mode="jira", value=jira, project=project), db)
+    result["query"] = query
+    result["source"] = "JIRA_REQUIREMENT_IMPACT"
+    result["intent"] = "JIRA_IMPACT_ANALYSIS"
+    result["impact_type"] = "PROPOSED_REQUIREMENT_AND_SOURCE_CANDIDATES"
+    issue = result.get("jira") or {}
+    if result.get("status") == "JIRA_NOT_INDEXED":
+        result["answer"] = f"{jira} is not indexed for the selected project. Sync its JIRA project in Knowledge Hub."
+        return result
+    lines = [f"Requirement impact analysis for {jira}",
+             f"Summary: {issue.get('summary') or '(not provided)'}",
+             f"Requirement: {issue.get('requirement') or '(not provided)'}"]
+    candidates = (result.get("code_impact") or {}).get("candidates") or []
+    scenarios = result.get("scenarios") or []
+    tests = result.get("test_cases") or []
+    commits = result.get("git_commits") or []
+    lines.append(f"Code impact candidates: {len(candidates)} (not automatically verified changes)")
+    lines.append(f"Matching existing scenarios: {len(scenarios)}")
+    lines.append(f"Imported test cases: {len(tests)} (not proof of execution)")
+    lines.append(f"Explicit JIRA-linked Git commits: {len(commits)}")
+    if not commits:
+        lines.append("No matching implementation commit was verified; this can be a new, unimplemented requirement.")
+    for item in candidates[:15]:
+        if isinstance(item, dict):
+            lines.append("Code candidate: " + str(item.get("method") or item.get("file") or item.get("path") or item)[:240])
+    for item in scenarios[:15]:
+        if isinstance(item, dict):
+            lines.append("Scenario candidate: " + str(item.get("scenario_code") or item.get("name") or ""))
+    lines.append("Affected HTTP operations are verified only where code or scenario evidence identifies them; no POST/PUT operation is assumed.")
+    result["answer"] = "\n".join(lines)
+    return result
+
+
 def _ask_knowledge_agent_impl(payload: KnowledgeAgentRequest, db: Session = Depends(get_db)):
     try:
         # Historical QA test questions return actual imported records, never generated evidence.
@@ -261,10 +306,27 @@ def _ask_knowledge_agent_impl(payload: KnowledgeAgentRequest, db: Session = Depe
         jira_key = _canonical_jira(query)
         # Normalize informal JIRA keys before any DSL, graph or LLM route.
         # An explicit JIRA request must not fall through to graph-only search.
+        if jira_key and re.search(r"\b(?:impact|impacted|affect|affected|change impact|what (?:needs|should) change)\b", query, re.I) and not re.search(r"\b(?:history|historical|release|baseline|commits? only)\b", query, re.I):
+            return _jira_requirement_impact(db, query, jira_key, payload.project_path)
         if jira_key and not re.search(r"\b(?:latest|last)\s+(?:commit|committed)\b", query, re.I):
             return _jira_combined_evidence(db, query, jira_key, requested)
         from services.agent.ask_evidence_service import detect_attribute
         impact_attribute = detect_attribute(query)
+        # Complete attribute history is a multi-source evidence request even when
+        # the question does not explicitly name mapping, QA, or release domains.
+        # Keep operation/endpoint impact questions on the existing impact route.
+        complete_history = bool(re.search(
+            r"\b(?:complete|full|entire|all)\s+(?:change\s+)?history\b|"
+            r"\bhistory\s+(?:of|for)\s+.*\b(?:everything|all evidence)\b",
+            query, re.I))
+        if impact_attribute and complete_history:
+            result = combined_attribute_impact(db, query, impact_attribute)
+            result["source"] = "COMPLETE_ATTRIBUTE_HISTORY"
+            result["history_scope"] = "CURRENT_MAPPING_AND_QA_PLUS_AVAILABLE_HISTORICAL_EVIDENCE"
+            result["note"] = ("Current mapping and imported QA evidence are not proof of "
+                              "historical mapping revisions or test executions. "
+                              "Only source-verified history is presented as historical changes.")
+            return result
         if impact_attribute and ("release" in requested or "test" in requested) and len(requested) >= 2:
             return combined_attribute_impact(db, query, impact_attribute)
         # Explicit commit-to-Jira correlation request; do not intercept ordinary Jira ASK.
@@ -346,7 +408,7 @@ def _ask_knowledge_agent_impl(payload: KnowledgeAgentRequest, db: Session = Depe
                 records = TestSuiteService().search(
                     db, project_path=project, jira=jira_match.group(0), limit=500
                 )
-                qa_answer = format_qa_evidence(records, db=db, project=project, jira=jira_match.group(0)) if records.get('count') else (
+                qa_answer = format_qa_evidence(records, db=db, project=project, jira=jira) if records.get('count') else (
                     'No matching imported QA test cases found for this project and JIRA.'
                 )
                 engineering_answer = str(analysis.get('answer') or '').strip()
