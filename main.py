@@ -403,3 +403,7 @@ from services.scenario.scenario_service import ScenarioService
 @app.on_event("shutdown")
 def shutdown_knowledge_sync():
     stop_knowledge_sync_scheduler()
+
+# Field-impact read-only field evidence and AG-UI event endpoint
+from routers.field_impact_router import router as field_impact_router
+app.include_router(field_impact_router)

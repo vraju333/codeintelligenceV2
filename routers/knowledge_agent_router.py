@@ -284,13 +284,46 @@ def _jira_requirement_impact(db: Session, query: str, jira: str, selected_projec
     lines.append(f"Explicit JIRA-linked Git commits: {len(commits)}")
     if not commits:
         lines.append("No matching implementation commit was verified; this can be a new, unimplemented requirement.")
-    for item in candidates[:15]:
+    java = result.get("java_evidence") or {}
+    lines.append("Existing Java source scan: " + str(java.get("status", "NOT_CHECKED")))
+    methods = java.get("methods") or []
+    lines.append(f"Source methods mentioning requirement attributes: {len(methods)} (potential impact, not verified JIRA dependency)")
+    for item in methods[:25]:
+        lines.append(f"  {item.get('file')}:{item.get('line')} — {item.get('method')}() | attributes: {', '.join(item.get('matched_attributes') or [])}")
+    for item in (java.get("fields") or [])[:12]:
+        lines.append(f"Source field: {item.get('file')}:{item.get('line')} — {item.get('text')}")
+    for item in (java.get("database_annotations") or [])[:12]:
+        lines.append(f"Persistence annotation: {item.get('file')}:{item.get('line')} — {item.get('text')} (schema unverified)")
+    operations = result.get("affected_operations") or []
+    ranked = result.get("operation_evidence") or {}
+    likely = ranked.get("potentially_related") or []
+    other = ranked.get("other_discovered") or []
+    lines.append(f"Discovered HTTP entry points: {len(operations)}; source-backed call candidates: {len(likely)}; other endpoints: {len(other)}")
+    for item in likely[:12]:
+        lines.append(f"  POTENTIAL: {item.get('http_method')} {item.get('endpoint')} — {item.get('controller_method')} (receiver-aware source call candidate; not AST)")
+        for path in item.get('candidate_call_paths', [])[:5]:
+            lines.append("    candidate chain: " + " -> ".join(f"{n.get('class')}.{n.get('method')}() [{n.get('file')}:{n.get('line')}]" for n in path.get('path', [])))
+        for target in item.get('candidate_method_links', [])[:5]:
+            lines.append(f"    source path endpoint: {target.get('file')}:{target.get('line')}::{target.get('method')} — {', '.join(target.get('matched_attributes') or [])}")
+    for item in other[:12]:
+        lines.append(f"  DISCOVERED ONLY: {item.get('http_method')} {item.get('endpoint')} — no matched source call path")
+    review = ranked.get('role_review') or {}
+    lines.append('Requirement role review (inferred, not verified changes):')
+    for item in review.get('priority_operations', []) + review.get('conditional_or_other_operations', []):
+        lines.append(f"  {item.get('change_review_priority')} | {item.get('http_method')} {item.get('endpoint')} | roles: {', '.join(item.get('requirement_roles') or [])} | source path: {item.get('source_path_found')}")
+        lines.append('    ' + str(item.get('role_reason')))
+    for gap in ranked.get('mapping_source_gaps', []):
+        lines.append(f"Mapping-to-source review gap: {gap.get('attribute')} — {gap.get('classification')} (bounded scan, not proof of absence)")
+    for item in (result.get("mappings") or [])[:12]:
+        lines.append(f"Imported mapping: {item.get('source_path')} → {item.get('target_class')}.{item.get('target_attribute')} (document evidence)")
+    for item in candidates[:10]:
         if isinstance(item, dict):
-            lines.append("Code candidate: " + str(item.get("method") or item.get("file") or item.get("path") or item)[:240])
-    for item in scenarios[:15]:
-        if isinstance(item, dict):
-            lines.append("Scenario candidate: " + str(item.get("scenario_code") or item.get("name") or ""))
-    lines.append("Affected HTTP operations are verified only where code or scenario evidence identifies them; no POST/PUT operation is assumed.")
+            lines.append("Inferred code candidate: " + str(item.get("method") or item.get("file") or item.get("path") or item.get("title") or "unspecified"))
+    for item in scenarios[:10]:
+        lines.append("Scenario text match: " + str(item.get("scenario_code") or item.get("name") or ""))
+    for item in (result.get("regression_recommendations") or [])[:10]:
+        lines.append("Recommended, NOT EXECUTED: " + str(item.get("scenario")))
+    lines.append("No JIRA-to-method call graph, database schema, or test execution is implied by source mentions.")
     result["answer"] = "\n".join(lines)
     return result
 
@@ -306,7 +339,30 @@ def _ask_knowledge_agent_impl(payload: KnowledgeAgentRequest, db: Session = Depe
         jira_key = _canonical_jira(query)
         # Normalize informal JIRA keys before any DSL, graph or LLM route.
         # An explicit JIRA request must not fall through to graph-only search.
-        if jira_key and re.search(r"\b(?:impact|impacted|affect|affected|change impact|what (?:needs|should) change)\b", query, re.I) and not re.search(r"\b(?:history|historical|release|baseline|commits? only)\b", query, re.I):
+        # Negated historical terms must never select the historical Git route.
+        # Source-analysis intent takes priority for proposed JIRA requirements.
+        historical_exclusion = bool(re.search(
+            r"\b(?:do\s+not|don't|without|exclude|ignore|no)\s+(?:use\s+|analy[sz]e\s+|include\s+)?(?:git\s+)?(?:history|commits?|git)\b",
+            query, re.I))
+        explicit_historical = bool(re.search(
+            r"\b(?:show|find|list|analy[sz]e|trace|compare|retrieve)\b.{0,55}"
+            r"\b(?:historical|history|commits?|git\s+history|release\s+history|baseline\s+history)\b",
+            query, re.I))
+        historical_only = explicit_historical and not historical_exclusion
+        # A bare JIRA key or simple "Analyze CAS-6" request should use the same
+        # comprehensive pre-development impact route as the detailed Swagger query.
+        # Historical requests retain their dedicated evidence route.
+        short_jira_impact = bool(jira_key and re.fullmatch(
+            r"(?:analy[sz]e|check|review|impact(?: analysis)?(?: for| of)?|show impact(?: for| of)?)?\s*"
+            + re.escape(jira_key) + r"(?:\s+(?:before development|for impact analysis))?\s*[.!]?",
+            query.strip(), re.I))
+        predevelopment = bool(short_jira_impact) or bool(re.search(
+            r"\b(?:pre.development|before (?:development|implementation)|not (?:yet )?implemented|"
+            r"existing java|java methods?|source references?|controllers?|rest apis?|"
+            r"api operations?|database fields?|data mappings?|regression scenarios?|"
+            r"potentially affected|could be affected|impact|impacted|trace|lineage|"
+            r"(?:first|last|full)\s*name|firstName|lastName|fullName)\b", query, re.I))
+        if jira_key and predevelopment and not historical_only:
             return _jira_requirement_impact(db, query, jira_key, payload.project_path)
         if jira_key and not re.search(r"\b(?:latest|last)\s+(?:commit|committed)\b", query, re.I):
             return _jira_combined_evidence(db, query, jira_key, requested)
