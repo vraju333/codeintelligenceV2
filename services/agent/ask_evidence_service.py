@@ -9,7 +9,10 @@ from services.agent.git_evidence_enrichment import enrich_commits, format_commit
 ATTRIBUTES = {'countrycode': 'countryCode', 'country code': 'countryCode',
               'customeremail': 'customerEmail', 'customer email': 'customerEmail',
               'email validation': 'customerEmail', 'email': 'customerEmail',
-              'accounttype': 'accountType', 'account type': 'accountType'}
+              'accounttype': 'accountType', 'account type': 'accountType',
+              'firstname': 'firstName', 'first name': 'firstName',
+              'lastname': 'lastName', 'last name': 'lastName',
+              'primaryemail': 'primaryEmail', 'primary email': 'primaryEmail'}
 CONSTANTS = {'countryCode': 'COUNTRY', 'customerEmail': 'EMAIL', 'accountType': 'ACCOUNT_TYPES'}
 
 
@@ -30,6 +33,29 @@ def _matching_change(change: dict, attribute: str) -> bool:
     return bool(constant and str(change.get('constant') or '').casefold() == constant and change.get('kind') in ('PATTERN_CHANGED', 'DEPENDS_ON_CHANGED_PATTERN'))
 
 
+def _endpoint_attribute_conflict(endpoint: str, attribute: str) -> bool:
+    """A field-specific PATCH route for a different field is not attribute proof.
+
+    This is a conservative veto, not a claim that remaining paths are dataflow verified.
+    """
+    route = str(endpoint or '').strip().casefold()
+    if not route.startswith('patch '):
+        return False
+    segment = route.split('?', 1)[0].rstrip('/').rsplit('/', 1)[-1]
+    if not segment or segment.startswith('{'):
+        return False
+    aliases = {
+        'countryCode': {'country-code', 'countrycode', 'country'},
+        'accountType': {'account-type', 'accounttype'},
+        'customerEmail': {'customer-email', 'customeremail', 'email'},
+        'primaryEmail': {'primary-email', 'primaryemail', 'email'},
+        'firstName': {'first-name', 'firstname'},
+        'lastName': {'last-name', 'lastname'},
+    }
+    known = set().union(*aliases.values())
+    return segment in known and segment not in aliases.get(attribute, set())
+
+
 def _summary(report: dict, *, attribute: str | None = None, include_qa: bool = False) -> dict:
     semantic = report['semantic_changes']
     matching = [s for s in semantic if _matching_change(s, attribute)] if attribute else semantic
@@ -40,7 +66,16 @@ def _summary(report: dict, *, attribute: str | None = None, include_qa: bool = F
     # explicitly linked evidence category. Do not discard non-pattern commits
     # (e.g. null-check changes) merely because they lack PATTERN_CHANGED.
     semantic_shas = {s['commit'] for s in matching} if attribute else {c['sha'] for c in commits}
-    paths = sorted({p['endpoint'] for p in report['source_verified_paths'] if p['commit'] in semantic_shas})
+    # A verified controller-to-service path is not automatically verified for a
+    # specific attribute. Require the terminal changed method to be one of the
+    # methods linked to that attribute's semantic change in the SAME commit.
+    matching_methods = {(s.get('commit'), s.get('method')) for s in matching if s.get('method')}
+    confirmed_paths = [p for p in report['source_verified_paths']
+                       if not attribute or ((p.get('commit'), p.get('changed_method')) in matching_methods
+                           and not _endpoint_attribute_conflict(p.get('endpoint'), attribute))]
+    candidate_paths = [p for p in report['source_verified_paths']
+                       if attribute and p.get('commit') in semantic_shas and p not in confirmed_paths]
+    paths = sorted({p['endpoint'] for p in confirmed_paths})
     tests = report['qa']['test_cases'] if include_qa else []
     relevant_commits = commits  # Exact JIRA key in commit message, not inferred attribute change
     enriched = enrich_commits(report.get('project_path') or '', relevant_commits)
@@ -52,7 +87,9 @@ def _summary(report: dict, *, attribute: str | None = None, include_qa: bool = F
     if attribute and not changed:
         lines.append(f'No commit-scoped {CONSTANTS.get(attribute, attribute)} validation modification verified for this JIRA.')
     lines.append('Affected Java methods: ' + (', '.join(methods) or 'not independently resolved'))
-    lines.append('Source-verified APIs: ' + (', '.join(paths) or 'none verified'))
+    lines.append('Attribute-verified API paths: ' + (', '.join(paths) or 'none established'))
+    if candidate_paths:
+        lines.append('Unverified attribute-to-API candidates: ' + ', '.join(sorted({p['endpoint'] for p in candidate_paths})))
     if include_qa:
         lines.append(f"QA cases: {len(tests)} unique, {report['qa']['tests_with_recorded_execution']} with separately recorded execution evidence")
         for case in tests:
@@ -60,8 +97,10 @@ def _summary(report: dict, *, attribute: str | None = None, include_qa: bool = F
     lines.append('Evidence boundary: Git/Java paths are source-verified; QA imports are plans, not execution or approval. Recorded executions are user-supplied evidence.')
     return {'answer': '\n'.join(lines), 'semantic_changes': matching, 'source_verified_endpoints': paths,
             'qa': report['qa'] if include_qa else None, 'git_commits': enriched,
+            'attribute_verified_paths': confirmed_paths, 'unverified_attribute_paths': candidate_paths,
             'jira': report['jira'], 'matched_change': bool(changed) if attribute else bool(commits),
-            'explicit_jira_commit_count': len(enriched)}
+            'explicit_jira_commit_count': len(enriched),
+            'verification_limit': 'Method-level static call graph; field-level dataflow is not yet established'}
 
 
 def jira_impact(db, jira_keys: tuple[str, ...], *, attribute: str | None = None, include_qa: bool = False) -> dict:

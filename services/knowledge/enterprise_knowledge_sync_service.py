@@ -4,6 +4,7 @@ import base64
 import hashlib
 import json
 import re
+import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -158,8 +159,9 @@ class EnterpriseKnowledgeSyncService:
             else: raise ValueError(f"Unsupported source type {source.source_type}")
             for key in ("discovered", "created", "updated", "skipped", "failed"):
                 setattr(run, "created_count" if key == "created" else "updated_count" if key == "updated" else "skipped_count" if key == "skipped" else "failed_count" if key == "failed" else "discovered", int(result.get(key, 0)))
-            run.status = "SUCCESS"; run.details_json = json.dumps(result, default=str, ensure_ascii=False); run.completed_at = datetime.utcnow()
-            source.last_sync_at = datetime.utcnow(); source.last_status = "SUCCESS"; source.last_error = None
+            run.status = result.get("status", "SUCCESS"); run.details_json = json.dumps(result, default=str, ensure_ascii=False); run.completed_at = datetime.utcnow()
+            source.last_sync_at = datetime.utcnow(); source.last_status = result.get("status", "SUCCESS")
+            source.last_error = "; ".join(f"{item.get('file')}: {item.get('error')}" for item in result.get("errors", [])) or None
             db.commit()
             if rebuild_indexes and result.get("created", 0) + result.get("updated", 0) + result.get("deactivated", 0) > 0:
                 result["indexes"] = self._refresh_indexes(db)
@@ -287,7 +289,7 @@ class EnterpriseKnowledgeSyncService:
     def _sync_document_folder(self, db: Session, source: KnowledgeSyncSource) -> dict[str, Any]:
         folder=Path(str(source.location or "")).expanduser()
         if not folder.exists() or not folder.is_dir(): raise ValueError(f"Document folder does not exist: {folder}")
-        files=[p for p in folder.rglob("*") if p.is_file() and p.suffix.lower() in self.extractor.SUPPORTED_EXTENSIONS]
+        files=[p for p in folder.rglob("*") if p.is_file() and not p.name.startswith("~$") and p.suffix.lower() in self.extractor.SUPPORTED_EXTENSIONS]
         created=updated=skipped=failed=0
         rows_imported = 0
         errors = []
@@ -392,6 +394,12 @@ class EnterpriseKnowledgeSyncService:
         return {"status": "PARTIAL" if errors else "SUCCESS", **counts, "errors": errors}
 
     @staticmethod
+    def _normalize_mapping_project(value: str | None) -> str:
+        # Compare Windows and POSIX spellings consistently without requiring
+        # a MappingIntelligenceService method that does not exist.
+        return str(value or "").strip().replace("/", "\\").rstrip("\\").casefold()
+
+    @staticmethod
     def _mapping_identity(file: Path) -> tuple[str, str | None]:
         match=re.search(r"(?:^|[_ .-])(V\d+(?:\.\d+)*)\b",file.stem,flags=re.I)
         version=match.group(1).upper() if match else None
@@ -401,12 +409,14 @@ class EnterpriseKnowledgeSyncService:
     def _sync_mapping_folder(self, db: Session, source: KnowledgeSyncSource) -> dict[str, Any]:
         folder=Path(str(source.location or "")).expanduser()
         if not folder.exists() or not folder.is_dir(): raise ValueError(f"Mapping folder does not exist: {folder}")
-        files=[p for p in folder.rglob("*") if p.is_file() and p.suffix.lower() in {".xlsx",".xlsm"}]
+        files=[p for p in folder.rglob("*") if p.is_file() and not p.name.startswith("~$") and p.suffix.lower() in {".xlsx",".xlsm"}]
         created=updated=skipped=failed=0
         rows_imported = 0
         errors = []
         for file in files:
             try:
+                if not zipfile.is_zipfile(file):
+                    raise ValueError("Invalid XLSX/XLSM workbook (not a ZIP-based Excel file). Re-export it from Excel or remove it from the mapping folder.")
                 data=file.read_bytes(); digest=hashlib.sha256(data).hexdigest(); external=str(file.resolve()); cp=self._checkpoint(db,source.id,external)
                 if cp and cp.content_hash == digest:
                     from db_models import MappingDocument
@@ -414,8 +424,8 @@ class EnterpriseKnowledgeSyncService:
                         MappingDocument.checksum_sha256 == digest,
                         MappingDocument.status == "ACTIVE",
                         MappingDocument.row_count > 0,
-                    ).all() if self.mapping._normalize_project(doc.project_path) ==
-                        self.mapping._normalize_project(source.project_path)), None)
+                    ).all() if self._normalize_mapping_project(doc.project_path) ==
+                        self._normalize_mapping_project(source.project_path)), None)
                     if existing:
                         cp.last_seen_at=datetime.utcnow(); skipped += 1; continue
                 family,version=self._mapping_identity(file)

@@ -12,7 +12,7 @@ def verify_source(db, source_id: int) -> dict:
     project = row.project_path or ""
     run = db.query(KnowledgeSyncRun).filter_by(source_id=source_id).order_by(KnowledgeSyncRun.id.desc()).first()
     result = {"source_id": source_id, "project_path": project, "source_type": row.source_type}
-    result["postgresql"] = {"status": "VERIFIED" if run and run.status == "SUCCESS" else "NOT_VERIFIED", "latest_run": run.status if run else None}
+    result["postgresql"] = {"status": "VERIFIED" if run and run.status == "SUCCESS" else "PARTIAL" if run and run.status == "PARTIAL" else "NOT_VERIFIED", "latest_run": run.status if run else None, "last_error": row.last_error}
     if row.source_type == "JIRA":
         import json
         config = json.loads(row.config_json or "{}")
@@ -21,7 +21,7 @@ def verify_source(db, source_id: int) -> dict:
         matches = [x for x in rows if normalized(x.project_path) == normalized(project)]
         result["records"] = {"status": "VERIFIED" if matches else "NOT_VERIFIED", "count": len(matches), "keys": [x.jira_id for x in matches[:30]]}
     elif row.source_type == "MAPPING_FOLDER":
-        docs = [x for x in db.query(MappingDocument).all() if normalized(x.project_path) == normalized(project) and x.status == "ACTIVE"]
+        docs = [x for x in db.query(MappingDocument).all() if normalized(x.project_path) == normalized(project) and x.status == "ACTIVE" and (not row.location or str(x.source_ref or "").replace("\\", "/").lower().startswith(str(row.location).replace("\\", "/").rstrip("/").lower() + "/"))]
         result["records"] = {"status": "VERIFIED" if docs else "NOT_VERIFIED", "documents": len(docs), "rows": db.query(MappingDefinition).filter(MappingDefinition.document_id.in_([d.id for d in docs])).count() if docs else 0}
     else:
         docs = [x for x in db.query(KnowledgeDocument).all() if normalized(x.project_path) == normalized(project) and x.status == "ACTIVE"]

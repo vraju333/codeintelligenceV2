@@ -10,6 +10,7 @@ from database import engine, initialize_storage, storage_status, SessionLocal
 # creates both scenario and baseline tables correctly.
 import db_models  # noqa: F401
 import baseline_models  # noqa: F401
+import release_snapshot_models  # noqa: F401
 import sdlc_models  # noqa: F401  # Cycle 1B additive evidence tables
 # KnowledgeDocument is defined in db_models and is therefore created by initialize_storage.
 
@@ -264,6 +265,8 @@ app.include_router(mapping_intelligence_router)
 app.include_router(deep_code_intelligence_router)
 app.include_router(enterprise_hybrid_rag_router)
 app.include_router(release_intelligence_router)
+from routers.release_snapshot_router import router as release_snapshot_router
+app.include_router(release_snapshot_router)
 app.include_router(engineering_assistant_router)
 app.include_router(knowledge_sync_router)
 
@@ -327,6 +330,8 @@ app.include_router(
 def startup():
 
     start_knowledge_sync_scheduler()
+    from services.field_impact.git_sync import start as start_field_git_sync
+    start_field_git_sync()
 
     #seed_scenarios()
 
@@ -403,6 +408,8 @@ from services.scenario.scenario_service import ScenarioService
 @app.on_event("shutdown")
 def shutdown_knowledge_sync():
     stop_knowledge_sync_scheduler()
+    from services.field_impact.git_sync import stop as stop_field_git_sync
+    stop_field_git_sync()
 
 # Field-impact read-only field evidence and AG-UI event endpoint
 from routers.field_impact_router import router as field_impact_router

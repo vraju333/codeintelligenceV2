@@ -6,6 +6,7 @@ from fastapi import (
 from sqlalchemy.orm import Session
 
 from database import get_db
+from services.regression.git_diff_service import GitDiffService
 from services.regression.regression_impact_service import (
     RegressionImpactService
 )
@@ -22,13 +23,13 @@ service = RegressionImpactService()
 
 
 @router.get("/git-changes")
-def get_git_changes():
+def get_git_changes(mode: str = "working", base_ref: str | None = None, target_ref: str | None = None):
 
     try:
 
         return (
-            service.git_diff_service
-            .analyse_changes()
+            GitDiffService()
+            .analyse_changes(mode=mode, base_ref=base_ref, target_ref=target_ref)
         )
 
     except RuntimeError as exception:
@@ -41,14 +42,13 @@ def get_git_changes():
 
 @router.get("/impact")
 def analyse_regression_impact(
+    mode: str = "working", base_ref: str | None = None, target_ref: str | None = None,
     db: Session = Depends(get_db)
 ):
 
     try:
 
-        return service.analyse(
-            db
-        )
+        return RegressionImpactService().analyse(db, mode=mode, base_ref=base_ref, target_ref=target_ref)
 
     except RuntimeError as exception:
 
@@ -66,8 +66,8 @@ def analyse_test_code():
 
 
 @router.get("/release-intelligence")
-def analyse_release_intelligence(db: Session = Depends(get_db)):
+def analyse_release_intelligence(mode: str = "working", base_ref: str | None = None, target_ref: str | None = None, db: Session = Depends(get_db)):
     try:
-        return ReleaseIntelligenceService().analyse(db)
+        return ReleaseIntelligenceService().analyse(db, mode=mode, base_ref=base_ref, target_ref=target_ref)
     except RuntimeError as exception:
         raise HTTPException(status_code=400, detail=str(exception))

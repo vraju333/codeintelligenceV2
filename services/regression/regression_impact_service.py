@@ -28,8 +28,11 @@ class RegressionImpactService:
         self.git_diff_service = GitDiffService()
         self.baselines = ScenarioBaselineRepository()
 
-    def analyse(self, db: Session):
-        changes = self.git_diff_service.analyse_changes()
+    def analyse(self, db: Session, mode: str = "working",
+                base_ref: str | None = None, target_ref: str | None = None):
+        changes = self.git_diff_service.analyse_changes(
+            mode=mode, base_ref=base_ref, target_ref=target_ref
+        )
 
         # Visible baselines are operation-level.  Every scenario/test case under
         # the same HTTP operation reuses that active baseline/version.
@@ -56,6 +59,23 @@ class RegressionImpactService:
         )
         legacy_by_scenario = {b.scenario_id: b for b in legacy_baselines}
         all_scenarios = ScenarioService().get_all_for_active_project(db)
+        # Explicit scenario-to-JIRA associations only. Imported project JIRAs are
+        # not automatically proof that every changed operation implements them.
+        def linked_jiras(scenario):
+            raw = str(getattr(scenario, "jira_id", "") or "").strip()
+            if not raw:
+                return []
+            identifiers = [part.strip().upper() for part in re.split(r"[,;\s]+", raw) if part.strip()]
+            linked = []
+            for identifier in identifiers:
+                row = db.query(JiraKnowledge).filter(JiraKnowledge.jira_id == identifier).first()
+                if row is not None and row.project_path and (
+                    str(row.project_path).replace("\\", "/").rstrip("/").casefold()
+                    == project_path.replace("\\", "/").rstrip("/").casefold()
+                ):
+                    linked.append(identifier)
+            return sorted(set(linked))
+
 
         # Current-source endpoint evidence. This is intentionally independent of
         # captured operation baselines so a newly/never-baselined scenario can
@@ -201,10 +221,10 @@ class RegressionImpactService:
                             changed_method_keys=changed_method_keys,
                         ),
                         "test_baselines": [],
-                        "jira_ids": [],
+                        "jira_ids": linked_jiras(scenario),
                         "reason": (
                             "Current-source endpoint flow intersects changed code; "
-                            "no captured operation baseline exists yet."
+                            "baseline capture is not required."
                         ),
                     })
                 else:
@@ -215,11 +235,11 @@ class RegressionImpactService:
                         "endpoint": scenario.endpoint,
                         "baseline_version": None,
                         "baseline_scope": None,
-                        "impact_status": "NO_BASELINE",
+                        "impact_status": "NO_MATCH_IN_CURRENT_SOURCE",
                         "matched_classes": [],
                         "changed_methods": [],
                         "dependency_paths": [],
-                        "reason": "No active operation baseline has been captured for this scenario's HTTP operation.",
+                        "reason": "No changed method or class was found in the resolved current-source endpoint flow; unresolved calls may still require review.",
                     })
                 continue
 
@@ -268,7 +288,7 @@ class RegressionImpactService:
                 "dependency_paths": dependency_paths,
                 "changed_attributes": sorted(changed_attributes),
                 "test_baselines": test_traceability,
-                "jira_ids": sorted({
+                "jira_ids": sorted(set(linked_jiras(scenario)) | {
                     str(jira_id)
                     for test in test_traceability
                     for jira_id in (test.get("jira_ids") or [])
@@ -556,40 +576,49 @@ class RegressionImpactService:
         changed_classes: set[str],
         changed_method_keys: set[str],
     ) -> list[dict]:
-        ordered = self._ordered_flow_methods(endpoint_flow)
-        if not ordered:
+        """Show only ancestor-to-descendant calls from the nested flow tree.
+
+        The flattened ``simplified_flow`` is intentionally ignored: its entries
+        are a traversal/list of methods, NOT a chain of call edges. Unresolved
+        calls are never presented as verified execution paths.
+        """
+        root = endpoint_flow.get("flow") if isinstance(endpoint_flow, dict) else None
+        if not isinstance(root, dict):
             return []
 
         paths = []
-        for index, method in enumerate(ordered):
-            class_name = method.split(".", 1)[0]
-            if method not in changed_method_keys and class_name not in changed_classes:
-                continue
+        seen = set()
 
-            # Show enough upstream/downstream context to explain why the scenario
-            # depends on the changed code without dumping the entire flow.
-            start = max(0, index - 3)
-            end = min(len(ordered), index + 4)
-            chain = ordered[start:end]
-            chain = list(dict.fromkeys([endpoint_label, *chain]))
-            paths.append({
-                "changed_symbol": method,
-                "path": chain,
-            })
+        def walk(node, ancestors, active):
+            if not isinstance(node, dict):
+                return
+            owner = str(node.get("class_name") or "")
+            method = str(node.get("method_name") or "")
+            if not owner or not method:
+                return
+            symbol = f"{owner}.{method}"
+            if symbol in active:
+                return
+            # A missing method body, external call, or depth limit is not
+            # sufficient evidence for a verified source-level call chain.
+            verified = node.get("found") is True and not node.get("external")
+            if not verified:
+                return
+            chain = [*ancestors, symbol]
+            if symbol in changed_method_keys:
+                key = tuple(chain)
+                if key not in seen:
+                    seen.add(key)
+                    paths.append({
+                        "changed_symbol": symbol,
+                        "path": [endpoint_label, *chain],
+                        "evidence_type": "STATIC_CALL_TREE",
+                        "verification": "SOURCE_RESOLVED",
+                    })
+            for child in node.get("calls") or []:
+                walk(child, chain, active | {symbol})
 
-        # A class can be explicitly declared as involved even when an older stored
-        # flow does not contain a method for it. Keep that evidence visible.
-        covered_classes = {
-            item["changed_symbol"].split(".", 1)[0]
-            for item in paths
-        }
-        for class_name in sorted(changed_classes - covered_classes):
-            if class_name in self._extract_flow_dependencies(endpoint_flow)[0]:
-                paths.append({
-                    "changed_symbol": class_name,
-                    "path": [endpoint_label, class_name],
-                })
-
+        walk(root, [], set())
         return paths[:8]
 
     def _ordered_flow_methods(self, endpoint_flow) -> list[str]:

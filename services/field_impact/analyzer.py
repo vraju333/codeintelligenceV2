@@ -114,3 +114,41 @@ def analyze_project(project_path: str, field: str, max_files: int=1500):
             'branch_qualified_references':[x for x in evidence if x.get('conditions')],
             'warnings':errors,'limitations':['Syntax-based field matching; aliasing and polymorphic dispatch not fully resolved',
             'No verified database trigger or cross-service execution trace','Source paths are possible evidence, not executed traces']}
+
+
+def enrich_field_impact(result: dict) -> dict:
+    """Classify direct syntax evidence without claiming resolved interprocedural flow."""
+    from pathlib import PurePosixPath
+    import re
+    evidence = result.get('writers', []) + result.get('readers', [])
+    for item in evidence:
+        detail = item.get('detail', '')
+        file = item.get('file', '').replace('\\', '/')
+        is_test = '/test/' in '/' + file or PurePosixPath(file).name.startswith('test_')
+        item['source_scope'] = 'TEST' if is_test else 'PRODUCTION'
+        if item['kind'] == 'WRITE':
+            item['operation_type'] = ('TEST_FIXTURE' if is_test else
+                'SETTER_IMPLEMENTATION' if item.get('method', '').startswith('set') and 'this.' in detail else
+                'TRANSFORMED_ASSIGNMENT' if re.search(r'\b(?:trim|strip|normalize|format|toUpperCase|toLowerCase)\s*\(', detail) else
+                'MAPPER_ASSIGNMENT' if 'Mapper' in file else 'ASSIGNMENT')
+        else:
+            item['operation_type'] = 'FIELD_READ'
+    # Same-expression relationships are verified syntax; types and receiver aliases are not resolved.
+    flows=[]
+    for writer in result.get('writers', []):
+        expression=writer.get('detail','')
+        if not expression or writer['source_scope']=='TEST':continue
+        for reader in result.get('readers', []):
+            if (reader.get('file')==writer.get('file') and reader.get('method')==writer.get('method')
+                and reader.get('line')==writer.get('line') and reader.get('detail') in expression):
+                transformations=re.findall(r'\b(trim|strip|normalize|format|toUpperCase|toLowerCase)\s*\(',expression)
+                flows.append({'file':writer['file'],'line':writer['line'],'method':writer['method'],
+                              'source_expression':reader['detail'],'target_expression':expression,
+                              'transformations':list(dict.fromkeys(transformations)),
+                              'evidence_level':'SAME_EXPRESSION_SYNTAX',
+                              'verified_cross_method':False})
+    result['same_expression_flows']=flows
+    result['production_writers']=sum(x['source_scope']=='PRODUCTION' for x in result.get('writers',[]))
+    result['test_writers']=sum(x['source_scope']=='TEST' for x in result.get('writers',[]))
+    result['analysis_level']='SYNTAX_WITH_SAME_EXPRESSION_FLOW'
+    return result

@@ -10,6 +10,9 @@ ALIASES = {
     'customerEmail': (r'\bcustomer\s*[_-]?\s*email\b', r'\bcustomerEmail\b'),
     'organizationCode': (r'\borganization\s*[_-]?\s*code\b', r'\borganizationCode\b'),
     'accountType': (r'\baccount\s*[_-]?\s*type\b', r'\baccountType\b'),
+    'firstName': (r'\bfirst\s*[_-]?\s*name\b', r'\bfirstName\b'),
+    'lastName': (r'\blast\s*[_-]?\s*name\b', r'\blastName\b'),
+    'primaryEmail': (r'\bprimary\s*[_-]?\s*email\b', r'\bprimaryEmail\b'),
 }
 
 def mapping_document_intent(query: str) -> bool:
@@ -36,12 +39,44 @@ def mapping_comparison_intent(query: str) -> bool:
 
 
 def extract_attribute(query: str) -> str:
+    """Extract the field, not the surrounding natural-language request."""
+    q = query or ''
+    # HTTP paths are context, not the requested field. Strip them before
+    # selecting the target attribute (e.g. firstName on /account-type).
+    q = re.sub(r'(?i)\b(?:GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)\s+(/[^\s,;]*)', ' ', q)
+    q = re.sub(r'(?<!\w)/(?:api/)?[\w{}./-]+', ' ', q)
+    # Explicit attribute intent outranks unrelated field mentions.
+    explicit = re.search(r'\b(?:impact|mapping|lineage|change|changing|attribute|field|property)\s+(?:of\s+|for\s+|on\s+|to\s+)?([A-Za-z_][A-Za-z0-9_]*)\b', q, re.I)
+    if explicit and explicit.group(1).casefold() not in {'the','a','an','on','of','for','to','in','from','java','mapping','change','impact'}:
+        word = explicit.group(1)
+        for canonical, patterns in ALIASES.items():
+            if any(re.fullmatch(pattern.replace(r'\b',''), word, re.I) for pattern in patterns):
+                return canonical
+        if re.search(r'[A-Z_]', word):
+            return word
     for canonical, patterns in ALIASES.items():
-        if any(re.search(p, query or '', re.I) for p in patterns):
+        if any(re.search(pattern, q, re.I) for pattern in patterns):
             return canonical
-    # Unknown attributes can still be searched without assuming a known schema.
-    cleaned = re.sub(r'\b(please|show|find|give|me|the|all|for|related|to|of|mapping|mappings|mapped|map|how|is|does|the|documents?|files?|workbooks?|excel|sheets?|lineage|source|target)\b', ' ', query or '', flags=re.I)
-    return ' '.join(cleaned.split()).strip(' ?,.')
+    # Explicit Java-style member references take priority over prose.
+    member = re.search(r'\b(?:[A-Z][\w]*\.)?([a-z][A-Za-z0-9_]*[A-Z][A-Za-z0-9_]*)\b', q)
+    if member:
+        return member.group(1)
+    # A simple one-token query may be a valid snake_case field.
+    if re.fullmatch(r'\s*[A-Za-z_][A-Za-z0-9_]*\s*', q):
+        return q.strip()
+    # Explicit field markers support arbitrary snake_case fields.
+    marked = re.search(r'\b(?:attribute|field|column|property)\s*[:=]\s*([A-Za-z_][A-Za-z0-9_]*)\b', q, re.I)
+    if marked:
+        return marked.group(1)
+    # Do not send a full English question to the mapping search engine.
+    return ''
+
+
+def mapping_change_impact_intent(query: str) -> bool:
+    return bool(MAPPING.search(query or '') and re.search(
+        r'\b(?:impact|affect|affected|changing|change|changes|modify|modification|regression)\b',
+        query or '', re.I))
+
 
 def mapping_documents_answer(db, query: str) -> dict:
     from services.lineage.mapping_intelligence_service import MappingIntelligenceService
@@ -56,6 +91,9 @@ def mapping_documents_answer(db, query: str) -> dict:
     if attribute == 'customerEmail': variants += ['customer_email', 'customer email']
     if attribute == 'organizationCode': variants += ['organization_code', 'organization code']
     if attribute == 'accountType': variants += ['account_type', 'account type']
+    if attribute == 'firstName': variants += ['first_name', 'first name']
+    if attribute == 'lastName': variants += ['last_name', 'last name']
+    if attribute == 'primaryEmail': variants += ['primary_email', 'primary email']
     rows, seen, discovery = [], set(), {}
     for variant in variants:
         result = service.search(db, variant, 250)

@@ -1,5 +1,6 @@
 import re
 import subprocess
+import tempfile
 from pathlib import Path
 
 from config import settings
@@ -10,6 +11,7 @@ class GitDiffService:
     def __init__(self):
         self.project_path = None
         self.git_root = None
+        self._comparison = None
 
     def _refresh_project_path(self):
         if not settings.JAVA_PROJECT_PATH:
@@ -26,21 +28,44 @@ class GitDiffService:
                 f"JAVA_PROJECT_PATH does not exist: {self.project_path}"
             )
 
-    def analyse_changes(self):
+    def analyse_changes(self, mode: str = "working", base_ref: str | None = None,
+                        target_ref: str | None = None):
+        """Modes: working (HEAD to working tree), last_commit, revisions."""
+        if mode not in {"working", "last_commit", "revisions"}:
+            raise RuntimeError("mode must be working, last_commit, or revisions")
+        if mode != "revisions" and (base_ref or target_ref):
+            raise RuntimeError("base_ref and target_ref are only valid in revisions mode")
+        if mode == "revisions" and (not base_ref or not target_ref):
+            raise RuntimeError("revisions mode requires base_ref and target_ref")
 
         self._refresh_project_path()
         self._validate_git_repository()
 
+        if mode == "working":
+            self._comparison = ("HEAD", None)
+        elif mode == "last_commit":
+            self._comparison = ("HEAD^", "HEAD")
+        else:
+            self._comparison = (self._resolve_ref(base_ref), self._resolve_ref(target_ref))
+        # Resolve HEAD^ early, providing an explicit error for a root commit.
+        if mode == "last_commit":
+            self._comparison = (self._resolve_ref("HEAD^"), self._resolve_ref("HEAD"))
         changed_files = self._get_changed_java_files()
 
         results = []
 
         for relative_path in changed_files:
 
-            file_path = (
-                self.git_root /
-                relative_path
-            )
+            file_path = self.git_root / relative_path
+            if self._comparison[1] is not None:
+                # Historical target content must not be read from the working tree.
+                target_text = self._get_revision_content(self._comparison[1], relative_path)
+                # Keep a per-request temporary copy for existing Java parsers.
+                if not hasattr(self, "_temporary_sources"):
+                    self._temporary_sources = []
+                historical_file = self._historical_file(relative_path, target_text)
+                self._temporary_sources.append(historical_file)
+                file_path = historical_file
 
             changed_lines = (
                 self._get_changed_line_numbers(
@@ -101,7 +126,11 @@ class GitDiffService:
                 }
             )
 
+        for temporary_source in getattr(self, "_temporary_sources", []):
+            temporary_source.unlink(missing_ok=True)
+        self._temporary_sources = []
         return {
+            "comparison": {"mode": mode, "base_ref": self._comparison[0], "target_ref": self._comparison[1] or "WORKTREE"},
             "project_path": str(
                 self.project_path
             ),
@@ -217,170 +246,75 @@ class GitDiffService:
 
         self.git_root = Path(root).resolve()
 
+    def _run_git(self, *args: str, missing_ok: bool = False) -> str:
+        result = subprocess.run(["git", *args], cwd=self.git_root,
+                                capture_output=True, text=True, encoding="utf-8",
+                                errors="replace")
+        if result.returncode:
+            if missing_ok and result.returncode == 128 and "does not exist" in result.stderr.lower():
+                return ""
+            raise RuntimeError(f"Git command failed: git {' '.join(args)}: {result.stderr.strip()}")
+        return result.stdout
+
+    def _resolve_ref(self, ref: str) -> str:
+        if not re.fullmatch(r"[A-Za-z0-9_./^~{}@-]+", ref or "") or ref.startswith("-"):
+            raise RuntimeError("Invalid Git revision")
+        return self._run_git("rev-parse", "--verify", f"{ref}^{{commit}}").strip()
+
+    def _get_revision_content(self, revision: str, relative_path: str) -> str:
+        result = subprocess.run(["git", "show", f"{revision}:{relative_path}"],
+                                cwd=self.git_root, capture_output=True, text=True,
+                                encoding="utf-8", errors="replace")
+        if result.returncode:
+            if "exists on disk, but not in" in result.stderr or "does not exist in" in result.stderr:
+                return ""
+            raise RuntimeError(f"Cannot read {relative_path} at {revision}: {result.stderr.strip()}")
+        return result.stdout
+
+    def _historical_file(self, relative_path: str, content: str) -> Path:
+        import os
+        fd, name = tempfile.mkstemp(suffix=".java", prefix="ci_regression_")
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(content)
+        return Path(name)
+
+    def _git_diff_args(self, unified: int | None = None, path: str | None = None) -> list[str]:
+        args = ["diff"]
+        if unified is not None:
+            args.append(f"--unified={unified}")
+        base, target = self._comparison
+        if target is not None:
+            args.extend([base, target])
+        else:
+            # HEAD -> worktree includes staged and unstaged changes together.
+            args.append("HEAD")
+        if path is not None:
+            args.extend(["--", path])
+        return args
+
     def _get_changed_java_files(self):
+        output = self._run_git(*self._git_diff_args(), "--name-only")
+        return sorted({line.strip() for line in output.splitlines()
+                       if line.strip().endswith(".java")})
 
-        files = set()
-
-        commands = [
-            [
-                "git",
-                "diff",
-                "--name-only"
-            ],
-            [
-                "git",
-                "diff",
-                "--cached",
-                "--name-only"
-            ]
-        ]
-
-        for command in commands:
-
-            result = subprocess.run(
-                command,
-                cwd=self.git_root,
-                capture_output=True,
-                text=True
-            )
-
-            if result.returncode != 0:
+    def _get_changed_line_numbers(self, relative_path: str):
+        diff = self._run_git(*self._git_diff_args(unified=0, path=relative_path))
+        changed = set()
+        for line in diff.splitlines():
+            if not line.startswith("@@"):
                 continue
+            match = re.search(r"\+(\d+)(?:,(\d+))?", line)
+            if match:
+                start = int(match.group(1))
+                count = int(match.group(2)) if match.group(2) is not None else 1
+                changed.update(range(start, start + count))
+        return changed
 
-            for line in result.stdout.splitlines():
-
-                line = line.strip()
-
-                if line.endswith(".java"):
-                    files.add(line)
-
-        return sorted(files)
-
-    def _get_changed_line_numbers(
-        self,
-        relative_path: str
-    ):
-
-        changed_lines = set()
-
-        commands = [
-            [
-                "git",
-                "diff",
-                "--unified=0",
-                "--",
-                relative_path
-            ],
-            [
-                "git",
-                "diff",
-                "--cached",
-                "--unified=0",
-                "--",
-                relative_path
-            ]
-        ]
-
-        for command in commands:
-
-            result = subprocess.run(
-                command,
-                cwd=self.git_root,
-                capture_output=True,
-                text=True
-            )
-
-            if result.returncode != 0:
-                continue
-
-            for line in result.stdout.splitlines():
-
-                if not line.startswith("@@"):
-                    continue
-
-                match = re.search(
-                    r"\+(\d+)(?:,(\d+))?",
-                    line
-                )
-
-                if not match:
-                    continue
-
-                start = int(
-                    match.group(1)
-                )
-
-                count = int(
-                    match.group(2) or 1
-                )
-
-                if count == 0:
-                    continue
-
-                for number in range(
-                    start,
-                    start + count
-                ):
-                    changed_lines.add(
-                        number
-                    )
-
-        return changed_lines
-
-    def _get_file_diff(
-        self,
-        relative_path: str
-    ) -> str:
-
-        parts = []
-
-        commands = [
-            [
-                "git",
-                "diff",
-                "--unified=3",
-                "--",
-                relative_path
-            ],
-            [
-                "git",
-                "diff",
-                "--cached",
-                "--unified=3",
-                "--",
-                relative_path
-            ]
-        ]
-
-        for command in commands:
-
-            result = subprocess.run(
-                command,
-                cwd=self.git_root,
-                capture_output=True,
-                text=True
-            )
-
-            if (
-                result.returncode == 0
-                and result.stdout.strip()
-            ):
-                parts.append(
-                    result.stdout.strip()
-                )
-
-        return "\n\n".join(parts)
-
+    def _get_file_diff(self, relative_path: str) -> str:
+        return self._run_git(*self._git_diff_args(unified=3, path=relative_path)).strip()
 
     def _get_head_file_content(self, relative_path: str) -> str:
-        """Return the committed HEAD version of a file, or empty text for a new file."""
-        result = subprocess.run(
-            ["git", "show", f"HEAD:{relative_path}"],
-            cwd=self.git_root,
-            capture_output=True,
-            text=True,
-        )
-        return result.stdout if result.returncode == 0 else ""
+        return self._get_revision_content(self._comparison[0], relative_path)
 
     def _extract_declared_fields(self, content: str) -> dict[str, dict]:
         """Extract Java class fields from complete source, excluding methods/locals."""
@@ -426,7 +360,7 @@ class GitDiffService:
         return any(segment in f"/{path}" for segment in role_segments)
 
     def _semantic_field_changes(self, relative_path: str, file_path: Path) -> list[dict]:
-        """Compare complete HEAD/current declarations so unchanged fields are never reported."""
+        """Compare complete base/target declarations so unchanged fields are never reported."""
         before = self._extract_declared_fields(self._get_head_file_content(relative_path))
         after_content = file_path.read_text(encoding="utf-8") if file_path.exists() else ""
         after = self._extract_declared_fields(after_content)
@@ -1040,7 +974,7 @@ class GitDiffService:
         }
 
     def _semantic_java_comparison(self, relative_path: str, file_path: Path) -> dict:
-        """Compare complete HEAD/working-tree Java symbols, not diff hunk line spans.
+        """Compare complete base/target Java symbols, not diff hunk line spans.
 
         This conservative classifier reports method-body token changes and constant
         initializer changes; it never treats formatting-only hunks as functional.
@@ -1084,6 +1018,6 @@ class GitDiffService:
                 name for name in new_methods.keys() & old_methods.keys()
                 if name not in changed_methods
             ),
-            "classification_basis": "HEAD versus working-tree Java tokens (comments and whitespace ignored)",
+            "classification_basis": "Selected Git comparison Java tokens (comments and whitespace ignored)",
             "limitations": "Token comparison is not a complete Java AST/data-flow analysis; constant consumers and endpoints require separate call-path verification.",
         }

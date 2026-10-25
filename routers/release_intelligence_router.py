@@ -14,8 +14,8 @@ def release_intelligence_status():
 
 
 @router.get("/analyse")
-def release_intelligence_analyse(db: Session = Depends(get_db)):
+def release_intelligence_analyse(mode: str = "working", base_ref: str | None = None, target_ref: str | None = None, db: Session = Depends(get_db)):
     try:
-        return service.analyse(db)
+        return service.analyse(db, mode=mode, base_ref=base_ref, target_ref=target_ref)
     except RuntimeError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

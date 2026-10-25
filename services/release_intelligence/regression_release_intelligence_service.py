@@ -46,10 +46,19 @@ class RegressionReleaseIntelligenceService:
     def _display_number(value: float) -> int | float:
         return int(value) if float(value).is_integer() else round(value, 10)
 
-    def _current_git_diff(self) -> str:
+    def _current_git_diff(self, mode: str = "working", base_ref: str | None = None, target_ref: str | None = None) -> str:
         root = Path(settings.JAVA_PROJECT_PATH).resolve()
+        mode = mode.lower().strip()
+        if mode == "last_commit":
+            refs = [base_ref or "HEAD^", target_ref or "HEAD"]
+        elif mode == "working":
+            refs = [base_ref] if base_ref else []
+        elif mode in {"refs", "range"} and base_ref and target_ref:
+            refs = [base_ref, target_ref]
+        else:
+            return ""
         proc = subprocess.run(
-            ["git", "diff", "--no-ext-diff", "--unified=0", "--", "*.java"],
+            ["git", "diff", "--no-ext-diff", "--unified=0", *refs, "--", "*.java"],
             cwd=root,
             capture_output=True,
             text=True,
@@ -62,13 +71,13 @@ class RegressionReleaseIntelligenceService:
             return ""
         return proc.stdout or ""
 
-    def _behavioral_changes(self, attrs: list[str]) -> list[dict[str, Any]]:
+    def _behavioral_changes(self, attrs: list[str], mode: str = "working", base_ref: str | None = None, target_ref: str | None = None) -> list[dict[str, Any]]:
         """Compare removed/added Java conditions in the current Git diff.
 
         Only evidence visible in the Git diff is emitted. Numeric threshold changes
         receive deterministic boundary-value recommendations.
         """
-        diff = self._safe(self._current_git_diff, "")
+        diff = self._safe(lambda: self._current_git_diff(mode, base_ref, target_ref), "")
         if not diff:
             return []
 
@@ -267,12 +276,12 @@ class RegressionReleaseIntelligenceService:
             "release_gate": "EVIDENCE_BASED_NOT_AUTOMATIC_APPROVAL",
         }
 
-    def analyse(self, db) -> dict[str, Any]:
-        impact = self.regression.analyse(db)
-        base = self.release.analyse(db)
+    def analyse(self, db, mode: str = "working", base_ref: str | None = None, target_ref: str | None = None) -> dict[str, Any]:
+        impact = self.regression.analyse(db, mode=mode, base_ref=base_ref, target_ref=target_ref)
+        base = self.release.analyse(db, mode=mode, base_ref=base_ref, target_ref=target_ref, impact=impact)
         attrs = self._uniq(impact.get("changed_attributes"))
         affected = impact.get("affected_scenarios") or []
-        behavioral_changes = self._behavioral_changes(attrs)
+        behavioral_changes = self._behavioral_changes(attrs, mode, base_ref, target_ref)
 
         attribute_intelligence = []
         consistency_findings: list[dict[str, Any]] = []
@@ -349,6 +358,7 @@ class RegressionReleaseIntelligenceService:
 
         return {
             "status": "ANALYZED", "phase": 10,
+            "git_comparison": {"mode": mode, "base_ref": base_ref, "target_ref": target_ref},
             "project_path": str(Path(settings.JAVA_PROJECT_PATH).resolve()),
             "change_summary": {
                 "changed_java_files": impact.get("total_changed_java_files", 0),

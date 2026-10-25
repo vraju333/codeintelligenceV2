@@ -58,6 +58,13 @@ class Settings:
     KNOWLEDGE_DOCUMENT_FOLDER = os.getenv("KNOWLEDGE_DOCUMENT_FOLDER", "").strip()
     KNOWLEDGE_MAPPING_FOLDER = os.getenv("KNOWLEDGE_MAPPING_FOLDER", "").strip()
 
+    # Opt-in local Git revision synchronization. No network webhook is implied.
+    FIELD_SYNC_ENABLED = os.getenv("FIELD_SYNC_ENABLED", "false").lower() == "true"
+    FIELD_SYNC_INTERVAL_SECONDS = max(60, int(os.getenv("FIELD_SYNC_INTERVAL_SECONDS", "180")))
+    FIELD_SYNC_MAX_FIELDS = max(1, min(200, int(os.getenv("FIELD_SYNC_MAX_FIELDS", "40"))))
+    FIELD_SYNC_RAG_ENABLED = os.getenv("FIELD_SYNC_RAG_ENABLED", "false").lower() == "true"
+    FIELD_SYNC_KNOWLEDGE_ENABLED = os.getenv("FIELD_SYNC_KNOWLEDGE_ENABLED", "false").lower() == "true"
+
     # Phase 8 Enterprise Hybrid RAG. pgvector uses the existing PostgreSQL instance.
     PHASE8_VECTOR_BACKEND = os.getenv("PHASE8_VECTOR_BACKEND", "pgvector").strip().lower()
     PHASE8_EMBEDDING_MODEL = os.getenv("PHASE8_EMBEDDING_MODEL", "sentence-transformers/all-MiniLM-L6-v2")

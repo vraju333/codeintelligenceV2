@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 from database import get_db
 from services.agent.knowledge_agent_service import KnowledgeAgentService
 from collections import Counter, defaultdict
+import re
 
 router = APIRouter(prefix="/api/knowledge-agent", tags=["Knowledge Agent"])
 service = KnowledgeAgentService()
@@ -126,18 +127,41 @@ def combined_attribute_impact(db: Session, query: str, attribute: str, jira: str
     code = collect("Engineering", lambda: attribute_change_history(db, query, attribute, include_qa=False))
     if isinstance(code, dict):
         result["engineering_evidence"] = code
+        result["verified_change_jiras"] = code.get("verified_change_jiras") or []
+        result["candidate_jiras"] = code.get("candidate_jiras") or []
+        result["attribute_verified_paths"] = [p for e in code.get("evidence") or [] for p in e.get("attribute_verified_paths") or []]
+        result["unverified_attribute_paths"] = [p for e in code.get("evidence") or [] for p in e.get("unverified_attribute_paths") or []]
         for key in ("git_evidence", "git_commit_evidence", "commit_call_paths", "jira_issues", "historical_jiras", "affected_methods", "affected_apis"):
             if key in code:
                 result[key] = code[key]
         parts.append(str(code.get("answer") or ""))
 
+    # Predictive questions need current-source candidates even without historical Git evidence.
+    # Keep them separate from attribute_verified_paths and execution evidence.
+    if re.search(r"\b(?:if i change|if we change|what if|could be affected|might be affected|potential(?:ly)? affected)\b", query, re.I):
+        from services.agent.project_attribute_impact_service import project_attribute_impact
+        predictive = collect("Predictive Java impact", lambda: project_attribute_impact(db, query, attribute))
+        if isinstance(predictive, dict):
+            result["predictive_impact"] = predictive
+            result["predictive_api_candidates"] = [p for p in predictive.get("reverse_call_paths", []) if p.get("endpoint")]
+            result["predictive_scenario_candidates"] = predictive.get("scenario_candidates") or []
+            result["predictive_evidence_status"] = "LEXICAL_CANDIDATES_NOT_VERIFIED"
+            endpoints = sorted({str(p.get("http_method") or "") + " " + str(p.get("endpoint") or "") for p in result["predictive_api_candidates"]})
+            scenarios = sorted({str(c.get("scenario_code") or "") for c in result["predictive_scenario_candidates"]})
+            parts.append("Predictive API candidates (NOT VERIFIED): " + (", ".join(endpoints) or "none found in available source"))
+            parts.append("Predictive scenario candidates (NOT EXECUTED): " + (", ".join(scenarios) or "none linked by project and endpoint"))
+            parts.append("Predictive results are current-source lexical candidates, not actual Git changes, proven attribute dataflow or test executions.")
+
     project = str(getattr(settings, "JAVA_PROJECT_PATH", "") or getattr(settings, "PYTHON_PROJECT_PATH", "") or "")
     result["qa_project_scope"] = project
+    result["evidence_contract_version"] = "2.0"
+    result["confidence_policy"] = "SOURCE_VERIFIED_OR_EXPLICITLY_UNVERIFIED"
     if project:
         qa = collect("Imported QA", lambda: TestSuiteService().search(
             db, project_path=project, jira=jira, attribute=attribute, limit=500))
         if isinstance(qa, dict):
             result["test_suites"] = qa
+            result["qa_evidence_status"] = "IMPORTED_PLANS_NOT_EXECUTION"
             parts.append(format_qa_evidence(qa, db=db, project=project, jira=jira) if qa.get("count") else
                          "No matching imported QA documents in the configured project.")
     else:
@@ -402,6 +426,14 @@ def _ask_knowledge_agent_impl(payload: KnowledgeAgentRequest, db: Session = Depe
                 lines.append("PR lookup: " + result['github_pr_status'] + "; Jira dates: " + result['jira_date_lookup_status'])
                 result['answer'] = '\n'.join(lines)
                 return result
+        # Project-scoped deterministic route for Java attribute impact. Prevent
+        # global RAG/LLM results from mixing Employee/Student workspaces.
+        from services.agent.ask_mapping_documents_service import extract_attribute as _extract_mapping_attribute, mapping_change_impact_intent as _mapping_change_intent
+        _impact_attr = _extract_mapping_attribute(query)
+        _java_impact = bool(re.search(r"\b(?:java methods?|impacted scenarios?|affected scenarios?|method impact)\b", query, re.I))
+        if _impact_attr and (_java_impact or _mapping_change_intent(query)):
+            from services.agent.project_attribute_impact_service import project_attribute_impact
+            return project_attribute_impact(db, query, _impact_attr, payload.project_path)
         # Broad impact questions must not be hijacked by the mapping-only or QA-only fast paths.
         from services.agent.ask_evidence_service import detect_attribute
         impact_attribute = detect_attribute(query)
@@ -415,6 +447,12 @@ def _ask_knowledge_agent_impl(payload: KnowledgeAgentRequest, db: Session = Depe
             jira_key_match = re.search(r"\b[A-Z][A-Z0-9_]+-\d+\b", query, re.I)
             return combined_attribute_impact(db, query, impact_attribute,
                                              jira=jira_key_match.group(0).upper() if jira_key_match else "")
+        # Mapping change impact is cross-source, not a mapping-only lookup.
+        from services.agent.ask_mapping_documents_service import extract_attribute, mapping_change_impact_intent
+        if mapping_change_impact_intent(query):
+            mapping_attribute = extract_attribute(query)
+            if mapping_attribute:
+                return combined_attribute_impact(db, query, mapping_attribute)
         # Mapping-document intent takes precedence over attribute historical-change routing.
         # Never substitute a Git commit when the user requests mapping workbooks.
         from services.agent.ask_mapping_documents_service import mapping_document_intent, mapping_documents_answer
