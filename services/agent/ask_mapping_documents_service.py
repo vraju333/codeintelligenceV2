@@ -61,6 +61,11 @@ def extract_attribute(query: str) -> str:
     member = re.search(r'\b(?:[A-Z][\w]*\.)?([a-z][A-Za-z0-9_]*[A-Z][A-Za-z0-9_]*)\b', q)
     if member:
         return member.group(1)
+    # Plain Java identifiers (e.g. email) in mapping requests must remain searchable.
+    # Restrict extraction to an explicit mapping-document request, not arbitrary prose.
+    plain = re.search(r"\bmapping\s+documents?\s+for\s+([A-Za-z_][A-Za-z0-9_]*)\b", q, re.I)
+    if plain:
+        return plain.group(1)
     # A simple one-token query may be a valid snake_case field.
     if re.fullmatch(r'\s*[A-Za-z_][A-Za-z0-9_]*\s*', q):
         return q.strip()
@@ -76,6 +81,46 @@ def mapping_change_impact_intent(query: str) -> bool:
     return bool(MAPPING.search(query or '') and re.search(
         r'\b(?:impact|affect|affected|changing|change|changes|modify|modification|regression)\b',
         query or '', re.I))
+
+
+def mapping_listing_intent(query: str) -> bool:
+    """Document inventory questions do not require an attribute."""
+    q = query or ''
+    return bool(MAPPING.search(q) and DOCUMENT.search(q) and
+                re.search(r'\b(all|list|available|uploaded|indexed|show|which|what|find)\b', q, re.I) and
+                not extract_attribute(q))
+
+
+def mapping_document_inventory(db, query: str, project_path: str | None = None) -> dict:
+    from services.lineage.mapping_intelligence_service import MappingIntelligenceService
+    from db_models import MappingDocument
+    from config import settings
+    service = MappingIntelligenceService()
+    project = str(project_path or getattr(settings, 'JAVA_PROJECT_PATH', None) or
+                  getattr(settings, 'PYTHON_PROJECT_PATH', None) or '').strip()
+    if not project:
+        return {'status': 'PROJECT_NOT_SELECTED', 'source': 'MAPPING_DOCUMENT_EVIDENCE',
+                'query': query, 'answer': 'Select a workspace project before listing mapping documents.',
+                'mapping_documents': [], 'mapping_rows': []}
+    # Discovery is only safe for the configured active project.
+    discovery = {}
+    if service._canonical_project_key(project) == service._canonical_project_key(service._project_path()):
+        discovery = service.ensure_active_project_workbooks(db)
+    key = service._canonical_project_key(project)
+    documents = [service._document_dict(doc) for doc in db.query(MappingDocument).filter(
+        MappingDocument.status == 'ACTIVE').all()
+        if service._canonical_project_key(doc.project_path) == key]
+    lines = [f'Mapping documents indexed for project: {project}', f'Documents: {len(documents)}']
+    for doc in documents:
+        lines.append(f"- {doc.get('title') or doc.get('filename') or 'Untitled'} | "
+                     f"file={doc.get('filename') or 'unknown'} | rows={doc.get('row_count', 0)} | "
+                     f"version={doc.get('document_version') or 'unspecified'}")
+    if not documents:
+        lines.append('No active mapping documents are indexed for this project. This is not an attribute search.')
+    return {'status': 'FOUND' if documents else 'NOT_FOUND', 'source': 'MAPPING_DOCUMENT_EVIDENCE',
+            'query': query, 'project_path': project, 'answer': '\n'.join(lines),
+            'mapping_documents': documents, 'mapping_rows': [], 'mapping_count': 0,
+            'workbook_discovery': discovery}
 
 
 def mapping_documents_answer(db, query: str) -> dict:
@@ -104,6 +149,14 @@ def mapping_documents_answer(db, query: str) -> dict:
             if identity not in seen:
                 seen.add(identity)
                 rows.append(row)
+    # Stable newest-first ordering across both structured evidence and answer text.
+    # Do not confuse the import document ID with a release/version number.
+    def _mapping_version(row):
+        provenance = row.get('provenance') or {}
+        name = str(provenance.get('document') or row.get('document_title') or row.get('filename') or '')
+        match = re.search(r'(?i)(?:^|[_\s.-])v(\d+)(?=[_\s.-]|$)', name)
+        return int(match.group(1)) if match else -1
+    rows.sort(key=_mapping_version, reverse=True)
     documents = {}
     for row in rows:
         provenance = row.get('provenance') or {}

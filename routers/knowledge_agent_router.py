@@ -146,6 +146,11 @@ def combined_attribute_impact(db: Session, query: str, attribute: str, jira: str
             result["predictive_api_candidates"] = [p for p in predictive.get("reverse_call_paths", []) if p.get("endpoint")]
             result["predictive_scenario_candidates"] = predictive.get("scenario_candidates") or []
             result["predictive_evidence_status"] = "LEXICAL_CANDIDATES_NOT_VERIFIED"
+            result["predictive_contract_checks"] = predictive.get("mapping_contract_checks") or []
+            result["predictive_call_paths"] = predictive.get("reverse_call_paths") or []
+            result["predictive_warnings"] = predictive.get("contract_warnings") or []
+            for key in ("field_evidence", "impact_graph", "regression_recommendations", "risk_summary"):
+                result["predictive_" + key] = predictive.get(key)
             endpoints = sorted({str(p.get("http_method") or "") + " " + str(p.get("endpoint") or "") for p in result["predictive_api_candidates"]})
             scenarios = sorted({str(c.get("scenario_code") or "") for c in result["predictive_scenario_candidates"]})
             parts.append("Predictive API candidates (NOT VERIFIED): " + (", ".join(endpoints) or "none found in available source"))
@@ -184,6 +189,279 @@ def combined_attribute_impact(db: Session, query: str, attribute: str, jira: str
     result["answer"] = "\n\n".join(p for p in parts if p)
     result["status"] = "FOUND" if any((result.get("mapping_rows"), result.get("test_suites", {}).get("count") if isinstance(result.get("test_suites"), dict) else 0, result.get("jira_test_baselines"), result.get("engineering_evidence", {}).get("status") == "FOUND" if isinstance(result.get("engineering_evidence"), dict) else False)) else "NOT_FOUND"
     return result
+
+
+def _requested_attributes(query: str) -> list[str]:
+    """Collect explicit field names without inventing attributes from prose."""
+    # URL template parameters are route syntax, not requested impact attributes.
+    query = re.sub(r"\{[^{}]+\}", " ", query)
+    names = ("firstName", "lastName", "fullName", "accountType", "countryCode", "customerId",
+             "primaryEmail", "organizationCode", "gpa", "customerEmail")
+    found = [name for name in names if re.search(r"(?<![A-Za-z0-9_])" + re.escape(name) + r"(?![A-Za-z0-9_])", query, re.I)]
+    # Keep the Java source identifier intact. The mapping contract documents
+    # Customer.email -> CUSTOMER_ACCOUNT.EMAIL; it does not establish that
+    # customerEmail is an interchangeable Java field.
+    if not found and re.search(r"(?<![A-Za-z0-9_])email(?![A-Za-z0-9_])", query, re.I):
+        found.append("email")
+    return found
+
+
+def _intelligence_intent(query: str) -> bool:
+    return bool(re.search(r"\b(?:impact graph|relationship graph|regression|release risk|risk assessment|"
+                          r"field.reference|field.level|confidence|helper transformations?|candidate call paths|"
+                          r"dataflow|data flow|predictive candidates|evidence gaps|exact java call path|"
+                          r"call paths?|does changing|changing .{1,60} impact|affected endpoints?|"
+                          r"java ast|ast call|conditional(?: validation)? branches|validation branches|"
+                          r"validation conditions?|if\s*/\s*else|control.flow|read\s*(?:vs\.?|versus|and)\s*write|"
+                          r"modif(?:y|ies)|actually modify|only read|verified and unverified|"
+                          r"verified (?:and |vs\.? )?unverified|impact relationships?)\b", query, re.I))
+
+
+def _focus_kind(query: str) -> str:
+    """Deterministic, question-specific intent; broad evidence remains accessible."""
+    if re.search(r"\b(?:does changing|changing .{1,60} impact|affected endpoints?)\b", query, re.I):
+        return 'ENDPOINT_IMPACT'
+    if re.search(r"\b(?:conditional|branches|validation conditions|if\s*/\s*else)\b", query, re.I):
+        return 'CONDITIONS'
+    if re.search(r"\b(?:modif(?:y|ies)|only read|read.*write)\b", query, re.I):
+        return 'READ_WRITE'
+    if re.search(r"\b(?:verified and unverified|verified (?:and |vs\.? )?unverified|impact relationships?|relationship graph|impact graph)\b", query, re.I):
+        return 'RELATIONSHIPS'
+    if re.search(r"\b(?:java ast|ast call|call path)\b", query, re.I):
+        return 'AST_CALLS'
+    return 'OVERVIEW'
+
+
+def _reconcile_ast_graph(graph: dict, ast: dict) -> dict:
+    """Promote only exact caller/target method edges corroborated by javac symbols.
+
+    Never promote attribute, endpoint, scenario, or field-flow edges using call evidence.
+    """
+    import copy
+    reconciled = copy.deepcopy(graph)
+    calls = ast.get('calls') or []
+    resolved = set()
+    for call in calls:
+        if call.get('status') != 'SYMBOL_RESOLVED':
+            continue
+        caller = str(call.get('method') or '')
+        target = str(call.get('target') or '')
+        if caller and target and '.' in target:
+            resolved.add((caller, target))
+    count = 0
+    for edge in reconciled.get('edges') or []:
+        source = str(edge.get('from') or '')
+        dest = str(edge.get('to') or '')
+        if not (source.startswith('method:') and dest.startswith('method:')):
+            continue
+        caller = source[7:]
+        callee = dest[7:]
+        # AST target is fully qualified. Match exact class and method suffix,
+        # with the caller's exact simple class/method; avoid name-only matches.
+        matching = [(c, t) for c, t in resolved
+                    if c == caller and (t == callee or t.endswith('.' + callee))]
+        if len(matching) == 1:
+            edge['status'] = 'AST_CALL_VERIFIED'
+            edge['evidence_type'] = 'JAVAC_SYMBOL_RESOLVED'
+            edge['resolved_target'] = matching[0][1]
+            edge['field_flow_verified'] = False
+            count += 1
+    reconciled['ast_verified_call_edges'] = count
+    return reconciled
+
+
+def _focused_evidence(analysis: dict, result: dict, query: str, attribute: str) -> dict:
+    """Produce only relevant evidence; never promote lexical paths or field references."""
+    focus = _focus_kind(query)
+    ast = analysis.get('java_ast_evidence') or {}
+    calls = [c for c in ast.get('calls', []) if c.get('status') == 'SYMBOL_RESOLVED']
+    conditions = ast.get('conditions') or []
+    events = analysis.get('field_flow_evidence') or []
+    graph = _reconcile_ast_graph(analysis.get('impact_graph') or {}, ast)
+    out = {'kind': focus, 'attribute': attribute, 'status': ast.get('status', 'UNAVAILABLE'),
+           'warnings': ast.get('warnings') or [], 'evidence_boundary': 'STATIC_SOURCE_NOT_RUNTIME_EXECUTION'}
+    if focus == 'CONDITIONS':
+        out['conditions'] = conditions
+        out['summary'] = f'{len(conditions)} AST conditions mentioning {attribute}; control-flow branches not CFG-verified.'
+    elif focus == 'READ_WRITE':
+        reads = [e for e in events if e.get('kind') == 'FIELD_GETTER_CALL']
+        writes = [e for e in events if e.get('kind') in ('FIELD_SETTER_CALL', 'FIELD_ASSIGNMENT')]
+        out.update(reads=reads, writes=writes, observations=events, local_transfers=ast.get('local_transfers') or [],
+                   summary=f'{len(reads)} getter observations and {len(writes)} write observations for {attribute}; not interprocedural dataflow verified.')
+    elif focus == 'AST_CALLS':
+        route = re.search(r'\b(PATCH|POST|PUT|GET|DELETE)\b', query, re.I)
+        method_hint = {'PATCH': 'updateAccountType', 'POST': 'create', 'PUT': 'replace', 'GET': 'get', 'DELETE': 'delete'}.get(route.group(1).upper()) if route else None
+        # A resolved call is not a verified endpoint-to-field path. Keep exact symbol evidence separate.
+        filtered = [c for c in calls if not method_hint or method_hint.lower() in (c.get('method', '') + ' ' + c.get('target', '')).lower()]
+        out.update(calls=filtered[:60], method_hint=method_hint,
+                   summary=f'{len(filtered)} symbol-resolved calls matching the requested route/method; endpoint-to-field dataflow not verified.')
+    elif focus == 'RELATIONSHIPS':
+        edges = graph.get('edges') or []
+        # Preserve original evidence labels, including lexical and source-reference-only.
+        verified = [e for e in edges if e.get('status') in ('SYMBOL_RESOLVED', 'AST_CALL_VERIFIED', 'DATAFLOW_VERIFIED', 'VERIFIED')]
+        unverified = [e for e in edges if e not in verified]
+        out.update(verified=verified, unverified=unverified,
+                   summary=f'{len(verified)} verified graph edges and {len(unverified)} candidate graph edges. Only exact AST-resolved method calls are promoted; field-flow and endpoint edges remain candidates.')
+    elif focus == 'ENDPOINT_IMPACT':
+        route = re.search(r'\b(PATCH|POST|PUT|GET|DELETE)\s+(/[^\s?]+)', query, re.I)
+        endpoint = route.group(1).upper() + ' ' + route.group(2).rstrip('.,') if route else ''
+        historical = result.get('attribute_verified_paths') or []
+        unverified = result.get('unverified_attribute_paths') or []
+        def matches(item):
+            value = str(item.get('endpoint') or '')
+            return bool(endpoint and (endpoint == value or endpoint.split(' ', 1)[-1] == value))
+        has_verified = any(matches(x) for x in historical)
+        out.update(endpoint=endpoint, historical_verified=has_verified,
+                   historical_candidate=any(matches(x) for x in unverified),
+                   conclusion='HISTORICALLY_VERIFIED' if has_verified else 'NOT_VERIFIED',
+                   summary=(f'{endpoint}: historical attribute impact verified; current predictive field flow remains unverified.' if has_verified else f'{endpoint}: no verified attribute impact established; do not infer impact from route names or lexical candidates.'))
+    else:
+        # An impact question needs an actionable overview, not a placeholder or
+        # a historical-JIRA-only conclusion. Keep evidence classifications explicit.
+        # The combined history response does not populate java_evidence or
+        # operation_evidence. Current-source candidates live in predictive_impact.
+        predictive = result.get('predictive_impact') or analysis or {}
+        operations = ((result.get('operation_evidence') or {}).get('potentially_related')
+                      or predictive.get('reverse_call_paths') or [])
+        legacy_methods = ((result.get('java_evidence') or {}).get('methods') or [])
+        lexical_methods = predictive.get('affected_methods') or []
+        java_methods = legacy_methods or [
+            {'method': m.get('method_name') or m.get('method'),
+             'file': m.get('file'), 'line': m.get('line'),
+             'classification': m.get('evidence_type') or 'PROJECT_SOURCE_LEXICAL_REFERENCE'}
+            for m in lexical_methods]
+        # JIRA candidates can be IDs, dictionaries or nested issue records.
+        # Normalize to stable objects so every client can render ID and summary.
+        raw_jiras = result.get('historical_jiras') or result.get('candidate_jiras') or []
+        jira_summaries = result.get('_jiraSummaries') or {}
+        for issue in result.get('jira_issues') or []:
+            if isinstance(issue, dict):
+                issue_id = str(issue.get('jira_id') or issue.get('key') or issue.get('id') or '').strip()
+                if issue_id:
+                    jira_summaries.setdefault(issue_id, str(issue.get('summary') or ''))
+        jiras = []
+        seen_jiras = set()
+        for item in raw_jiras:
+            if isinstance(item, dict):
+                issue_id = str(item.get('jira_id') or item.get('key') or item.get('id') or '').strip()
+                summary = str(item.get('summary') or jira_summaries.get(issue_id) or '')
+            else:
+                issue_id = str(item).strip()
+                summary = str(jira_summaries.get(issue_id) or '')
+            if issue_id and issue_id.casefold() not in seen_jiras:
+                seen_jiras.add(issue_id.casefold())
+                jiras.append({'jira_id': issue_id, 'summary': summary,
+                              'classification': 'REQUIREMENT_CANDIDATE_NOT_VERIFIED_CHANGE'})
+        mapping_rows = result.get('mapping_rows') or result.get('mappings') or []
+        qa = result.get('test_suites') or {}
+        tests = qa.get('test_cases') or result.get('test_cases') or []
+        test_ids = {str(t.get('test_id') or '').casefold() for t in tests if t.get('test_id')}
+        # Drop incomplete operation records and deduplicate by method + endpoint.
+        unique_operations = []
+        seen_operations = set()
+        for op in operations:
+            if not isinstance(op, dict):
+                continue
+            method = str(op.get('http_method') or '').strip().upper()
+            endpoint = str(op.get('endpoint') or '').strip()
+            if not method or not endpoint:
+                continue
+            key = (method, endpoint)
+            if key not in seen_operations:
+                seen_operations.add(key)
+                unique_operations.append(op)
+        operation_names = [str(op['http_method']).strip().upper() + ' ' + str(op['endpoint']).strip()
+                           for op in unique_operations]
+        method_names = list(dict.fromkeys(
+            str(m.get('method') or '') for m in java_methods if m.get('method')))
+        out.update(operations=unique_operations, methods=java_methods, jira_matches=jiras,
+                   mapping_rows=mapping_rows, unique_test_count=len(test_ids))
+        parts = [f'{attribute}: {len(method_names)} distinct source-method names in {len(java_methods)} mentions; '
+                 f'{len(operation_names)} source-backed candidate API operations; '
+                 f'{len(mapping_rows)} mapping rows; {len(jiras)} candidate JIRA references; '
+                 f'{len(test_ids)} unique imported QA plans (not executed).']
+        if operation_names:
+            parts.append('Candidate operations: ' + ', '.join(operation_names[:6]) + '.')
+        if method_names:
+            parts.append('Review source-mentioned methods: ' + ', '.join(method_names[:8]) + '.')
+        parts.append('Paths and lexical method references are candidates, not field-level AST/dataflow verified; JIRA matches and QA imports do not prove implementation or execution.')
+        out['summary'] = ' '.join(parts)
+    return out
+
+
+def _enrich_intelligence(db: Session, query: str, attribute: str, project: str | None = None) -> dict:
+    """Always run predictive analysis for explicitly requested intelligence evidence."""
+    from services.agent.project_attribute_impact_service import project_attribute_impact
+    from services.knowledge.test_suite_service import TestSuiteService
+    from config import settings
+    result = combined_attribute_impact(db, query, attribute)
+    analysis = project_attribute_impact(db, query, attribute, project)
+    result['predictive_impact'] = analysis
+    result['predictive_api_candidates'] = [p for p in analysis.get('reverse_call_paths', []) if p.get('endpoint')]
+    result['predictive_scenario_candidates'] = analysis.get('scenario_candidates') or []
+    result['predictive_contract_checks'] = analysis.get('mapping_contract_checks') or []
+    result['predictive_call_paths'] = analysis.get('reverse_call_paths') or []
+    for key in ('field_evidence', 'field_flow_evidence', 'java_ast_evidence', 'impact_graph', 'regression_recommendations', 'risk_summary'):
+        result['predictive_' + key] = analysis.get(key)
+    result['predictive_evidence_status'] = 'SOURCE_CANDIDATES_NOT_DATAFLOW_VERIFIED'
+    # Explicit top-level evidence makes the analysis inspectable by API clients.
+    result['field_flow_evidence'] = analysis.get('field_flow_evidence') or []
+    result['java_ast_evidence'] = analysis.get('java_ast_evidence') or {'status': 'UNAVAILABLE', 'calls': [], 'conditions': [], 'warnings': ['AST evidence not returned by analysis']}
+    result['predictive_impact_graph'] = _reconcile_ast_graph(analysis.get('impact_graph') or {}, result['java_ast_evidence'])
+    result['predictive_impact']['impact_graph'] = result['predictive_impact_graph']
+    result['analysis_focus'] = _focus_kind(query)
+    result['focused_evidence'] = _focused_evidence(analysis, result, query, attribute)
+    project_path = str(project or getattr(settings, 'JAVA_PROJECT_PATH', '') or '')
+    qa = result.get('test_suites') or {}
+    if project_path and not qa.get('test_cases'):
+        try:
+            qa = TestSuiteService().search(db, project_path=project_path, attribute=attribute, limit=500)
+            result['test_suites'] = qa
+        except Exception as exc:
+            result.setdefault('evidence_warnings', []).append('QA lookup: ' + type(exc).__name__)
+    # Deduplicate imported QA plans; recommendation is semantic review, never proven coverage.
+    from services.agent.sdlc_report_service import unique_cases
+    cases = unique_cases(qa.get('test_cases') or [])
+    recommendations = []
+    for case in cases:
+        scenario = str(case.get('scenario') or '')
+        test_id = str(case.get('test_id') or '')
+        if not test_id:
+            continue
+        recommendations.append({'test_id': test_id, 'scenario': scenario,
+            'reason': 'Imported QA test describes a potentially relevant behavior; confirm code-to-test coverage before execution.',
+            'recommendation': 'REVIEW_AND_RUN_IF_CONFIRMED', 'execution_status': 'NOT_VERIFIED',
+            'evidence_type': 'IMPORTED_QA_PLAN_CANDIDATE'})
+    result['qa_regression_recommendations'] = recommendations[:100]
+    ast = result['java_ast_evidence']
+    field_events = result['field_flow_evidence']
+    result['answer'] += ('\n\nAST inspection: ' + str(ast.get('status')) +
+                         '; resolved calls: ' + str(sum(x.get('status') == 'SYMBOL_RESOLVED' for x in ast.get('calls', []))) +
+                         '; matching conditions: ' + str(len(ast.get('conditions', []))) +
+                         '; field observations: ' + str(len(field_events)) +
+                         ('; warnings: ' + '; '.join(ast.get('warnings', [])[:3]) if ast.get('warnings') else '') +
+                         '\n\nPredictive field references: ' + str(len(analysis.get('field_evidence') or [])) +
+                         ' (NOT DATAFLOW VERIFIED)\nImpact graph: ' +
+                         str(len((analysis.get('impact_graph') or {}).get('nodes') or [])) + ' nodes / ' +
+                         str(len((analysis.get('impact_graph') or {}).get('edges') or [])) +
+                         ' edges (CANDIDATES)\nRegression QA review: ' + str(len(recommendations)) +
+                         ' imported cases (NOT EXECUTED)\nRelease risk: ' +
+                         str((analysis.get('risk_summary') or {}).get('classification', 'INSUFFICIENT_VERIFIED_EVIDENCE')))
+    return result
+
+
+def _multi_attribute_intelligence(db: Session, query: str, attributes: list[str], project: str | None) -> dict:
+    """Keep independent attribute evidence, no false cross-attribute union of verified links."""
+    analyses = []
+    for attribute in attributes:
+        analyses.append(_enrich_intelligence(db, query, attribute, project))
+    return {'status': 'PARTIAL_MATCH', 'source': 'MULTI_ATTRIBUTE_INTELLIGENCE',
+            'query': query, 'attributes': attributes, 'attribute_analyses': analyses,
+            'risk_summary': {'classification': 'INSUFFICIENT_VERIFIED_EVIDENCE',
+                             'note': 'Evaluate each attribute independently; no numerical release risk without verified field flow and executions.'},
+            'answer': '\n\n'.join('ATTRIBUTE: ' + name + '\n' + item.get('answer', '')
+                                   for name, item in zip(attributes, analyses)),
+            'evidence_policy': 'NO_CROSS_ATTRIBUTE_VERIFICATION_INFERENCE'}
 
 
 def _canonical_jira(query: str) -> str:
@@ -352,6 +630,41 @@ def _jira_requirement_impact(db: Session, query: str, jira: str, selected_projec
     return result
 
 
+def _project_inventory_answer(db: Session, query: str, project_path: str | None) -> dict | None:
+    """Deterministic project inventories; never confuse listing with attribute impact."""
+    from config import settings
+    from db_models import JiraKnowledge
+    from services.agent.ask_mapping_documents_service import mapping_listing_intent, mapping_document_inventory
+    from services.lineage.mapping_intelligence_service import MappingIntelligenceService
+    requested = str(project_path or getattr(settings, 'JAVA_PROJECT_PATH', None) or
+                    getattr(settings, 'PYTHON_PROJECT_PATH', None) or '').strip()
+    if mapping_listing_intent(query):
+        return mapping_document_inventory(db, query, requested)
+    jira_listing = bool(re.search(r'\b(?:jiras?|jira issues?|jira requirements?|tickets?)\b', query, re.I) and
+                        re.search(r'\b(?:all|list|show|which|what|available|indexed|in|for)\b', query, re.I) and
+                        not re.search(r'\b[A-Z][A-Z0-9_]+-\d+\b', query, re.I))
+    if not jira_listing:
+        return None
+    if not requested:
+        return {'status': 'PROJECT_NOT_SELECTED', 'source': 'INDEXED_JIRA_INVENTORY',
+                'query': query, 'answer': 'Select a workspace project before listing JIRAs.', 'jiras': []}
+    canonical = MappingIntelligenceService._canonical_project_key
+    # Jira IDs are not sufficient proof of workspace ownership: use persisted scope.
+    rows = [r for r in db.query(JiraKnowledge).all()
+            if canonical(r.project_path) == canonical(requested)]
+    rows.sort(key=lambda r: (r.updated_at is not None, r.updated_at), reverse=True)
+    items = [{'jira_id': r.jira_id, 'title': r.title, 'requirement': r.requirement,
+              'project_path': r.project_path} for r in rows]
+    lines = [f'Indexed JIRA requirements for project: {requested}', f'JIRAs: {len(items)}']
+    for item in items:
+        lines.append(f"- {item['jira_id']} — {item['title'] or item['requirement'][:120]}")
+    if not items:
+        lines.append('No JIRAs with matching workspace ownership are indexed. Live Jira has not been queried.')
+    return {'status': 'FOUND' if items else 'NOT_FOUND', 'source': 'INDEXED_JIRA_INVENTORY',
+            'query': query, 'project_path': requested, 'jiras': items, 'answer': '\n'.join(lines),
+            'note': 'Requirement-level indexed evidence; no JIRA-to-code link is implied.'}
+
+
 def _ask_knowledge_agent_impl(payload: KnowledgeAgentRequest, db: Session = Depends(get_db)):
     try:
         # Historical QA test questions return actual imported records, never generated evidence.
@@ -359,6 +672,57 @@ def _ask_knowledge_agent_impl(payload: KnowledgeAgentRequest, db: Session = Depe
         from config import settings
         from services.knowledge.test_suite_service import TestSuiteService
         query = payload.query
+        # High-priority explicit intelligence questions must not be consumed by
+        # mapping-only, historical-only or single-attribute fallback routes.
+        requested_attributes = _requested_attributes(query)
+        # An explicit historical request must precede generic intelligence routing.
+        # Do not misclassify a proposed change as a past Git modification.
+        history_request = bool(re.search(
+            r"\b(?:show|find|list|trace|compare|retrieve|analy[sz]e)\b.{0,80}"
+            r"\b(?:historical|history|past changes?|previous changes?|commits?|git history)\b|"
+            r"\b(?:historical|history|past changes?|previous changes?)\b.{0,80}\b(?:to|of|for)\b",
+            query, re.I))
+        history_negated = bool(re.search(
+            r"\b(?:no|without|exclude|ignore|do not|don't)\s+(?:git\s+)?(?:history|historical|commits?)\b",
+            query, re.I))
+        if history_request and not history_negated:
+            from services.agent.ask_evidence_service import detect_attribute, attribute_change_history
+            historical_attribute = detect_attribute(query)
+            if historical_attribute:
+                historical = attribute_change_history(db, query, historical_attribute,
+                    include_qa=bool(re.search(r"\b(?:test|qa|coverage|regression)\b", query, re.I)))
+                historical['intent_classification'] = 'HISTORICAL_ATTRIBUTE_CHANGE'
+                return historical
+        # Unknown named attributes should not fall through to speculative LLM answers.
+        unknown_field = re.search(
+            r"\b(?:impact\s+of\s+(?:changing|modifying|updating)|"
+            r"what\s+is\s+the\s+impact\s+of\s+(?:changing|modifying|updating))\s+"
+            r"([A-Za-z_][A-Za-z0-9_]*)\b", query, re.I)
+        if unknown_field and not requested_attributes:
+            field = unknown_field.group(1)
+            return {'status': 'NOT_FOUND', 'source': 'ATTRIBUTE_NOT_INDEXED',
+                    'query': query, 'attribute': field, 'project_path': payload.project_path,
+                    'answer': f'No indexed attribute evidence found for {field}. No source, API, JIRA, mapping or QA impact can be asserted from this query. Confirm the attribute name and project indexing.',
+                    'evidence_warnings': ['Attribute not recognized by the current explicit attribute registry; this is not proof the field is absent from source code.'],
+                    'execution_verified': False, 'verified_attribute_paths': []}
+        # Prospective attribute impact is NOT a historical semantic-diff query.
+        # Route it before the broad is_change_question fallback (which matches
+        # both "impact" and "changing" and otherwise returns JIRA-only history).
+        prospective_impact = bool(re.search(
+            r"\b(?:what(?:'s| is)?\s+(?:the\s+)?impact\s+of\s+(?:changing|modifying|updating)|"
+            r"impact\s+of\s+(?:changing|modifying|updating)|"
+            r"(?:changing|modifying|updating)\s+.{1,70}\s+(?:impact|affect)|"
+            r"(?:what|which)\s+(?:apis?|methods?|scenarios?|tests?)\s+(?:are|will be|could be)\s+(?:affected|impacted))\b",
+            query, re.I))
+        if requested_attributes and prospective_impact and not re.search(
+            r"\b(?:historical|history|previously|past commits?|last commit|git diff)\b", query, re.I):
+            if len(requested_attributes) > 1:
+                return _multi_attribute_intelligence(db, query, requested_attributes, payload.project_path)
+            return _enrich_intelligence(db, query, requested_attributes[0], payload.project_path)
+        if requested_attributes and _intelligence_intent(query):
+            if len(requested_attributes) > 1:
+                return _multi_attribute_intelligence(db, query, requested_attributes, payload.project_path)
+            return _enrich_intelligence(db, query, requested_attributes[0], payload.project_path)
         requested = _requested_evidence(query)
         jira_key = _canonical_jira(query)
         # Normalize informal JIRA keys before any DSL, graph or LLM route.
@@ -551,9 +915,21 @@ def _ask_knowledge_agent_impl(payload: KnowledgeAgentRequest, db: Session = Depe
 def ask_knowledge_agent(payload: KnowledgeAgentRequest, db: Session = Depends(get_db)):
     """Keep established evidence retrieval, add a validated presentation contract."""
     from services.agent.ask_presentation_planner import plan_presentation
-    result = _ask_knowledge_agent_impl(payload, db)
+    result = _project_inventory_answer(db, payload.query, payload.project_path)
+    if result is None:
+        result = _ask_knowledge_agent_impl(payload, db)
     if not isinstance(result, dict):
         return result
     # Presentation only: never change the underlying evidence or imply verified links.
     result["presentation_plan"] = plan_presentation(payload.query, result)
     return result
+
+
+@router.post("/graph")
+def knowledge_graph_for_question(payload: KnowledgeAgentRequest, db: Session = Depends(get_db)):
+    """Independent, source-validated graph retrieval for arbitrary ASK wording."""
+    from services.agent.graph_question_service import retrieve
+    try:
+        return retrieve(payload.query, payload.project_path, db)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))

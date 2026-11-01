@@ -414,3 +414,7 @@ def shutdown_knowledge_sync():
 # Field-impact read-only field evidence and AG-UI event endpoint
 from routers.field_impact_router import router as field_impact_router
 app.include_router(field_impact_router)
+
+# Shared Phase 10/11 investigation contract (existing routes remain unchanged).
+from routers.investigation_router import router as investigation_experience_router
+app.include_router(investigation_experience_router)

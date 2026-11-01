@@ -238,6 +238,35 @@ class EnterpriseKnowledgeSyncService:
             raise ValueError("Invalid Jira project key")
         base_jql = (f"project = {project_key} ORDER BY updated ASC" if project_key
                     else str(config.get("jql") or settings.JIRA_SYNC_JQL or "ORDER BY updated ASC").strip())
+        # JiraKnowledge uses jira_id as a global key. Two active connectors
+        # importing the same Jira project into different code scopes would
+        # overwrite each other's project_path on every scheduled sync.
+        effective_key = project_key
+        if not effective_key:
+            match = re.search(r"\bproject\s*=\s*['\"]?([A-Z][A-Z0-9_]{1,20})", base_jql, re.I)
+            if match:
+                effective_key = match.group(1).upper()
+        if effective_key:
+            def norm_scope(v: str | None) -> str:
+                return str(v or "").replace("\\", "/").rstrip("/").casefold()
+            for other in db.query(KnowledgeSyncSource).filter(KnowledgeSyncSource.source_type == "JIRA").all():
+                if other.id == source.id or not self._enabled(other):
+                    continue
+                try:
+                    other_config = json.loads(other.config_json or "{}")
+                except (ValueError, TypeError):
+                    other_config = {}
+                other_key = str(other_config.get("project_key") or "").strip().upper()
+                if not other_key:
+                    other_jql = str(other_config.get("jql") or "")
+                    m = re.search(r"\bproject\s*=\s*['\"]?([A-Z][A-Z0-9_]{1,20})", other_jql, re.I)
+                    other_key = m.group(1).upper() if m else ""
+                if other_key == effective_key and norm_scope(other.project_path) != norm_scope(source.project_path):
+                    raise ValueError(
+                        f"Jira project {effective_key} has active sources {source.id} and {other.id} "
+                        "assigned to different code projects. Disable or correct the wrong source; "
+                        "sync stopped to protect project isolation."
+                    )
         # Cursor is an updated timestamp. Keep the user JQL and add an incremental updated constraint.
         # Manual Refresh is a full project reconciliation. An incremental cursor can
         # hide newly created Jira issues (e.g. CAS-2) whose timestamps fall
@@ -265,8 +294,13 @@ class EnterpriseKnowledgeSyncService:
             if not key: continue
             cp=self._checkpoint(db,source.id,key)
             existing_jira = db.query(JiraKnowledge).filter(JiraKnowledge.jira_id == key).first()
+            # A shared JiraKnowledge row is keyed by issue ID, not (project, issue).
+            # Skip only when the checkpoint and the stored row both match this scope.
+            # A second active source for the same Jira project under another code
+            # project is unsafe and must be resolved before synchronization.
             if (cp and cp.version_token == changed and existing_jira and
-                str(existing_jira.project_path or "") == str(source.project_path or "")):
+                str(existing_jira.project_path or "").replace("\\", "/").rstrip("/").casefold() ==
+                str(source.project_path or "").replace("\\", "/").rstrip("/").casefold()):
                 skipped += 1
                 continue
             title=str(fields.get("summary") or "")

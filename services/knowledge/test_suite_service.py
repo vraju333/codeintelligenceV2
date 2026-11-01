@@ -127,8 +127,20 @@ class TestSuiteService:
             for case in meta.get('cases', []):
                 if jira and jira.upper() != str(case.get('jira') or '').upper():
                     continue
-                if attribute and _norm(attribute) not in _norm(' '.join(str(case.get(k) or '') for k in ('attribute', 'scenario', 'input', 'expected'))):
-                    continue
+                if attribute:
+                    # Explicit test attribute is authoritative. Do not infer a
+                    # different field from a generic scenario, payload or JIRA.
+                    declared = str(case.get('attribute') or '').strip()
+                    if declared:
+                        if _norm(declared) != _norm(attribute):
+                            continue
+                    else:
+                        # Legacy test suites without an Attribute column may
+                        # match explicit field mentions in scenario/expected.
+                        # Input values alone are not a reliable field linkage.
+                        searchable = ' '.join(str(case.get(k) or '') for k in ('scenario', 'expected'))
+                        if not re.search(r'(?<![A-Za-z0-9])' + re.escape(attribute) + r'(?![A-Za-z0-9])', searchable, re.I):
+                            continue
                 found.append({**case, 'source_filename': doc.title, 'source_ref': doc.source_ref,
                     'source_kind': meta.get('source_kind'), 'source_jira': meta.get('jira'),
                     'source_id': meta.get('source_id'), 'document_id': doc.id})

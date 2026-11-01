@@ -270,6 +270,21 @@ def rank_http_operations_by_source(project: str, operations: list[dict], java_ev
                 'No matched path does not establish that an endpoint is unaffected.']}
 
 
+def _endpoint_targets_attribute(endpoint: str, method: str, attributes: list[str]) -> bool:
+    """Match a PATCH target to the requested field, not unrelated route words."""
+    endpoint_tokens = [canonical(part) for part in re.split(r"[/{}]+", endpoint) if part]
+    method_token = canonical(method)
+    for attribute in attributes:
+        target = canonical(attribute)
+        if not target:
+            continue
+        # A route segment like account-type is a direct target; do not use
+        # arbitrary substring matching (e.g. email vs alternateEmail).
+        if target in endpoint_tokens or method_token in {"update" + target, "patch" + target, "set" + target}:
+            return True
+    return False
+
+
 def classify_requirement_operations(operations: dict, attributes: list[str], mappings: list[dict],
                                     java_evidence: dict) -> dict:
     """Classify operation roles, not proven changes. Works for any attribute set.
@@ -281,7 +296,7 @@ def classify_requirement_operations(operations: dict, attributes: list[str], map
     mapped = {canonical(m.get('target_attribute', '')) for m in mappings}
     fields = {canonical(a) for field in java_evidence.get('fields', [])
               for a in attributes if mentioned(field.get('text', ''), a)}
-    missing = sorted(a for a in attributes if canonical(a) in mapped and canonical(a) not in fields)
+    missing = sorted(a for a in attributes if canonical(a) in mapped and canonical(a) not in fields) if java_evidence.get('status') == 'SCANNED' else []
     related = []
     other = []
     role_counts = {}
@@ -299,10 +314,14 @@ def classify_requirement_operations(operations: dict, attributes: list[str], map
             roles = ['INPUT', 'PERSISTENCE']
             priority = 'HIGH'
             reason = 'Creation may accept source attributes and persist derived values.'
-        elif verb in ('PUT',) or (verb == 'PATCH' and any(t in endpoint + method for t in ('name', 'customer-details', 'profile'))):
+        elif verb == 'PUT':
             roles = ['INPUT', 'PERSISTENCE']
             priority = 'HIGH'
-            reason = 'Replacement/name update may require recomputing and persisting derived values.'
+            reason = 'Replacement may accept and persist the requested attribute.'
+        elif verb == 'PATCH' and _endpoint_targets_attribute(endpoint, method, attributes):
+            roles = ['INPUT', 'PERSISTENCE']
+            priority = 'HIGH'
+            reason = 'PATCH directly targets the requested attribute; implementation and persistence remain unverified.'
         elif verb == 'GET':
             roles = ['OUTPUT']
             priority = 'MEDIUM'
@@ -310,7 +329,7 @@ def classify_requirement_operations(operations: dict, attributes: list[str], map
         elif verb == 'PATCH':
             roles = ['INDIRECT_REGRESSION']
             priority = 'LOW'
-            reason = 'This PATCH targets another property; shared mapper traversal warrants regression review only.'
+            reason = 'PATCH does not explicitly target the requested attribute; review shared behavior for possible indirect regression.'
         elif verb == 'DELETE':
             roles = ['LIFECYCLE_REGRESSION']
             priority = 'LOW'
@@ -427,9 +446,9 @@ def analyze(request: ImpactRequest, db: Session = Depends(get_db)):
             code_impact = {'status': 'ERROR', 'candidates': [], 'verified_associations': [],
                            'note': f'Java source analysis failed: {type(exc).__name__}'}
 
-    java_evidence = existing_java_evidence(request.project, attrs) if request.project and jira else {'status': 'NOT_CHECKED', 'methods': [], 'fields': [], 'database_annotations': []}
+    java_evidence = existing_java_evidence(request.project, attrs) if request.project and attrs else {'status': 'NOT_CHECKED', 'methods': [], 'fields': [], 'database_annotations': []}
     affected_operations = []
-    if request.project and mode == 'jira' and jira:
+    if request.project and attrs:
         try:
             affected_operations = proposed_http_operations(request.project, attrs)
         except (OSError, ValueError):
@@ -500,7 +519,7 @@ def analyze(request: ImpactRequest, db: Session = Depends(get_db)):
     # Compare explicitly stated two-letter requirement against imported rule.
     # A potential mismatch is documentary, not proof of runtime behavior.
     conflicts = []
-    requirement_text = text.lower()
+    requirement_text = ' '.join([text] + [str(h.get('summary') or '') + ' ' + str(h.get('evidence_excerpt') or '') for h in historical]).lower()
     exactly_two = bool(re.search(r'(?:exactly|only|strictly)\s+(?:two|2)\s+(?:letters|characters)', requirement_text))
     for row in mappings:
         rule = str(row.get('mapping_rule') or '')

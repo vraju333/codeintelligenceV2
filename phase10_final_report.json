@@ -1,0 +1,380 @@
+{
+  "timestamp_utc": "2026-10-31T16:00:54.203760+00:00",
+  "project": "D:\\AIlearning\\customer-account-service",
+  "checks": [
+    {
+      "name": "knowledge_sync_sources",
+      "status": "PASS",
+      "details": {
+        "auto_sync_enabled": true,
+        "interval_seconds": 900,
+        "project_source_count": 3,
+        "project_sources": [
+          {
+            "id": 4,
+            "name": "Customer Account Mapping",
+            "source_type": "MAPPING_FOLDER",
+            "location": "D:/AIlearning/customer-account-service/docs",
+            "project_path": "D:/AIlearning/customer-account-service",
+            "config": {},
+            "enabled": true,
+            "last_cursor": null,
+            "last_sync_at": "2026-10-31T15:58:14.427376",
+            "last_status": "SUCCESS",
+            "last_error": null
+          },
+          {
+            "id": 5,
+            "name": "Customer Account JIRA",
+            "source_type": "JIRA",
+            "location": "https://vraju333.atlassian.net/",
+            "project_path": "D:/AIlearning/customer-account-service",
+            "config": {
+              "project_key": "CAS"
+            },
+            "enabled": true,
+            "last_cursor": "2026-10-30T16:29:29.938+0530",
+            "last_sync_at": "2026-10-31T15:58:15.118957",
+            "last_status": "SUCCESS",
+            "last_error": null
+          },
+          {
+            "id": 6,
+            "name": "Test Suites — customer-account-service — test-suites",
+            "source_type": "TEST_SUITE_FOLDER",
+            "location": "D:/AIlearning/customer-account-service/test-suites",
+            "project_path": "D:/AIlearning/customer-account-service",
+            "config": {},
+            "enabled": true,
+            "last_cursor": null,
+            "last_sync_at": "2026-10-31T15:58:15.178516",
+            "last_status": "SUCCESS",
+            "last_error": null
+          }
+        ],
+        "all_source_count": 6
+      }
+    },
+    {
+      "name": "source_ids_unique",
+      "status": "PASS",
+      "details": {
+        "ids": [
+          1,
+          2,
+          3,
+          4,
+          5,
+          6
+        ]
+      }
+    },
+    {
+      "name": "cross_project_folder_collisions",
+      "status": "PASS",
+      "details": {
+        "collisions": []
+      }
+    },
+    {
+      "name": "cross_project_jira_conflicts",
+      "status": "PASS",
+      "details": {
+        "conflicts": []
+      }
+    },
+    {
+      "name": "knowledge_sync_runs",
+      "status": "PASS",
+      "details": {
+        "count": 50,
+        "recent_runs": [
+          {
+            "id": 1751,
+            "source_id": 6,
+            "trigger": "SCHEDULED",
+            "status": "SUCCESS",
+            "discovered": 3,
+            "created": 0,
+            "updated": 0,
+            "skipped": 3,
+            "failed": 0,
+            "started_at": "2026-10-31T15:58:15.137903",
+            "completed_at": "2026-10-31T15:58:15.178494"
+          },
+          {
+            "id": 1750,
+            "source_id": 5,
+            "trigger": "SCHEDULED",
+            "status": "SUCCESS",
+            "discovered": 8,
+            "created": 0,
+            "updated": 0,
+            "skipped": 8,
+            "failed": 0,
+            "started_at": "2026-10-31T15:58:14.437319",
+            "completed_at": "2026-10-31T15:58:15.118923"
+          },
+          {
+            "id": 1749,
+            "source_id": 4,
+            "trigger": "SCHEDULED",
+            "status": "SUCCESS",
+            "discovered": 5,
+            "created": 0,
+            "updated": 0,
+            "skipped": 5,
+            "failed": 0,
+            "started_at": "2026-10-31T15:58:14.368358",
+            "completed_at": "2026-10-31T15:58:14.427340"
+          },
+          {
+            "id": 1748,
+            "source_id": 5,
+            "trigger": "MANUAL",
+            "status": "SUCCESS",
+            "discovered": 8,
+            "created": 0,
+            "updated": 0,
+            "skipped": 8,
+            "failed": 0,
+            "started_at": "2026-10-31T15:55:39.191473",
+            "completed_at": "2026-10-31T15:55:40.095988"
+          },
+          {
+            "id": 1747,
+            "source_id": 6,
+            "trigger": "SCHEDULED",
+            "status": "SUCCESS",
+            "discovered": 3,
+            "created": 0,
+            "updated": 0,
+            "skipped": 3,
+            "failed": 0,
+            "started_at": "2026-10-31T15:43:14.317998",
+            "completed_at": "2026-10-31T15:43:14.343748"
+          },
+          {
+            "id": 1746,
+            "source_id": 5,
+            "trigger": "SCHEDULED",
+            "status": "FAILED",
+            "discovered": 0,
+            "created": 0,
+            "updated": 0,
+            "skipped": 0,
+            "failed": 1,
+            "started_at": "2026-10-31T15:43:14.308561",
+            "completed_at": "2026-10-31T15:43:14.313716"
+          },
+          {
+            "id": 1745,
+            "source_id": 4,
+            "trigger": "SCHEDULED",
+            "status": "SUCCESS",
+            "discovered": 5,
+            "created": 0,
+            "updated": 0,
+            "skipped": 5,
+            "failed": 0,
+            "started_at": "2026-10-31T15:43:14.266817",
+            "completed_at": "2026-10-31T15:43:14.302377"
+          },
+          {
+            "id": 1744,
+            "source_id": 1,
+            "trigger": "SCHEDULED",
+            "status": "FAILED",
+            "discovered": 0,
+            "created": 0,
+            "updated": 0,
+            "skipped": 0,
+            "failed": 1,
+            "started_at": "2026-10-31T15:43:14.230314",
+            "completed_at": "2026-10-31T15:43:14.254450"
+          },
+          {
+            "id": 1743,
+            "source_id": 6,
+            "trigger": "SCHEDULED",
+            "status": "SUCCESS",
+            "discovered": 3,
+            "created": 0,
+            "updated": 0,
+            "skipped": 3,
+            "failed": 0,
+            "started_at": "2026-10-31T15:29:51.062020",
+            "completed_at": "2026-10-31T15:29:51.115941"
+          },
+          {
+            "id": 1742,
+            "source_id": 5,
+            "trigger": "SCHEDULED",
+            "status": "SUCCESS",
+            "discovered": 8,
+            "created": 0,
+            "updated": 8,
+            "skipped": 0,
+            "failed": 0,
+            "started_at": "2026-10-31T15:29:49.104885",
+            "completed_at": "2026-10-31T15:29:51.049551"
+          },
+          {
+            "id": 1741,
+            "source_id": 4,
+            "trigger": "SCHEDULED",
+            "status": "SUCCESS",
+            "discovered": 5,
+            "created": 0,
+            "updated": 0,
+            "skipped": 5,
+            "failed": 0,
+            "started_at": "2026-10-31T15:29:49.031146",
+            "completed_at": "2026-10-31T15:29:49.091310"
+          },
+          {
+            "id": 1740,
+            "source_id": 1,
+            "trigger": "SCHEDULED",
+            "status": "SUCCESS",
+            "discovered": 8,
+            "created": 0,
+            "updated": 8,
+            "skipped": 0,
+            "failed": 0,
+            "started_at": "2026-10-31T15:29:46.195489",
+            "completed_at": "2026-10-31T15:29:49.008313"
+          },
+          {
+            "id": 1739,
+            "source_id": 6,
+            "trigger": "SCHEDULED",
+            "status": "SUCCESS",
+            "discovered": 3,
+            "created": 0,
+            "updated": 0,
+            "skipped": 3,
+            "failed": 0,
+            "started_at": "2026-10-31T15:16:15.006808",
+            "completed_at": "2026-10-31T15:16:15.029228"
+          },
+          {
+            "id": 1738,
+            "source_id": 5,
+            "trigger": "SCHEDULED",
+            "status": "SUCCESS",
+            "discovered": 8,
+            "created": 0,
+            "updated": 8,
+            "skipped": 0,
+            "failed": 0,
+            "started_at": "2026-10-31T15:16:13.734566",
+            "completed_at": "2026-10-31T15:16:14.991406"
+          },
+          {
+            "id": 1737,
+            "source_id": 4,
+            "trigger": "SCHEDULED",
+            "status": "SUCCESS",
+            "discovered": 5,
+            "created": 0,
+            "updated": 0,
+            "skipped": 5,
+            "failed": 0,
+            "started_at": "2026-10-31T15:16:13.695147",
+            "completed_at": "2026-10-31T15:16:13.727271"
+          }
+        ]
+      }
+    },
+    {
+      "name": "investigation_parity_accountType",
+      "status": "PASS",
+      "details": {
+        "source": "COMBINED_ATTRIBUTE_EVIDENCE",
+        "attribute": "accountType",
+        "snapshot_source_equal": true,
+        "snapshot_attribute_equal": true,
+        "events": [
+          "RUN_STARTED",
+          "STEP_STARTED",
+          "STEP_FINISHED",
+          "STEP_STARTED",
+          "TOOL_EVIDENCE",
+          "TOOL_EVIDENCE",
+          "TOOL_EVIDENCE",
+          "TOOL_EVIDENCE",
+          "TOOL_EVIDENCE",
+          "TOOL_EVIDENCE",
+          "TOOL_EVIDENCE",
+          "TOOL_EVIDENCE",
+          "STEP_FINISHED",
+          "STATE_SNAPSHOT",
+          "RUN_FINISHED"
+        ],
+        "panel_fields": [
+          "predictive_api_candidates",
+          "predictive_scenario_candidates",
+          "mapping_rows",
+          "mapping_documents",
+          "project_release_baselines",
+          "predictive_impact.regression_recommendations",
+          "predictive_impact.risk_summary",
+          "predictive_impact.mapping_contract_checks"
+        ],
+        "mapping_rows": 4,
+        "api_candidates": 8,
+        "note": "This compares two backend endpoints, not rendered IntelliJ/Web UI screenshots."
+      }
+    },
+    {
+      "name": "investigation_parity_email",
+      "status": "PASS",
+      "details": {
+        "source": "COMBINED_ATTRIBUTE_EVIDENCE",
+        "attribute": "email",
+        "snapshot_source_equal": true,
+        "snapshot_attribute_equal": true,
+        "events": [
+          "RUN_STARTED",
+          "STEP_STARTED",
+          "STEP_FINISHED",
+          "STEP_STARTED",
+          "TOOL_EVIDENCE",
+          "TOOL_EVIDENCE",
+          "TOOL_EVIDENCE",
+          "TOOL_EVIDENCE",
+          "TOOL_EVIDENCE",
+          "TOOL_EVIDENCE",
+          "TOOL_EVIDENCE",
+          "TOOL_EVIDENCE",
+          "STEP_FINISHED",
+          "STATE_SNAPSHOT",
+          "RUN_FINISHED"
+        ],
+        "panel_fields": [
+          "predictive_api_candidates",
+          "predictive_scenario_candidates",
+          "mapping_rows",
+          "mapping_documents",
+          "project_release_baselines",
+          "predictive_impact.regression_recommendations",
+          "predictive_impact.risk_summary",
+          "predictive_impact.mapping_contract_checks"
+        ],
+        "mapping_rows": 3,
+        "api_candidates": 6,
+        "note": "This compares two backend endpoints, not rendered IntelliJ/Web UI screenshots."
+      }
+    }
+  ],
+  "notes": [
+    "Read-only checks do not establish automatic refresh, actual source correctness, or UI rendering parity."
+  ],
+  "counts": {
+    "PASS": 7,
+    "REVIEW": 0,
+    "FAIL": 0,
+    "ERROR": 0
+  }
+}
