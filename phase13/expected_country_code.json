@@ -1,0 +1,7 @@
+{
+  "scenario": "Customer Account Service countryCode normalization change",
+  "approved": false,
+  "must_mention": ["countryCode"],
+  "must_not_mention": [],
+  "review_notes": "Draft only. Populate verified impacted methods, mapping paths, JIRA IDs, and baseline/test IDs from the actual repository before setting approved=true."
+}

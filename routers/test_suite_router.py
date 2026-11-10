@@ -80,6 +80,34 @@ def _jira_attachment_bytes(sync, attachment_id: str, content_url: str) -> bytes:
     raise ValueError('Jira attachment download failed: ' + '; '.join(failures))
 
 
+@router.get('/documents')
+def documents(project_path: str, sync: bool = True, include_history: bool = False,
+              db: Session = Depends(get_db)):
+    """Shared project-scoped folder-authoritative QA document response for Web and IntelliJ."""
+    from db_models import KnowledgeSyncSource
+    from services.knowledge.test_suite_service import normalize_project_path
+    if not project_path.strip():
+        raise HTTPException(400, 'project_path is required')
+    reports = []
+    if sync:
+        engine = EnterpriseKnowledgeSyncService()
+        sources = db.query(KnowledgeSyncSource).filter(
+            KnowledgeSyncSource.source_type == 'TEST_SUITE_FOLDER').all()
+        for source in sources:
+            if normalize_project_path(source.project_path) != normalize_project_path(project_path):
+                continue
+            if not engine._enabled(source):
+                continue
+            try:
+                reports.append(engine.sync_source(db, source.id, trigger='DOCUMENTS_READ', rebuild_indexes=False))
+            except Exception as exc:
+                db.rollback()
+                reports.append({'source_id': source.id, 'status': 'FAILED', 'error': str(exc)})
+    result = registry.list_project_documents(db, project_path, include_history=include_history)
+    result['sync'] = {'sources': reports}
+    return result
+
+
 @router.get('/search')
 def search(project_path: str, jira: str = '', attribute: str = '', db: Session = Depends(get_db)):
     if not project_path.strip():

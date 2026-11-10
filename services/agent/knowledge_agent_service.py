@@ -163,12 +163,12 @@ Base the final answer only on returned tool evidence. Be concise and name the ev
 class KnowledgeAgentService:
     """LangGraph tool-calling agent. The model chooses tools; LangGraph executes the loop."""
 
-    def run(self, db: Session, query: str) -> dict[str, Any]:
+    def run(self, db: Session, query: str, project_path: str | None = None) -> dict[str, Any]:
         query = str(query or "").strip()
         if not query:
             raise ValueError("query is required")
 
-        registry = KnowledgeToolRegistry(db)
+        registry = KnowledgeToolRegistry(db, project_path=project_path)
         tools = registry.tools()
 
         # Deterministic routing guarantees authoritative evidence sources that the

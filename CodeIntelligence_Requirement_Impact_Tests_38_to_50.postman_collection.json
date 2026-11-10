@@ -1,0 +1,605 @@
+{
+  "info": {
+    "name": "CodeIntelligence Requirement Impact Validation \u2014 Tests 38\u201350",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "description": "Tests 40 and 43 reproduce known exact requirements; Tests 38,39,41,42 are reconstructed scenarios, not recovered original prompts. Tests 44\u201350 are new edge cases. Requires indexed Java project and running FastAPI."
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://127.0.0.1:8081"
+    }
+  ],
+  "item": [
+    {
+      "name": "Test 38 \u2014 Validation recommendations \u2014 reconstructed",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"mode\": \"requirement\",\n  \"value\": \"Modify countryCode validation to accept only IN, US and GB and reject CA and FR. Preserve lowercase-to-uppercase normalization. Identify impacted Java classes, methods, endpoints, existing test scenarios, and regression tests. Do not modify email validation, accountType mapping or customer deletion behavior.\",\n  \"project\": \"D:\\\\AIlearning\\\\customer-account-service\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/requirement-impact/analyze",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "requirement-impact",
+            "analyze"
+          ]
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('HTTP 200', function () { pm.response.to.have.status(200); });",
+              "pm.test('JSON response', function () { pm.response.to.be.json; });",
+              "pm.test('Response has status', function () { const r=pm.response.json(); pm.expect(r).to.have.property('status'); });"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Test 39 \u2014 Historical traceability \u2014 reconstructed",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"mode\": \"requirement\",\n  \"value\": \"For the customer countryCode validation change, identify verified Java methods, API endpoints, mapping paths, historical scenarios, test baselines and linked JIRA evidence. Distinguish verified evidence from inferred impact. Do not invent missing historical records.\",\n  \"project\": \"D:\\\\AIlearning\\\\customer-account-service\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/requirement-impact/analyze",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "requirement-impact",
+            "analyze"
+          ]
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('HTTP 200', function () { pm.response.to.have.status(200); });",
+              "pm.test('JSON response', function () { pm.response.to.be.json; });",
+              "pm.test('Response has status', function () { const r=pm.response.json(); pm.expect(r).to.have.property('status'); });"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Test 40 \u2014 Contradictory countryCode rules \u2014 exact",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"mode\": \"requirement\",\n  \"value\": \"Update customer countryCode validation to accept only IN, US and GB. Reject CA and FR. However, for backward compatibility, continue accepting CA and FR for existing customers and all new customer creation requests. The validation must be identical for both create and update operations. Preserve lowercase-to-uppercase normalization. Do not modify email validation, accountType mapping or customer deletion behavior. Identify impacted Java classes, methods, API endpoints, mappings, historical scenarios and regression tests. Detect and report any contradictory requirements before recommending implementation changes.\",\n  \"project\": \"D:\\\\AIlearning\\\\customer-account-service\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/requirement-impact/analyze",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "requirement-impact",
+            "analyze"
+          ]
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('HTTP 200', function () { pm.response.to.have.status(200); });",
+              "pm.test('JSON response', function () { pm.response.to.be.json; });",
+              "pm.test('Response has status', function () { const r=pm.response.json(); pm.expect(r).to.have.property('status'); });",
+              "pm.test('Clarification required', function () { const r=pm.response.json(); pm.expect(r.status).to.eql('CLARIFICATION_REQUIRED'); pm.expect(r.clarification_required || (r.requirement_intent && r.requirement_intent.clarification_required)).to.eql(true); });",
+              "pm.test('Conflicting values CA and FR identified', function () { const r=pm.response.json(); const cs=r.requirement_conflicts || (r.requirement_intent && r.requirement_intent.instruction_conflicts) || []; const s=JSON.stringify(cs); pm.expect(s).to.include('CA'); pm.expect(s).to.include('FR'); });"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Test 41 \u2014 API scope and impact \u2014 reconstructed",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"mode\": \"requirement\",\n  \"value\": \"Update countryCode validation in customer creation and update operations to accept only IN, US and GB, reject CA and FR, and normalize lowercase values to uppercase. Identify which API operations need implementation changes versus regression-only checks. Do not change customer retrieval, deletion, email validation or accountType mapping.\",\n  \"project\": \"D:\\\\AIlearning\\\\customer-account-service\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/requirement-impact/analyze",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "requirement-impact",
+            "analyze"
+          ]
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('HTTP 200', function () { pm.response.to.have.status(200); });",
+              "pm.test('JSON response', function () { pm.response.to.be.json; });",
+              "pm.test('Response has status', function () { const r=pm.response.json(); pm.expect(r).to.have.property('status'); });"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Test 42 \u2014 Mapping and regression coverage \u2014 reconstructed",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"mode\": \"requirement\",\n  \"value\": \"Change countryCode validation to accept only IN, US and GB and reject CA and FR. Trace the field across request DTO, controller, service, mapper, entity, persistence and response DTO where applicable. Identify direct modifications, inferred dependencies, missing implementation coverage, protected behaviors and specific regression tests. Preserve lowercase normalization and do not modify email validation, accountType mapping or customer deletion.\",\n  \"project\": \"D:\\\\AIlearning\\\\customer-account-service\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/requirement-impact/analyze",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "requirement-impact",
+            "analyze"
+          ]
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('HTTP 200', function () { pm.response.to.have.status(200); });",
+              "pm.test('JSON response', function () { pm.response.to.be.json; });",
+              "pm.test('Response has status', function () { const r=pm.response.json(); pm.expect(r).to.have.property('status'); });"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Test 43 \u2014 Optional customerTier plus countryCode \u2014 exact",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"mode\": \"requirement\",\n  \"value\": \"Enhance customer management by adding a new optional attribute customerTier with allowed values STANDARD, GOLD and PLATINUM. Accept customerTier in customer creation and update requests, persist it in the database, and return it in customer retrieval responses. Existing customers without customerTier must continue to work. Also update countryCode validation to accept only IN, US and GB, reject CA and FR, and preserve lowercase-to-uppercase normalization. Ensure that customerTier is correctly mapped across request DTO, service, mapper, entity, database and response DTO layers. Do not modify email validation, accountType mapping, or customer deletion behavior. Identify all impacted Java classes, methods, API endpoints, mappings, historical scenarios and regression tests. Distinguish verified code evidence from inferred impact, and report any missing implementation coverage.\",\n  \"project\": \"D:\\\\AIlearning\\\\customer-account-service\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/requirement-impact/analyze",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "requirement-impact",
+            "analyze"
+          ]
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('HTTP 200', function () { pm.response.to.have.status(200); });",
+              "pm.test('JSON response', function () { pm.response.to.be.json; });",
+              "pm.test('Response has status', function () { const r=pm.response.json(); pm.expect(r).to.have.property('status'); });"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Test 44 \u2014 No contradiction \u2014 same clause",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"mode\": \"requirement\",\n  \"value\": \"Update countryCode validation to accept only IN, US and GB and reject CA and FR. Keep lowercase-to-uppercase normalization. Identify relevant create/update impact and regression tests.\",\n  \"project\": \"D:\\\\AIlearning\\\\customer-account-service\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/requirement-impact/analyze",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "requirement-impact",
+            "analyze"
+          ]
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('HTTP 200', function () { pm.response.to.have.status(200); });",
+              "pm.test('JSON response', function () { pm.response.to.be.json; });",
+              "pm.test('Response has status', function () { const r=pm.response.json(); pm.expect(r).to.have.property('status'); });",
+              "pm.test('No false contradiction', function () { const r=pm.response.json(); pm.expect(r.status).not.to.eql('CLARIFICATION_REQUIRED'); });"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Test 45 \u2014 Explicit contradictory same-clause",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"mode\": \"requirement\",\n  \"value\": \"For countryCode, accept CA and FR but reject CA and FR. Identify the contradictory values and ask for clarification before proposing validation tests.\",\n  \"project\": \"D:\\\\AIlearning\\\\customer-account-service\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/requirement-impact/analyze",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "requirement-impact",
+            "analyze"
+          ]
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('HTTP 200', function () { pm.response.to.have.status(200); });",
+              "pm.test('JSON response', function () { pm.response.to.be.json; });",
+              "pm.test('Response has status', function () { const r=pm.response.json(); pm.expect(r).to.have.property('status'); });",
+              "pm.test('Clarification required', function () { const r=pm.response.json(); pm.expect(r.status).to.eql('CLARIFICATION_REQUIRED'); pm.expect(r.clarification_required || (r.requirement_intent && r.requirement_intent.clarification_required)).to.eql(true); });",
+              "pm.test('Conflicting values CA and FR identified', function () { const r=pm.response.json(); const cs=r.requirement_conflicts || (r.requirement_intent && r.requirement_intent.instruction_conflicts) || []; const s=JSON.stringify(cs); pm.expect(s).to.include('CA'); pm.expect(s).to.include('FR'); });"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Test 46 \u2014 Protected unrelated behaviors",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"mode\": \"requirement\",\n  \"value\": \"Change only countryCode validation in customer creation and update requests. Preserve email validation, accountType mapping and customer deletion behavior. Identify any regression-only checks separately from code changes.\",\n  \"project\": \"D:\\\\AIlearning\\\\customer-account-service\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/requirement-impact/analyze",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "requirement-impact",
+            "analyze"
+          ]
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('HTTP 200', function () { pm.response.to.have.status(200); });",
+              "pm.test('JSON response', function () { pm.response.to.be.json; });",
+              "pm.test('Response has status', function () { const r=pm.response.json(); pm.expect(r).to.have.property('status'); });"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Test 47 \u2014 Optional attribute backwards compatibility",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"mode\": \"requirement\",\n  \"value\": \"Add optional customerTier with STANDARD, GOLD and PLATINUM values for create and update requests. Persist it and return it in retrieval responses. Existing customers without customerTier must remain supported. Identify missing mapping and migration coverage.\",\n  \"project\": \"D:\\\\AIlearning\\\\customer-account-service\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/requirement-impact/analyze",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "requirement-impact",
+            "analyze"
+          ]
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('HTTP 200', function () { pm.response.to.have.status(200); });",
+              "pm.test('JSON response', function () { pm.response.to.be.json; });",
+              "pm.test('Response has status', function () { const r=pm.response.json(); pm.expect(r).to.have.property('status'); });"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Test 48 \u2014 Evidence integrity",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"mode\": \"requirement\",\n  \"value\": \"For countryCode, show the source methods and endpoints that actually exist in the indexed Java project, plus available historical baselines and JIRA evidence. Clearly label inferred impacts and unavailable evidence; do not invent classes, methods, issues or baselines.\",\n  \"project\": \"D:\\\\AIlearning\\\\customer-account-service\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/requirement-impact/analyze",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "requirement-impact",
+            "analyze"
+          ]
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('HTTP 200', function () { pm.response.to.have.status(200); });",
+              "pm.test('JSON response', function () { pm.response.to.be.json; });",
+              "pm.test('Response has status', function () { const r=pm.response.json(); pm.expect(r).to.have.property('status'); });"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Test 49 \u2014 Normalization case regression",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"mode\": \"requirement\",\n  \"value\": \"For countryCode validation, accept IN, US and GB case-insensitively by normalizing lowercase input to uppercase, and reject CA and FR. Recommend create/update boundary tests, invalid values and null handling based on actual source evidence.\",\n  \"project\": \"D:\\\\AIlearning\\\\customer-account-service\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/requirement-impact/analyze",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "requirement-impact",
+            "analyze"
+          ]
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('HTTP 200', function () { pm.response.to.have.status(200); });",
+              "pm.test('JSON response', function () { pm.response.to.be.json; });",
+              "pm.test('Response has status', function () { const r=pm.response.json(); pm.expect(r).to.have.property('status'); });"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Test 50 \u2014 Non-conflicting exception policy",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"mode\": \"requirement\",\n  \"value\": \"Accept only IN, US and GB for new customers. For existing customers during update, also accept CA and FR as legacy values. Explicitly report that create and update policies differ. Identify API impact and regression tests without falsely flagging the exception as a contradiction.\",\n  \"project\": \"D:\\\\AIlearning\\\\customer-account-service\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/requirement-impact/analyze",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "requirement-impact",
+            "analyze"
+          ]
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('HTTP 200', function () { pm.response.to.have.status(200); });",
+              "pm.test('JSON response', function () { pm.response.to.be.json; });",
+              "pm.test('Response has status', function () { const r=pm.response.json(); pm.expect(r).to.have.property('status'); });"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ]
+    }
+  ]
+}

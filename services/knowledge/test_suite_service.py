@@ -87,6 +87,11 @@ def parse_test_cases(filename: str, data: bytes, jira_key: str | None = None) ->
     return cases
 
 
+def normalize_project_path(value: str | None) -> str:
+    """Normalize Windows paths, including historically doubled separators."""
+    return re.sub(r"/+", "/", str(value or "").strip().replace("\\", "/")).rstrip("/").casefold()
+
+
 class TestSuiteService:
     def ingest(self, db: Session, *, filename: str, data: bytes, project_path: str,
                source_ref: str, jira_key: str | None = None, source_kind: str = 'FOLDER',
@@ -95,12 +100,15 @@ class TestSuiteService:
         if not cases:
             return {'status': 'NO_TEST_CASES', 'cases': 0, 'filename': filename}
         digest = hashlib.sha256(data).hexdigest()
-        old = db.query(KnowledgeDocument).filter(
-            KnowledgeDocument.project_path == project_path,
+        old = [row for row in db.query(KnowledgeDocument).filter(
             KnowledgeDocument.source_ref == source_ref,
             KnowledgeDocument.source_type == 'TEST',
             KnowledgeDocument.status == 'ACTIVE').all()
+            if normalize_project_path(row.project_path) == normalize_project_path(project_path)]
         if any(json.loads(row.metadata_json or '{}').get('sha256') == digest for row in old):
+            for row in old:
+                row.project_path = project_path
+            db.commit()
             return {'status': 'UNCHANGED', 'cases': len(cases), 'filename': filename}
         for row in old:
             row.status = 'SUPERSEDED'
@@ -113,14 +121,31 @@ class TestSuiteService:
         db.commit()
         return {'status': 'IMPORTED', 'cases': len(cases), 'filename': filename, 'document_id': doc.id}
 
+    def list_project_documents(self, db: Session, project_path: str, include_history: bool = False) -> dict:
+        rows = db.query(KnowledgeDocument).filter(KnowledgeDocument.source_type == 'TEST').order_by(KnowledgeDocument.id.desc()).all()
+        records = []
+        for row in rows:
+            if normalize_project_path(row.project_path) != normalize_project_path(project_path):
+                continue
+            if not include_history and row.status != 'ACTIVE':
+                continue
+            meta = json.loads(row.metadata_json or '{}')
+            records.append({'id': row.id, 'filename': row.title, 'title': row.title,
+                            'source_ref': row.source_ref, 'project_path': row.project_path,
+                            'status': row.status, 'source_kind': meta.get('source_kind'),
+                            'source_id': meta.get('source_id'), 'case_count': len(meta.get('cases') or []),
+                            'checksum_sha256': meta.get('sha256'),
+                            'jira': meta.get('jira')})
+        return {'project_path': project_path, 'documents': records,
+                'record_count': len(records),
+                'distinct_file_count': len({(r['source_ref'] or r['filename']).casefold() for r in records})}
+
     def search(self, db: Session, *, project_path: str, jira: str = '', attribute: str = '', limit: int = 100) -> dict:
         # IntelliJ and backend may supply the same Windows path with different case or separators.
         # Keep retrieval project-scoped; never silently include another project.
-        def scope(value: str) -> str:
-            return re.sub(r'/+', '/', str(value or '').strip().replace('\\', '/')).rstrip('/').casefold()
         rows = db.query(KnowledgeDocument).filter(
             KnowledgeDocument.source_type == 'TEST', KnowledgeDocument.status == 'ACTIVE').all()
-        rows = [row for row in rows if scope(row.project_path) == scope(project_path)]
+        rows = [row for row in rows if normalize_project_path(row.project_path) == normalize_project_path(project_path)]
         found = []
         for doc in rows:
             meta = json.loads(doc.metadata_json or '{}')

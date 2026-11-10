@@ -1,0 +1,2290 @@
+{
+  "generated_at": "2026-11-04T11:07:55.263422+00:00",
+  "project": "D:\\AIlearning\\customer-account-service",
+  "base": "http://127.0.0.1:8081",
+  "checks": [
+    {
+      "check": "API mapping_documents",
+      "result": "PASS",
+      "detail": "HTTP 200; 190.68 ms; "
+    },
+    {
+      "check": "API test_documents",
+      "result": "PASS",
+      "detail": "HTTP 200; 18.01 ms; "
+    },
+    {
+      "check": "API knowledge_sources",
+      "result": "PASS",
+      "detail": "HTTP 200; 45.95 ms; "
+    },
+    {
+      "check": "API impact",
+      "result": "PASS",
+      "detail": "HTTP 200; 251.24 ms; "
+    },
+    {
+      "check": "mapping project isolation",
+      "result": "PASS",
+      "detail": "9 mapping records"
+    },
+    {
+      "check": "mapping documents present",
+      "result": "PASS",
+      "detail": "9 records; 8 unique filenames"
+    },
+    {
+      "check": "mapping row evidence",
+      "result": "PASS",
+      "detail": "At least one imported mapping has rows"
+    },
+    {
+      "check": "test documents returned",
+      "result": "PASS",
+      "detail": "keys: ['project_path', 'documents', 'record_count', 'distinct_file_count', 'sync']"
+    },
+    {
+      "check": "impact response structure",
+      "result": "PASS",
+      "detail": "keys: ['status', 'mode', 'input', 'project', 'jira', 'attributes', 'historical_jiras', 'mappings', 'mapping_documents', 'scenarios', 'code_impact', 'java_evidence', 'affected_operations', 'operation_evidence', 'git_commits', 'verified_code_changes', 'test_cases', 'evidence_warnings', 'mapping_conflicts', 'regression_recommendations']"
+    },
+    {
+      "check": "ground truth approved",
+      "result": "NOT_EVALUATED",
+      "detail": "Expected evidence is a draft. Verify actual code/JIRA/test IDs and set approved=true."
+    },
+    {
+      "check": "concurrent API reliability",
+      "result": "PASS",
+      "detail": "30/30 HTTP successes"
+    },
+    {
+      "check": "mapping API p95 <= 2000ms",
+      "result": "PASS",
+      "detail": "p95=116.62ms (local development target, adjust for hardware)"
+    },
+    {
+      "check": "read-only result stability",
+      "result": "PASS",
+      "detail": "9 records before, 9 after"
+    }
+  ],
+  "load": {
+    "requests": 30,
+    "workers": 5,
+    "success": 30,
+    "failed": 0,
+    "p50_ms": 24.735,
+    "p95_ms": 116.62,
+    "max_ms": 143.73
+  },
+  "api_responses": {
+    "mapping_documents": {
+      "ok": true,
+      "code": 200,
+      "ms": 190.68,
+      "body": {
+        "documents": [
+          {
+            "id": 18,
+            "filename": "customer-field-mapping_v2.xlsx",
+            "title": "customer-field-mapping_v2",
+            "mapping_family": "customer-field-mapping",
+            "document_version": "V2",
+            "source_ref": "D:\\AIlearning\\customer-account-service\\docs\\customer-field-mapping_v2.xlsx",
+            "project_path": "D:\\AIlearning\\customer-account-service",
+            "sheet_count": 1,
+            "row_count": 3,
+            "status": "ACTIVE",
+            "created_at": "2026-11-04T10:20:45.730211"
+          },
+          {
+            "id": 17,
+            "filename": "customer-field-mapping_v1.xlsx",
+            "title": "customer-field-mapping_v1",
+            "mapping_family": "customer-field-mapping",
+            "document_version": "V1",
+            "source_ref": "D:\\AIlearning\\customer-account-service\\docs\\customer-field-mapping_v1.xlsx",
+            "project_path": "D:\\AIlearning\\customer-account-service",
+            "sheet_count": 1,
+            "row_count": 3,
+            "status": "ACTIVE",
+            "created_at": "2026-11-04T10:12:42.479973"
+          },
+          {
+            "id": 16,
+            "filename": "Customer_Account_Service_Mapping_V4.xlsx",
+            "title": "Customer_Account_Service_Mapping_V4",
+            "mapping_family": "Customer_Account_Service_Mapping",
+            "document_version": "V4",
+            "source_ref": "D:\\AIlearning\\customer-account-service\\docs\\Customer_Account_Service_Mapping_V4.xlsx",
+            "project_path": "D:\\AIlearning\\customer-account-service",
+            "sheet_count": 2,
+            "row_count": 7,
+            "status": "ACTIVE",
+            "created_at": "2026-11-04T08:55:23.669819"
+          },
+          {
+            "id": 15,
+            "filename": "Customer_Account_Service_Mapping_V2.xlsx",
+            "title": "Customer_Account_Service_Mapping_V2",
+            "mapping_family": "Customer_Account_Service_Mapping",
+            "document_version": "V2",
+            "source_ref": "D:\\AIlearning\\customer-account-service\\docs\\Customer_Account_Service_Mapping_V2.xlsx",
+            "project_path": "D:\\AIlearning\\customer-account-service",
+            "sheet_count": 2,
+            "row_count": 7,
+            "status": "ACTIVE",
+            "created_at": "2026-11-04T08:54:38.470060"
+          },
+          {
+            "id": 14,
+            "filename": "Customer_Account_Service_Mapping_V3.xlsx",
+            "title": "Customer_Account_Service_Mapping_V3",
+            "mapping_family": "Customer_Account_Service_Mapping_V3",
+            "document_version": null,
+            "source_ref": "D:\\AIlearning\\customer-account-service\\docs\\Customer_Account_Service_Mapping_V3.xlsx",
+            "project_path": "D:\\AIlearning\\customer-account-service",
+            "sheet_count": 2,
+            "row_count": 7,
+            "status": "ACTIVE",
+            "created_at": "2026-10-30T11:07:59.570775"
+          },
+          {
+            "id": 12,
+            "filename": "customer-field-mapping.xlsx",
+            "title": "customer-field-mapping",
+            "mapping_family": "customer-field-mapping",
+            "document_version": null,
+            "source_ref": "D:\\AIlearning\\customer-account-service\\docs\\customer-field-mapping.xlsx",
+            "project_path": "D:\\AIlearning\\customer-account-service",
+            "sheet_count": 1,
+            "row_count": 3,
+            "status": "ACTIVE",
+            "created_at": "2026-10-25T05:35:37.050167"
+          },
+          {
+            "id": 10,
+            "filename": "Customer_Account_Service_Mapping_V1.xlsx",
+            "title": "Customer_Account_Service_Mapping_V1",
+            "mapping_family": "Customer_Account_Service_Mapping_V1",
+            "document_version": null,
+            "source_ref": "D:\\AIlearning\\customer-account-service\\docs\\Customer_Account_Service_Mapping_V1.xlsx",
+            "project_path": "D:\\AIlearning\\customer-account-service",
+            "sheet_count": 2,
+            "row_count": 7,
+            "status": "ACTIVE",
+            "created_at": "2026-10-21T11:22:27.022219"
+          },
+          {
+            "id": 8,
+            "filename": "Customer_Account_Service_Mapping_V1.xlsx",
+            "title": "Customer_Account_Service_Mapping_V1",
+            "mapping_family": "Customer_Account_Service_Mapping",
+            "document_version": "V1",
+            "source_ref": "D:\\AIlearning\\customer-account-service\\docs\\Customer_Account_Service_Mapping_V1.xlsx",
+            "project_path": "D:\\AIlearning\\customer-account-service",
+            "sheet_count": 2,
+            "row_count": 6,
+            "status": "ACTIVE",
+            "created_at": "2026-10-21T11:20:16.552290"
+          },
+          {
+            "id": 7,
+            "filename": "Customer_Account_Service_Mapping.xlsx",
+            "title": "Customer_Account_Service_Mapping",
+            "mapping_family": "Customer_Account_Service_Mapping",
+            "document_version": null,
+            "source_ref": "D:\\AIlearning\\customer-account-service\\docs\\Customer_Account_Service_Mapping.xlsx",
+            "project_path": "D:\\AIlearning\\customer-account-service",
+            "sheet_count": 2,
+            "row_count": 6,
+            "status": "ACTIVE",
+            "created_at": "2026-10-08T07:22:46.122444"
+          }
+        ],
+        "project_path": "D:\\AIlearning\\customer-account-service",
+        "sync": {
+          "sources": [],
+          "reconciliation": {
+            "status": "NOT_RUN",
+            "reason": "Read-only request"
+          },
+          "mode": "READ_ONLY",
+          "auto_sync_interval_seconds": 60
+        },
+        "record_count": 9,
+        "distinct_file_count": 8
+      }
+    },
+    "test_documents": {
+      "ok": true,
+      "code": 200,
+      "ms": 18.01,
+      "body": {
+        "project_path": "D:\\AIlearning\\customer-account-service",
+        "documents": [
+          {
+            "id": 40,
+            "filename": "CAS-4_Test_Suite_1.xlsx",
+            "title": "CAS-4_Test_Suite_1.xlsx",
+            "source_ref": "D:\\AIlearning\\customer-account-service\\test-suites\\CAS-4\\CAS-4_Test_Suite_1.xlsx",
+            "project_path": "D:/AIlearning/customer-account-service",
+            "status": "ACTIVE",
+            "source_kind": "FOLDER",
+            "source_id": 6,
+            "case_count": 5,
+            "checksum_sha256": "8093efffa38e2b19f91612c0c7e4ddf1647951e5e795f4866cb1170fc82090fb",
+            "jira": null
+          },
+          {
+            "id": 28,
+            "filename": "CAS-4_Test_Suite.xlsx",
+            "title": "CAS-4_Test_Suite.xlsx",
+            "source_ref": "jira:CAS-4:attachment:10034",
+            "project_path": "D:/AIlearning/customer-account-service",
+            "status": "ACTIVE",
+            "source_kind": "JIRA",
+            "source_id": null,
+            "case_count": 5,
+            "checksum_sha256": "8093efffa38e2b19f91612c0c7e4ddf1647951e5e795f4866cb1170fc82090fb",
+            "jira": "CAS-4"
+          },
+          {
+            "id": 27,
+            "filename": "CAS-4_Test_Suite.xlsx",
+            "title": "CAS-4_Test_Suite.xlsx",
+            "source_ref": "D:\\AIlearning\\customer-account-service\\test-suites\\CAS-4\\CAS-4_Test_Suite.xlsx",
+            "project_path": "D:/AIlearning/customer-account-service",
+            "status": "ACTIVE",
+            "source_kind": "FOLDER",
+            "source_id": 6,
+            "case_count": 5,
+            "checksum_sha256": "8093efffa38e2b19f91612c0c7e4ddf1647951e5e795f4866cb1170fc82090fb",
+            "jira": null
+          },
+          {
+            "id": 26,
+            "filename": "CAS-3_Test_Suite.xlsx",
+            "title": "CAS-3_Test_Suite.xlsx",
+            "source_ref": "jira:CAS-3:attachment:10033",
+            "project_path": "D:/AIlearning/customer-account-service",
+            "status": "ACTIVE",
+            "source_kind": "JIRA",
+            "source_id": null,
+            "case_count": 6,
+            "checksum_sha256": "43e35ee399cfd58575e2187ce0af293627f6eb990082e481402e87afb2a9f620",
+            "jira": "CAS-3"
+          },
+          {
+            "id": 25,
+            "filename": "CAS-3_Test_Suite.xlsx",
+            "title": "CAS-3_Test_Suite.xlsx",
+            "source_ref": "D:\\AIlearning\\customer-account-service\\test-suites\\CAS-3\\CAS-3_Test_Suite.xlsx",
+            "project_path": "D:/AIlearning/customer-account-service",
+            "status": "ACTIVE",
+            "source_kind": "FOLDER",
+            "source_id": 6,
+            "case_count": 6,
+            "checksum_sha256": "43e35ee399cfd58575e2187ce0af293627f6eb990082e481402e87afb2a9f620",
+            "jira": null
+          },
+          {
+            "id": 24,
+            "filename": "CAS-2_Test_Suite.xlsx",
+            "title": "CAS-2_Test_Suite.xlsx",
+            "source_ref": "jira:CAS-2:attachment:10000",
+            "project_path": "D:/AIlearning/customer-account-service",
+            "status": "ACTIVE",
+            "source_kind": "JIRA",
+            "source_id": null,
+            "case_count": 10,
+            "checksum_sha256": "0d6f28343b8491bce86d12fac0beaa6394917cc2b6423556f57488ef6587aebc",
+            "jira": "CAS-2"
+          },
+          {
+            "id": 23,
+            "filename": "CAS-2_Test_Suite_With_Results.xlsx",
+            "title": "CAS-2_Test_Suite_With_Results.xlsx",
+            "source_ref": "D:\\AIlearning\\customer-account-service\\test-suites\\CAS-2\\CAS-2_Test_Suite_With_Results.xlsx",
+            "project_path": "D:/AIlearning/customer-account-service",
+            "status": "ACTIVE",
+            "source_kind": "FOLDER",
+            "source_id": null,
+            "case_count": 10,
+            "checksum_sha256": "e34fe76b4cc74c9d66365e382e218697a098a1b2dc4e571bc51e7d845ab5afd3",
+            "jira": null
+          }
+        ],
+        "record_count": 7,
+        "distinct_file_count": 7,
+        "sync": {
+          "sources": []
+        }
+      }
+    },
+    "knowledge_sources": {
+      "ok": true,
+      "code": 200,
+      "ms": 45.95,
+      "body": {
+        "auto_sync_enabled": true,
+        "interval_seconds": 900,
+        "sources": [
+          {
+            "id": 1,
+            "name": "JIRA",
+            "source_type": "JIRA",
+            "location": "https://vraju333.atlassian.net",
+            "project_path": "D:\\AIlearning\\student-employee-project",
+            "config": {
+              "jql": "project = CAS ORDER BY updated ASC"
+            },
+            "enabled": false,
+            "last_cursor": "2026-10-30T16:29:29.938+0530",
+            "last_sync_at": "2026-10-31T15:43:14.254465",
+            "last_status": "FAILED",
+            "last_error": "Jira project CAS has active sources 1 and 5 assigned to different code projects. Disable or correct the wrong source; sync stopped to protect project isolation."
+          },
+          {
+            "id": 2,
+            "name": "Mappings",
+            "source_type": "MAPPING_FOLDER",
+            "location": "D:\\AIlearning\\docs",
+            "project_path": "D:\\AIlearning\\student-employee-project",
+            "config": {},
+            "enabled": false,
+            "last_cursor": null,
+            "last_sync_at": "2026-10-08T06:03:40.934404",
+            "last_status": "SUCCESS",
+            "last_error": null
+          },
+          {
+            "id": 3,
+            "name": "Customer Account Jira",
+            "source_type": "JIRA",
+            "location": "https://vraju333.atlassian.net",
+            "project_path": "jira://CAS",
+            "config": {
+              "project_key": "CAS"
+            },
+            "enabled": false,
+            "last_cursor": "2026-10-07T19:55:00.248+0530",
+            "last_sync_at": "2026-10-08T15:53:09.797907",
+            "last_status": "SUCCESS",
+            "last_error": null
+          },
+          {
+            "id": 4,
+            "name": "Customer Account Mapping",
+            "source_type": "MAPPING_FOLDER",
+            "location": "D:/AIlearning/customer-account-service/docs",
+            "project_path": "D:/AIlearning/customer-account-service",
+            "config": {},
+            "enabled": true,
+            "last_cursor": null,
+            "last_sync_at": "2026-11-04T11:00:21.026658",
+            "last_status": "SUCCESS",
+            "last_error": null
+          },
+          {
+            "id": 5,
+            "name": "Customer Account JIRA",
+            "source_type": "JIRA",
+            "location": "https://vraju333.atlassian.net/",
+            "project_path": "D:/AIlearning/customer-account-service",
+            "config": {
+              "project_key": "CAS"
+            },
+            "enabled": true,
+            "last_cursor": "2026-11-03T20:28:04.002+0530",
+            "last_sync_at": "2026-11-04T11:00:21.711275",
+            "last_status": "SUCCESS",
+            "last_error": null
+          },
+          {
+            "id": 6,
+            "name": "Test Suites — customer-account-service — test-suites",
+            "source_type": "TEST_SUITE_FOLDER",
+            "location": "D:/AIlearning/customer-account-service/test-suites",
+            "project_path": "D:/AIlearning/customer-account-service",
+            "config": {},
+            "enabled": true,
+            "last_cursor": null,
+            "last_sync_at": "2026-11-04T11:00:21.756386",
+            "last_status": "SUCCESS",
+            "last_error": null
+          }
+        ]
+      }
+    },
+    "impact": {
+      "ok": true,
+      "code": 200,
+      "ms": 251.24,
+      "body": {
+        "status": "FOUND",
+        "mode": "attribute",
+        "input": "countryCode",
+        "project": "D:\\AIlearning\\customer-account-service",
+        "jira": null,
+        "attributes": [
+          "countryCode"
+        ],
+        "historical_jiras": [
+          {
+            "jira_id": "CAS-1",
+            "summary": "Ingest customer account information from XML and persist it",
+            "matched_attributes": [
+              "countryCode"
+            ],
+            "matched_in": "indexed requirement",
+            "evidence_excerpt": "Customer Account Service should receive customer information in XML format.\nThe incoming customer information contains:\nCustomer ID\nFirst Name\nLast Name\nEmail\nCountry Code\nAccount Type\nThe service should validate the incoming customer information, map the XML data into the application's customer model, and persist the customer information in the database.\nThe service should expose an API to receive the customer XML payload and return a successful",
+            "relationship": "REQUIREMENT_ATTRIBUTE_MENTION"
+          },
+          {
+            "jira_id": "CAS-9",
+            "summary": "modify the code to populate the countryCode based on DB values",
+            "matched_attributes": [
+              "countryCode"
+            ],
+            "matched_in": "indexed requirement",
+            "evidence_excerpt": "Jira metadata: {\"status\": \"To Do\", \"issue_type\": \"Bug\", \"labels\": [], \"components\": [], \"fix_versions\": []}",
+            "relationship": "REQUIREMENT_ATTRIBUTE_MENTION"
+          },
+          {
+            "jira_id": "CAS-10",
+            "summary": "recode back to mapping for countryCode",
+            "matched_attributes": [
+              "countryCode"
+            ],
+            "matched_in": "indexed requirement",
+            "evidence_excerpt": "Jira metadata: {\"status\": \"To Do\", \"issue_type\": \"Bug\", \"labels\": [], \"components\": [], \"fix_versions\": []}",
+            "relationship": "REQUIREMENT_ATTRIBUTE_MENTION"
+          },
+          {
+            "jira_id": "CAS-2",
+            "summary": "Update Customer Country Code validation to accept exactly two letters",
+            "matched_attributes": [
+              "countryCode"
+            ],
+            "matched_in": "indexed requirement",
+            "evidence_excerpt": "Currently, the Customer Account Service accepts country codes containing 2 or 3 uppercase letters.\nThe requirement is to restrict country codes to exactly 2 letters, following the ISO 3166-1 alpha-2 format.\nAcceptance Criteria:\nAccept valid two-letter country codes such as\nIN\nand\nUS\n.\nReject three-letter country codes such as\nIND\nand\nUSA\n.\nReject single-letter country codes.\nContinue normalizing lowercase country codes to uppercase.\nEnsure custom",
+            "relationship": "REQUIREMENT_ATTRIBUTE_MENTION"
+          },
+          {
+            "jira_id": "CAS-5",
+            "summary": "enhance country code details",
+            "matched_attributes": [
+              "countryCode"
+            ],
+            "matched_in": "indexed requirement",
+            "evidence_excerpt": "Update country code for customer service to retreive from DB\n\nJira metadata: {\"status\": \"To Do\", \"issue_type\": \"Bug\", \"labels\": [], \"components\": [], \"fix_versions\": []}",
+            "relationship": "REQUIREMENT_ATTRIBUTE_MENTION"
+          },
+          {
+            "jira_id": "CAS-7",
+            "summary": "change accounType  udpation logic",
+            "matched_attributes": [
+              "countryCode"
+            ],
+            "matched_in": "indexed requirement",
+            "evidence_excerpt": "accountType should use the countryCode related value and suffix . if countcode is US accounttype should be like “US”+accounTypeName\n\nJira metadata: {\"status\": \"To Do\", \"issue_type\": \"Bug\", \"labels\": [], \"components\": [], \"fix_versions\": []}",
+            "relationship": "REQUIREMENT_ATTRIBUTE_MENTION"
+          }
+        ],
+        "mappings": [
+          {
+            "id": 31,
+            "source_type": "XML",
+            "source_path": "/CustomerAccount/CountryCode",
+            "mapping_rule": "Trim + uppercase; 2-3 letters",
+            "target_class": "Customer",
+            "target_attribute": "countryCode",
+            "target_expression": "Customer.countryCode",
+            "provenance": {
+              "document_id": 10,
+              "document": "Customer_Account_Service_Mapping_V1.xlsx",
+              "sheet": "Customer Mapping",
+              "row": 6,
+              "source_ref": "D:\\AIlearning\\customer-account-service\\docs\\Customer_Account_Service_Mapping_V1.xlsx"
+            }
+          },
+          {
+            "id": 51,
+            "source_type": "XML",
+            "source_path": "/CustomerAccount/CountryCode",
+            "mapping_rule": "Trim + uppercase; 2-3 letters",
+            "target_class": "Customer",
+            "target_attribute": "countryCode",
+            "target_expression": "Customer.countryCode",
+            "provenance": {
+              "document_id": 14,
+              "document": "Customer_Account_Service_Mapping_V3.xlsx",
+              "sheet": "Customer Mapping",
+              "row": 6,
+              "source_ref": "D:\\AIlearning\\customer-account-service\\docs\\Customer_Account_Service_Mapping_V3.xlsx"
+            }
+          },
+          {
+            "id": 12,
+            "source_type": "XML",
+            "source_path": "/CustomerAccount/CountryCode",
+            "mapping_rule": "Trim + uppercase; 2-3 letters",
+            "target_class": "Customer",
+            "target_attribute": "countryCode",
+            "target_expression": "Customer.countryCode",
+            "provenance": {
+              "document_id": 7,
+              "document": "Customer_Account_Service_Mapping.xlsx",
+              "sheet": "Customer Mapping",
+              "row": 6,
+              "source_ref": "D:\\AIlearning\\customer-account-service\\docs\\Customer_Account_Service_Mapping.xlsx"
+            }
+          },
+          {
+            "id": 18,
+            "source_type": "XML",
+            "source_path": "/CustomerAccount/CountryCode",
+            "mapping_rule": "Trim + uppercase; 2-3 letters",
+            "target_class": "Customer",
+            "target_attribute": "countryCode",
+            "target_expression": "Customer.countryCode",
+            "provenance": {
+              "document_id": 8,
+              "document": "Customer_Account_Service_Mapping_V1.xlsx",
+              "sheet": "Customer Mapping",
+              "row": 6,
+              "source_ref": "D:\\AIlearning\\customer-account-service\\docs\\Customer_Account_Service_Mapping_V1.xlsx"
+            }
+          },
+          {
+            "id": 58,
+            "source_type": "XML",
+            "source_path": "/CustomerAccount/CountryCode",
+            "mapping_rule": "Trim + uppercase; 2-3 letters",
+            "target_class": "Customer",
+            "target_attribute": "countryCode",
+            "target_expression": "Customer.countryCode",
+            "provenance": {
+              "document_id": 15,
+              "document": "Customer_Account_Service_Mapping_V2.xlsx",
+              "sheet": "Customer Mapping",
+              "row": 6,
+              "source_ref": "D:\\AIlearning\\customer-account-service\\docs\\Customer_Account_Service_Mapping_V2.xlsx"
+            }
+          },
+          {
+            "id": 65,
+            "source_type": "XML",
+            "source_path": "/CustomerAccount/CountryCode",
+            "mapping_rule": "Trim + uppercase; 2-3 letters",
+            "target_class": "Customer",
+            "target_attribute": "countryCode",
+            "target_expression": "Customer.countryCode",
+            "provenance": {
+              "document_id": 16,
+              "document": "Customer_Account_Service_Mapping_V4.xlsx",
+              "sheet": "Customer Mapping",
+              "row": 6,
+              "source_ref": "D:\\AIlearning\\customer-account-service\\docs\\Customer_Account_Service_Mapping_V4.xlsx"
+            }
+          }
+        ],
+        "mapping_documents": [
+          {
+            "document_id": 10,
+            "title": "Customer_Account_Service_Mapping_V1.xlsx",
+            "source_ref": "D:\\AIlearning\\customer-account-service\\docs\\Customer_Account_Service_Mapping_V1.xlsx"
+          },
+          {
+            "document_id": 14,
+            "title": "Customer_Account_Service_Mapping_V3.xlsx",
+            "source_ref": "D:\\AIlearning\\customer-account-service\\docs\\Customer_Account_Service_Mapping_V3.xlsx"
+          },
+          {
+            "document_id": 7,
+            "title": "Customer_Account_Service_Mapping.xlsx",
+            "source_ref": "D:\\AIlearning\\customer-account-service\\docs\\Customer_Account_Service_Mapping.xlsx"
+          },
+          {
+            "document_id": 8,
+            "title": "Customer_Account_Service_Mapping_V1.xlsx",
+            "source_ref": "D:\\AIlearning\\customer-account-service\\docs\\Customer_Account_Service_Mapping_V1.xlsx"
+          },
+          {
+            "document_id": 15,
+            "title": "Customer_Account_Service_Mapping_V2.xlsx",
+            "source_ref": "D:\\AIlearning\\customer-account-service\\docs\\Customer_Account_Service_Mapping_V2.xlsx"
+          },
+          {
+            "document_id": 16,
+            "title": "Customer_Account_Service_Mapping_V4.xlsx",
+            "source_ref": "D:\\AIlearning\\customer-account-service\\docs\\Customer_Account_Service_Mapping_V4.xlsx"
+          }
+        ],
+        "scenarios": [],
+        "code_impact": {
+          "status": "NOT_CHECKED",
+          "candidates": [],
+          "verified_associations": [],
+          "note": "Live Java source not checked."
+        },
+        "java_evidence": {
+          "status": "SCANNED",
+          "project_path": "D:\\AIlearning\\customer-account-service",
+          "attributes": [
+            "countryCode"
+          ],
+          "files_scanned": 14,
+          "methods": [
+            {
+              "file": "src/main/java/com/codeintelligence/customeraccount/entity/CustomerAccountEntity.java",
+              "method": "getCountryCode",
+              "line": 26,
+              "matched_attributes": [
+                "countryCode"
+              ],
+              "classification": "SOURCE_METHOD_MENTION",
+              "jira_relationship": "INFERRED_POTENTIAL_IMPACT"
+            },
+            {
+              "file": "src/main/java/com/codeintelligence/customeraccount/entity/CustomerAccountEntity.java",
+              "method": "setCountryCode",
+              "line": 27,
+              "matched_attributes": [
+                "countryCode"
+              ],
+              "classification": "SOURCE_METHOD_MENTION",
+              "jira_relationship": "INFERRED_POTENTIAL_IMPACT"
+            },
+            {
+              "file": "src/main/java/com/codeintelligence/customeraccount/mapper/CustomerJpaMapper.java",
+              "method": "toEntity",
+              "line": 9,
+              "matched_attributes": [
+                "countryCode"
+              ],
+              "classification": "SOURCE_METHOD_MENTION",
+              "jira_relationship": "INFERRED_POTENTIAL_IMPACT"
+            },
+            {
+              "file": "src/main/java/com/codeintelligence/customeraccount/mapper/CustomerJpaMapper.java",
+              "method": "toModel",
+              "line": 22,
+              "matched_attributes": [
+                "countryCode"
+              ],
+              "classification": "SOURCE_METHOD_MENTION",
+              "jira_relationship": "INFERRED_POTENTIAL_IMPACT"
+            },
+            {
+              "file": "src/main/java/com/codeintelligence/customeraccount/mapper/CustomerXmlMapper.java",
+              "method": "toModel",
+              "line": 11,
+              "matched_attributes": [
+                "countryCode"
+              ],
+              "classification": "SOURCE_METHOD_MENTION",
+              "jira_relationship": "INFERRED_POTENTIAL_IMPACT"
+            },
+            {
+              "file": "src/main/java/com/codeintelligence/customeraccount/model/Customer.java",
+              "method": "getCountryCode",
+              "line": 19,
+              "matched_attributes": [
+                "countryCode"
+              ],
+              "classification": "SOURCE_METHOD_MENTION",
+              "jira_relationship": "INFERRED_POTENTIAL_IMPACT"
+            },
+            {
+              "file": "src/main/java/com/codeintelligence/customeraccount/model/Customer.java",
+              "method": "setCountryCode",
+              "line": 20,
+              "matched_attributes": [
+                "countryCode"
+              ],
+              "classification": "SOURCE_METHOD_MENTION",
+              "jira_relationship": "INFERRED_POTENTIAL_IMPACT"
+            },
+            {
+              "file": "src/main/java/com/codeintelligence/customeraccount/service/CustomerService.java",
+              "method": "validate",
+              "line": 120,
+              "matched_attributes": [
+                "countryCode"
+              ],
+              "classification": "SOURCE_METHOD_MENTION",
+              "jira_relationship": "INFERRED_POTENTIAL_IMPACT"
+            },
+            {
+              "file": "src/main/java/com/codeintelligence/customeraccount/xml/CustomerXmlRequest.java",
+              "method": "getCountryCode",
+              "line": 23,
+              "matched_attributes": [
+                "countryCode"
+              ],
+              "classification": "SOURCE_METHOD_MENTION",
+              "jira_relationship": "INFERRED_POTENTIAL_IMPACT"
+            },
+            {
+              "file": "src/main/java/com/codeintelligence/customeraccount/xml/CustomerXmlRequest.java",
+              "method": "setCountryCode",
+              "line": 24,
+              "matched_attributes": [
+                "countryCode"
+              ],
+              "classification": "SOURCE_METHOD_MENTION",
+              "jira_relationship": "INFERRED_POTENTIAL_IMPACT"
+            },
+            {
+              "file": "src/test/java/com/codeintelligence/customeraccount/service/CustomerServiceCas2Test.java",
+              "method": "request",
+              "line": 27,
+              "matched_attributes": [
+                "countryCode"
+              ],
+              "classification": "SOURCE_METHOD_MENTION",
+              "jira_relationship": "INFERRED_POTENTIAL_IMPACT"
+            },
+            {
+              "file": "src/test/java/com/codeintelligence/customeraccount/service/CustomerServiceCas2Test.java",
+              "method": "createAcceptsTwoLettersAndNormalizesLowercase",
+              "line": 44,
+              "matched_attributes": [
+                "countryCode"
+              ],
+              "classification": "SOURCE_METHOD_MENTION",
+              "jira_relationship": "INFERRED_POTENTIAL_IMPACT"
+            },
+            {
+              "file": "src/test/java/com/codeintelligence/customeraccount/service/CustomerServiceCas2Test.java",
+              "method": "createRejectsOneAndThreeLetterCodes",
+              "line": 54,
+              "matched_attributes": [
+                "countryCode"
+              ],
+              "classification": "SOURCE_METHOD_MENTION",
+              "jira_relationship": "INFERRED_POTENTIAL_IMPACT"
+            },
+            {
+              "file": "src/test/java/com/codeintelligence/customeraccount/service/CustomerServiceCas2Test.java",
+              "method": "replaceAcceptsLowercaseAndStoresUppercase",
+              "line": 72,
+              "matched_attributes": [
+                "countryCode"
+              ],
+              "classification": "SOURCE_METHOD_MENTION",
+              "jira_relationship": "INFERRED_POTENTIAL_IMPACT"
+            },
+            {
+              "file": "src/test/java/com/codeintelligence/customeraccount/service/CustomerServiceCas2Test.java",
+              "method": "replaceRejectsThreeLettersWithoutSaving",
+              "line": 83,
+              "matched_attributes": [
+                "countryCode"
+              ],
+              "classification": "SOURCE_METHOD_MENTION",
+              "jira_relationship": "INFERRED_POTENTIAL_IMPACT"
+            },
+            {
+              "file": "src/test/java/com/codeintelligence/customeraccount/service/CustomerServiceCas2Test.java",
+              "method": "accountTypeUpdateRevalidatesExistingCountryCode",
+              "line": 100,
+              "matched_attributes": [
+                "countryCode"
+              ],
+              "classification": "SOURCE_METHOD_MENTION",
+              "jira_relationship": "INFERRED_POTENTIAL_IMPACT"
+            },
+            {
+              "file": "src/test/java/com/codeintelligence/customeraccount/service/CustomerServiceCas3Test.java",
+              "method": "request",
+              "line": 16,
+              "matched_attributes": [
+                "countryCode"
+              ],
+              "classification": "SOURCE_METHOD_MENTION",
+              "jira_relationship": "INFERRED_POTENTIAL_IMPACT"
+            },
+            {
+              "file": "src/test/java/com/codeintelligence/customeraccount/service/CustomerServiceCas4Test.java",
+              "method": "request",
+              "line": 16,
+              "matched_attributes": [
+                "countryCode"
+              ],
+              "classification": "SOURCE_METHOD_MENTION",
+              "jira_relationship": "INFERRED_POTENTIAL_IMPACT"
+            }
+          ],
+          "fields": [
+            {
+              "file": "src/main/java/com/codeintelligence/customeraccount/entity/CustomerAccountEntity.java",
+              "line": 15,
+              "text": "@Column(name = \"COUNTRY_CODE\", nullable = false, length = 3) private String countryCode;",
+              "classification": "SOURCE_FIELD"
+            },
+            {
+              "file": "src/main/java/com/codeintelligence/customeraccount/model/Customer.java",
+              "line": 8,
+              "text": "private String countryCode;",
+              "classification": "SOURCE_FIELD"
+            },
+            {
+              "file": "src/main/java/com/codeintelligence/customeraccount/xml/CustomerXmlRequest.java",
+              "line": 12,
+              "text": "@JacksonXmlProperty(localName = \"CountryCode\") private String countryCode;",
+              "classification": "SOURCE_FIELD"
+            }
+          ],
+          "database_annotations": [
+            {
+              "file": "src/main/java/com/codeintelligence/customeraccount/entity/CustomerAccountEntity.java",
+              "line": 15,
+              "text": "@Column(name = \"COUNTRY_CODE\", nullable = false, length = 3) private String countryCode;",
+              "classification": "SOURCE_ANNOTATION_NOT_DB_SCHEMA_VERIFIED"
+            }
+          ],
+          "limitations": [
+            "Source mentions do not establish JIRA dependency or execution.",
+            "Method bodies are approximated, not AST/CFG data flow."
+          ]
+        },
+        "affected_operations": [
+          {
+            "http_method": "POST",
+            "endpoint": "/api/customers",
+            "controller_method": "create",
+            "controller_file": "src\\main\\java\\com\\codeintelligence\\customeraccount\\controller\\CustomerController.java",
+            "classification": "INFERRED",
+            "reason": "Controller entry point; attribute-to-operation call path not verified",
+            "attribute_candidates": [
+              "countryCode"
+            ]
+          },
+          {
+            "http_method": "GET",
+            "endpoint": "/api/customers/{customerId}",
+            "controller_method": "get",
+            "controller_file": "src\\main\\java\\com\\codeintelligence\\customeraccount\\controller\\CustomerController.java",
+            "classification": "INFERRED",
+            "reason": "Controller entry point; attribute-to-operation call path not verified",
+            "attribute_candidates": [
+              "countryCode"
+            ]
+          },
+          {
+            "http_method": "GET",
+            "endpoint": "/api/customers",
+            "controller_method": "getAll",
+            "controller_file": "src\\main\\java\\com\\codeintelligence\\customeraccount\\controller\\CustomerController.java",
+            "classification": "INFERRED",
+            "reason": "Controller entry point; attribute-to-operation call path not verified",
+            "attribute_candidates": [
+              "countryCode"
+            ]
+          },
+          {
+            "http_method": "PUT",
+            "endpoint": "/api/customers/{customerId}",
+            "controller_method": "replace",
+            "controller_file": "src\\main\\java\\com\\codeintelligence\\customeraccount\\controller\\CustomerController.java",
+            "classification": "INFERRED",
+            "reason": "Controller entry point; attribute-to-operation call path not verified",
+            "attribute_candidates": [
+              "countryCode"
+            ]
+          },
+          {
+            "http_method": "PATCH",
+            "endpoint": "/api/customers/{customerId}/account-type",
+            "controller_method": "updateAccountType",
+            "controller_file": "src\\main\\java\\com\\codeintelligence\\customeraccount\\controller\\CustomerController.java",
+            "classification": "INFERRED",
+            "reason": "Controller entry point; attribute-to-operation call path not verified",
+            "attribute_candidates": [
+              "countryCode"
+            ]
+          },
+          {
+            "http_method": "DELETE",
+            "endpoint": "/api/customers/{customerId}",
+            "controller_method": "delete",
+            "controller_file": "src\\main\\java\\com\\codeintelligence\\customeraccount\\controller\\CustomerController.java",
+            "classification": "INFERRED",
+            "reason": "Controller entry point; attribute-to-operation call path not verified",
+            "attribute_candidates": [
+              "countryCode"
+            ]
+          }
+        ],
+        "operation_evidence": {
+          "potentially_related": [
+            {
+              "http_method": "POST",
+              "endpoint": "/api/customers",
+              "controller_method": "create",
+              "controller_file": "src\\main\\java\\com\\codeintelligence\\customeraccount\\controller\\CustomerController.java",
+              "classification": "INFERRED_SOURCE_BACKED_CALL_PATH",
+              "reason": "Controller-to-attribute method path found using declared receiver types; not a resolved AST/dataflow",
+              "attribute_candidates": [
+                "countryCode"
+              ],
+              "candidate_call_paths": [
+                {
+                  "path": [
+                    {
+                      "class": "CustomerController",
+                      "method": "create",
+                      "file": "src/main/java/com/codeintelligence/customeraccount/controller/CustomerController.java",
+                      "line": 20
+                    },
+                    {
+                      "class": "CustomerService",
+                      "method": "create",
+                      "file": "src/main/java/com/codeintelligence/customeraccount/service/CustomerService.java",
+                      "line": 47
+                    },
+                    {
+                      "class": "CustomerXmlMapper",
+                      "method": "toModel",
+                      "file": "src/main/java/com/codeintelligence/customeraccount/mapper/CustomerXmlMapper.java",
+                      "line": 11
+                    }
+                  ],
+                  "matched_attributes": [
+                    "countryCode"
+                  ],
+                  "classification": "SOURCE_BACKED_CALL_CANDIDATE",
+                  "jira_relationship": "INFERRED",
+                  "resolution": "FIELD_RECEIVER_TYPE_AND_METHOD_NAME_NOT_AST"
+                },
+                {
+                  "path": [
+                    {
+                      "class": "CustomerController",
+                      "method": "create",
+                      "file": "src/main/java/com/codeintelligence/customeraccount/controller/CustomerController.java",
+                      "line": 20
+                    },
+                    {
+                      "class": "CustomerService",
+                      "method": "create",
+                      "file": "src/main/java/com/codeintelligence/customeraccount/service/CustomerService.java",
+                      "line": 47
+                    },
+                    {
+                      "class": "CustomerJpaMapper",
+                      "method": "toModel",
+                      "file": "src/main/java/com/codeintelligence/customeraccount/mapper/CustomerJpaMapper.java",
+                      "line": 21
+                    }
+                  ],
+                  "matched_attributes": [
+                    "countryCode"
+                  ],
+                  "classification": "SOURCE_BACKED_CALL_CANDIDATE",
+                  "jira_relationship": "INFERRED",
+                  "resolution": "FIELD_RECEIVER_TYPE_AND_METHOD_NAME_NOT_AST"
+                },
+                {
+                  "path": [
+                    {
+                      "class": "CustomerController",
+                      "method": "create",
+                      "file": "src/main/java/com/codeintelligence/customeraccount/controller/CustomerController.java",
+                      "line": 20
+                    },
+                    {
+                      "class": "CustomerService",
+                      "method": "create",
+                      "file": "src/main/java/com/codeintelligence/customeraccount/service/CustomerService.java",
+                      "line": 47
+                    },
+                    {
+                      "class": "CustomerJpaMapper",
+                      "method": "toEntity",
+                      "file": "src/main/java/com/codeintelligence/customeraccount/mapper/CustomerJpaMapper.java",
+                      "line": 9
+                    }
+                  ],
+                  "matched_attributes": [
+                    "countryCode"
+                  ],
+                  "classification": "SOURCE_BACKED_CALL_CANDIDATE",
+                  "jira_relationship": "INFERRED",
+                  "resolution": "FIELD_RECEIVER_TYPE_AND_METHOD_NAME_NOT_AST"
+                }
+              ],
+              "candidate_method_links": [
+                {
+                  "file": "src/main/java/com/codeintelligence/customeraccount/mapper/CustomerXmlMapper.java",
+                  "method": "toModel",
+                  "line": 11,
+                  "matched_attributes": [
+                    "countryCode"
+                  ],
+                  "evidence": "SOURCE_BACKED_RECEIVER_CALL_CANDIDATE_NOT_AST"
+                },
+                {
+                  "file": "src/main/java/com/codeintelligence/customeraccount/mapper/CustomerJpaMapper.java",
+                  "method": "toModel",
+                  "line": 21,
+                  "matched_attributes": [
+                    "countryCode"
+                  ],
+                  "evidence": "SOURCE_BACKED_RECEIVER_CALL_CANDIDATE_NOT_AST"
+                },
+                {
+                  "file": "src/main/java/com/codeintelligence/customeraccount/mapper/CustomerJpaMapper.java",
+                  "method": "toEntity",
+                  "line": 9,
+                  "matched_attributes": [
+                    "countryCode"
+                  ],
+                  "evidence": "SOURCE_BACKED_RECEIVER_CALL_CANDIDATE_NOT_AST"
+                }
+              ]
+            },
+            {
+              "http_method": "PUT",
+              "endpoint": "/api/customers/{customerId}",
+              "controller_method": "replace",
+              "controller_file": "src\\main\\java\\com\\codeintelligence\\customeraccount\\controller\\CustomerController.java",
+              "classification": "INFERRED_SOURCE_BACKED_CALL_PATH",
+              "reason": "Controller-to-attribute method path found using declared receiver types; not a resolved AST/dataflow",
+              "attribute_candidates": [
+                "countryCode"
+              ],
+              "candidate_call_paths": [
+                {
+                  "path": [
+                    {
+                      "class": "CustomerController",
+                      "method": "replace",
+                      "file": "src/main/java/com/codeintelligence/customeraccount/controller/CustomerController.java",
+                      "line": 31
+                    },
+                    {
+                      "class": "CustomerService",
+                      "method": "replace",
+                      "file": "src/main/java/com/codeintelligence/customeraccount/service/CustomerService.java",
+                      "line": 76
+                    },
+                    {
+                      "class": "CustomerXmlMapper",
+                      "method": "toModel",
+                      "file": "src/main/java/com/codeintelligence/customeraccount/mapper/CustomerXmlMapper.java",
+                      "line": 11
+                    }
+                  ],
+                  "matched_attributes": [
+                    "countryCode"
+                  ],
+                  "classification": "SOURCE_BACKED_CALL_CANDIDATE",
+                  "jira_relationship": "INFERRED",
+                  "resolution": "FIELD_RECEIVER_TYPE_AND_METHOD_NAME_NOT_AST"
+                },
+                {
+                  "path": [
+                    {
+                      "class": "CustomerController",
+                      "method": "replace",
+                      "file": "src/main/java/com/codeintelligence/customeraccount/controller/CustomerController.java",
+                      "line": 31
+                    },
+                    {
+                      "class": "CustomerService",
+                      "method": "replace",
+                      "file": "src/main/java/com/codeintelligence/customeraccount/service/CustomerService.java",
+                      "line": 76
+                    },
+                    {
+                      "class": "CustomerJpaMapper",
+                      "method": "toModel",
+                      "file": "src/main/java/com/codeintelligence/customeraccount/mapper/CustomerJpaMapper.java",
+                      "line": 21
+                    }
+                  ],
+                  "matched_attributes": [
+                    "countryCode"
+                  ],
+                  "classification": "SOURCE_BACKED_CALL_CANDIDATE",
+                  "jira_relationship": "INFERRED",
+                  "resolution": "FIELD_RECEIVER_TYPE_AND_METHOD_NAME_NOT_AST"
+                },
+                {
+                  "path": [
+                    {
+                      "class": "CustomerController",
+                      "method": "replace",
+                      "file": "src/main/java/com/codeintelligence/customeraccount/controller/CustomerController.java",
+                      "line": 31
+                    },
+                    {
+                      "class": "CustomerService",
+                      "method": "replace",
+                      "file": "src/main/java/com/codeintelligence/customeraccount/service/CustomerService.java",
+                      "line": 76
+                    },
+                    {
+                      "class": "CustomerJpaMapper",
+                      "method": "toEntity",
+                      "file": "src/main/java/com/codeintelligence/customeraccount/mapper/CustomerJpaMapper.java",
+                      "line": 9
+                    }
+                  ],
+                  "matched_attributes": [
+                    "countryCode"
+                  ],
+                  "classification": "SOURCE_BACKED_CALL_CANDIDATE",
+                  "jira_relationship": "INFERRED",
+                  "resolution": "FIELD_RECEIVER_TYPE_AND_METHOD_NAME_NOT_AST"
+                }
+              ],
+              "candidate_method_links": [
+                {
+                  "file": "src/main/java/com/codeintelligence/customeraccount/mapper/CustomerXmlMapper.java",
+                  "method": "toModel",
+                  "line": 11,
+                  "matched_attributes": [
+                    "countryCode"
+                  ],
+                  "evidence": "SOURCE_BACKED_RECEIVER_CALL_CANDIDATE_NOT_AST"
+                },
+                {
+                  "file": "src/main/java/com/codeintelligence/customeraccount/mapper/CustomerJpaMapper.java",
+                  "method": "toModel",
+                  "line": 21,
+                  "matched_attributes": [
+                    "countryCode"
+                  ],
+                  "evidence": "SOURCE_BACKED_RECEIVER_CALL_CANDIDATE_NOT_AST"
+                },
+                {
+                  "file": "src/main/java/com/codeintelligence/customeraccount/mapper/CustomerJpaMapper.java",
+                  "method": "toEntity",
+                  "line": 9,
+                  "matched_attributes": [
+                    "countryCode"
+                  ],
+                  "evidence": "SOURCE_BACKED_RECEIVER_CALL_CANDIDATE_NOT_AST"
+                }
+              ]
+            },
+            {
+              "http_method": "PATCH",
+              "endpoint": "/api/customers/{customerId}/account-type",
+              "controller_method": "updateAccountType",
+              "controller_file": "src\\main\\java\\com\\codeintelligence\\customeraccount\\controller\\CustomerController.java",
+              "classification": "INFERRED_SOURCE_BACKED_CALL_PATH",
+              "reason": "Controller-to-attribute method path found using declared receiver types; not a resolved AST/dataflow",
+              "attribute_candidates": [
+                "countryCode"
+              ],
+              "candidate_call_paths": [
+                {
+                  "path": [
+                    {
+                      "class": "CustomerController",
+                      "method": "updateAccountType",
+                      "file": "src/main/java/com/codeintelligence/customeraccount/controller/CustomerController.java",
+                      "line": 34
+                    },
+                    {
+                      "class": "CustomerService",
+                      "method": "updateAccountType",
+                      "file": "src/main/java/com/codeintelligence/customeraccount/service/CustomerService.java",
+                      "line": 97
+                    },
+                    {
+                      "class": "CustomerJpaMapper",
+                      "method": "toModel",
+                      "file": "src/main/java/com/codeintelligence/customeraccount/mapper/CustomerJpaMapper.java",
+                      "line": 21
+                    }
+                  ],
+                  "matched_attributes": [
+                    "countryCode"
+                  ],
+                  "classification": "SOURCE_BACKED_CALL_CANDIDATE",
+                  "jira_relationship": "INFERRED",
+                  "resolution": "FIELD_RECEIVER_TYPE_AND_METHOD_NAME_NOT_AST"
+                },
+                {
+                  "path": [
+                    {
+                      "class": "CustomerController",
+                      "method": "updateAccountType",
+                      "file": "src/main/java/com/codeintelligence/customeraccount/controller/CustomerController.java",
+                      "line": 34
+                    },
+                    {
+                      "class": "CustomerService",
+                      "method": "updateAccountType",
+                      "file": "src/main/java/com/codeintelligence/customeraccount/service/CustomerService.java",
+                      "line": 97
+                    },
+                    {
+                      "class": "CustomerJpaMapper",
+                      "method": "toEntity",
+                      "file": "src/main/java/com/codeintelligence/customeraccount/mapper/CustomerJpaMapper.java",
+                      "line": 9
+                    }
+                  ],
+                  "matched_attributes": [
+                    "countryCode"
+                  ],
+                  "classification": "SOURCE_BACKED_CALL_CANDIDATE",
+                  "jira_relationship": "INFERRED",
+                  "resolution": "FIELD_RECEIVER_TYPE_AND_METHOD_NAME_NOT_AST"
+                }
+              ],
+              "candidate_method_links": [
+                {
+                  "file": "src/main/java/com/codeintelligence/customeraccount/mapper/CustomerJpaMapper.java",
+                  "method": "toModel",
+                  "line": 21,
+                  "matched_attributes": [
+                    "countryCode"
+                  ],
+                  "evidence": "SOURCE_BACKED_RECEIVER_CALL_CANDIDATE_NOT_AST"
+                },
+                {
+                  "file": "src/main/java/com/codeintelligence/customeraccount/mapper/CustomerJpaMapper.java",
+                  "method": "toEntity",
+                  "line": 9,
+                  "matched_attributes": [
+                    "countryCode"
+                  ],
+                  "evidence": "SOURCE_BACKED_RECEIVER_CALL_CANDIDATE_NOT_AST"
+                }
+              ]
+            }
+          ],
+          "other_discovered": [
+            {
+              "http_method": "GET",
+              "endpoint": "/api/customers/{customerId}",
+              "controller_method": "get",
+              "controller_file": "src\\main\\java\\com\\codeintelligence\\customeraccount\\controller\\CustomerController.java",
+              "classification": "DISCOVERED_ENDPOINT_NO_ATTRIBUTE_PATH",
+              "reason": "Endpoint exists, but no source-backed receiver call path to an attribute method was found",
+              "attribute_candidates": [
+                "countryCode"
+              ],
+              "candidate_call_paths": [],
+              "candidate_method_links": []
+            },
+            {
+              "http_method": "GET",
+              "endpoint": "/api/customers",
+              "controller_method": "getAll",
+              "controller_file": "src\\main\\java\\com\\codeintelligence\\customeraccount\\controller\\CustomerController.java",
+              "classification": "DISCOVERED_ENDPOINT_NO_ATTRIBUTE_PATH",
+              "reason": "Endpoint exists, but no source-backed receiver call path to an attribute method was found",
+              "attribute_candidates": [
+                "countryCode"
+              ],
+              "candidate_call_paths": [],
+              "candidate_method_links": []
+            },
+            {
+              "http_method": "DELETE",
+              "endpoint": "/api/customers/{customerId}",
+              "controller_method": "delete",
+              "controller_file": "src\\main\\java\\com\\codeintelligence\\customeraccount\\controller\\CustomerController.java",
+              "classification": "DISCOVERED_ENDPOINT_NO_ATTRIBUTE_PATH",
+              "reason": "Endpoint exists, but no source-backed receiver call path to an attribute method was found",
+              "attribute_candidates": [
+                "countryCode"
+              ],
+              "candidate_call_paths": [],
+              "candidate_method_links": []
+            }
+          ],
+          "analysis_type": "BOUNDED_RECEIVER_AWARE_SOURCE_CALL_CANDIDATES",
+          "limitations": [
+            "Not Java AST/CFG, type inference, polymorphic dispatch, or field-level dataflow.",
+            "Constructor injection without a field declaration, inherited methods, chained calls, interfaces, local variables, and static calls may be missed.",
+            "A source-backed path is not proof that the proposed JIRA change is implemented.",
+            "No matched path does not establish that an endpoint is unaffected."
+          ],
+          "role_review": {
+            "priority_operations": [
+              {
+                "http_method": "POST",
+                "endpoint": "/api/customers",
+                "controller_method": "create",
+                "controller_file": "src\\main\\java\\com\\codeintelligence\\customeraccount\\controller\\CustomerController.java",
+                "classification": "INFERRED_SOURCE_BACKED_CALL_PATH",
+                "reason": "Controller-to-attribute method path found using declared receiver types; not a resolved AST/dataflow",
+                "attribute_candidates": [
+                  "countryCode"
+                ],
+                "candidate_call_paths": [
+                  {
+                    "path": [
+                      {
+                        "class": "CustomerController",
+                        "method": "create",
+                        "file": "src/main/java/com/codeintelligence/customeraccount/controller/CustomerController.java",
+                        "line": 20
+                      },
+                      {
+                        "class": "CustomerService",
+                        "method": "create",
+                        "file": "src/main/java/com/codeintelligence/customeraccount/service/CustomerService.java",
+                        "line": 47
+                      },
+                      {
+                        "class": "CustomerXmlMapper",
+                        "method": "toModel",
+                        "file": "src/main/java/com/codeintelligence/customeraccount/mapper/CustomerXmlMapper.java",
+                        "line": 11
+                      }
+                    ],
+                    "matched_attributes": [
+                      "countryCode"
+                    ],
+                    "classification": "SOURCE_BACKED_CALL_CANDIDATE",
+                    "jira_relationship": "INFERRED",
+                    "resolution": "FIELD_RECEIVER_TYPE_AND_METHOD_NAME_NOT_AST"
+                  },
+                  {
+                    "path": [
+                      {
+                        "class": "CustomerController",
+                        "method": "create",
+                        "file": "src/main/java/com/codeintelligence/customeraccount/controller/CustomerController.java",
+                        "line": 20
+                      },
+                      {
+                        "class": "CustomerService",
+                        "method": "create",
+                        "file": "src/main/java/com/codeintelligence/customeraccount/service/CustomerService.java",
+                        "line": 47
+                      },
+                      {
+                        "class": "CustomerJpaMapper",
+                        "method": "toModel",
+                        "file": "src/main/java/com/codeintelligence/customeraccount/mapper/CustomerJpaMapper.java",
+                        "line": 21
+                      }
+                    ],
+                    "matched_attributes": [
+                      "countryCode"
+                    ],
+                    "classification": "SOURCE_BACKED_CALL_CANDIDATE",
+                    "jira_relationship": "INFERRED",
+                    "resolution": "FIELD_RECEIVER_TYPE_AND_METHOD_NAME_NOT_AST"
+                  },
+                  {
+                    "path": [
+                      {
+                        "class": "CustomerController",
+                        "method": "create",
+                        "file": "src/main/java/com/codeintelligence/customeraccount/controller/CustomerController.java",
+                        "line": 20
+                      },
+                      {
+                        "class": "CustomerService",
+                        "method": "create",
+                        "file": "src/main/java/com/codeintelligence/customeraccount/service/CustomerService.java",
+                        "line": 47
+                      },
+                      {
+                        "class": "CustomerJpaMapper",
+                        "method": "toEntity",
+                        "file": "src/main/java/com/codeintelligence/customeraccount/mapper/CustomerJpaMapper.java",
+                        "line": 9
+                      }
+                    ],
+                    "matched_attributes": [
+                      "countryCode"
+                    ],
+                    "classification": "SOURCE_BACKED_CALL_CANDIDATE",
+                    "jira_relationship": "INFERRED",
+                    "resolution": "FIELD_RECEIVER_TYPE_AND_METHOD_NAME_NOT_AST"
+                  }
+                ],
+                "candidate_method_links": [
+                  {
+                    "file": "src/main/java/com/codeintelligence/customeraccount/mapper/CustomerXmlMapper.java",
+                    "method": "toModel",
+                    "line": 11,
+                    "matched_attributes": [
+                      "countryCode"
+                    ],
+                    "evidence": "SOURCE_BACKED_RECEIVER_CALL_CANDIDATE_NOT_AST"
+                  },
+                  {
+                    "file": "src/main/java/com/codeintelligence/customeraccount/mapper/CustomerJpaMapper.java",
+                    "method": "toModel",
+                    "line": 21,
+                    "matched_attributes": [
+                      "countryCode"
+                    ],
+                    "evidence": "SOURCE_BACKED_RECEIVER_CALL_CANDIDATE_NOT_AST"
+                  },
+                  {
+                    "file": "src/main/java/com/codeintelligence/customeraccount/mapper/CustomerJpaMapper.java",
+                    "method": "toEntity",
+                    "line": 9,
+                    "matched_attributes": [
+                      "countryCode"
+                    ],
+                    "evidence": "SOURCE_BACKED_RECEIVER_CALL_CANDIDATE_NOT_AST"
+                  }
+                ],
+                "requirement_roles": [
+                  "INPUT",
+                  "PERSISTENCE"
+                ],
+                "change_review_priority": "HIGH",
+                "role_classification": "INFERRED_OPERATION_ROLE_NOT_VERIFIED_CHANGE",
+                "role_reason": "Creation may accept source attributes and persist derived values.",
+                "role_evidence_note": "Source-backed mapper candidate; persistence write not independently verified.",
+                "source_path_found": true
+              },
+              {
+                "http_method": "PUT",
+                "endpoint": "/api/customers/{customerId}",
+                "controller_method": "replace",
+                "controller_file": "src\\main\\java\\com\\codeintelligence\\customeraccount\\controller\\CustomerController.java",
+                "classification": "INFERRED_SOURCE_BACKED_CALL_PATH",
+                "reason": "Controller-to-attribute method path found using declared receiver types; not a resolved AST/dataflow",
+                "attribute_candidates": [
+                  "countryCode"
+                ],
+                "candidate_call_paths": [
+                  {
+                    "path": [
+                      {
+                        "class": "CustomerController",
+                        "method": "replace",
+                        "file": "src/main/java/com/codeintelligence/customeraccount/controller/CustomerController.java",
+                        "line": 31
+                      },
+                      {
+                        "class": "CustomerService",
+                        "method": "replace",
+                        "file": "src/main/java/com/codeintelligence/customeraccount/service/CustomerService.java",
+                        "line": 76
+                      },
+                      {
+                        "class": "CustomerXmlMapper",
+                        "method": "toModel",
+                        "file": "src/main/java/com/codeintelligence/customeraccount/mapper/CustomerXmlMapper.java",
+                        "line": 11
+                      }
+                    ],
+                    "matched_attributes": [
+                      "countryCode"
+                    ],
+                    "classification": "SOURCE_BACKED_CALL_CANDIDATE",
+                    "jira_relationship": "INFERRED",
+                    "resolution": "FIELD_RECEIVER_TYPE_AND_METHOD_NAME_NOT_AST"
+                  },
+                  {
+                    "path": [
+                      {
+                        "class": "CustomerController",
+                        "method": "replace",
+                        "file": "src/main/java/com/codeintelligence/customeraccount/controller/CustomerController.java",
+                        "line": 31
+                      },
+                      {
+                        "class": "CustomerService",
+                        "method": "replace",
+                        "file": "src/main/java/com/codeintelligence/customeraccount/service/CustomerService.java",
+                        "line": 76
+                      },
+                      {
+                        "class": "CustomerJpaMapper",
+                        "method": "toModel",
+                        "file": "src/main/java/com/codeintelligence/customeraccount/mapper/CustomerJpaMapper.java",
+                        "line": 21
+                      }
+                    ],
+                    "matched_attributes": [
+                      "countryCode"
+                    ],
+                    "classification": "SOURCE_BACKED_CALL_CANDIDATE",
+                    "jira_relationship": "INFERRED",
+                    "resolution": "FIELD_RECEIVER_TYPE_AND_METHOD_NAME_NOT_AST"
+                  },
+                  {
+                    "path": [
+                      {
+                        "class": "CustomerController",
+                        "method": "replace",
+                        "file": "src/main/java/com/codeintelligence/customeraccount/controller/CustomerController.java",
+                        "line": 31
+                      },
+                      {
+                        "class": "CustomerService",
+                        "method": "replace",
+                        "file": "src/main/java/com/codeintelligence/customeraccount/service/CustomerService.java",
+                        "line": 76
+                      },
+                      {
+                        "class": "CustomerJpaMapper",
+                        "method": "toEntity",
+                        "file": "src/main/java/com/codeintelligence/customeraccount/mapper/CustomerJpaMapper.java",
+                        "line": 9
+                      }
+                    ],
+                    "matched_attributes": [
+                      "countryCode"
+                    ],
+                    "classification": "SOURCE_BACKED_CALL_CANDIDATE",
+                    "jira_relationship": "INFERRED",
+                    "resolution": "FIELD_RECEIVER_TYPE_AND_METHOD_NAME_NOT_AST"
+                  }
+                ],
+                "candidate_method_links": [
+                  {
+                    "file": "src/main/java/com/codeintelligence/customeraccount/mapper/CustomerXmlMapper.java",
+                    "method": "toModel",
+                    "line": 11,
+                    "matched_attributes": [
+                      "countryCode"
+                    ],
+                    "evidence": "SOURCE_BACKED_RECEIVER_CALL_CANDIDATE_NOT_AST"
+                  },
+                  {
+                    "file": "src/main/java/com/codeintelligence/customeraccount/mapper/CustomerJpaMapper.java",
+                    "method": "toModel",
+                    "line": 21,
+                    "matched_attributes": [
+                      "countryCode"
+                    ],
+                    "evidence": "SOURCE_BACKED_RECEIVER_CALL_CANDIDATE_NOT_AST"
+                  },
+                  {
+                    "file": "src/main/java/com/codeintelligence/customeraccount/mapper/CustomerJpaMapper.java",
+                    "method": "toEntity",
+                    "line": 9,
+                    "matched_attributes": [
+                      "countryCode"
+                    ],
+                    "evidence": "SOURCE_BACKED_RECEIVER_CALL_CANDIDATE_NOT_AST"
+                  }
+                ],
+                "requirement_roles": [
+                  "INPUT",
+                  "PERSISTENCE"
+                ],
+                "change_review_priority": "HIGH",
+                "role_classification": "INFERRED_OPERATION_ROLE_NOT_VERIFIED_CHANGE",
+                "role_reason": "Replacement may accept and persist the requested attribute.",
+                "role_evidence_note": "Source-backed mapper candidate; persistence write not independently verified.",
+                "source_path_found": true
+              },
+              {
+                "http_method": "GET",
+                "endpoint": "/api/customers/{customerId}",
+                "controller_method": "get",
+                "controller_file": "src\\main\\java\\com\\codeintelligence\\customeraccount\\controller\\CustomerController.java",
+                "classification": "DISCOVERED_ENDPOINT_NO_ATTRIBUTE_PATH",
+                "reason": "Endpoint exists, but no source-backed receiver call path to an attribute method was found",
+                "attribute_candidates": [
+                  "countryCode"
+                ],
+                "candidate_call_paths": [],
+                "candidate_method_links": [],
+                "requirement_roles": [
+                  "OUTPUT"
+                ],
+                "change_review_priority": "MEDIUM",
+                "role_classification": "INFERRED_OPERATION_ROLE_NOT_VERIFIED_CHANGE",
+                "role_reason": "Read endpoints may need to expose the derived attribute; no implementation is established.",
+                "role_evidence_note": "No attribute call path resolved; absence of evidence is not evidence of no impact.",
+                "source_path_found": false
+              },
+              {
+                "http_method": "GET",
+                "endpoint": "/api/customers",
+                "controller_method": "getAll",
+                "controller_file": "src\\main\\java\\com\\codeintelligence\\customeraccount\\controller\\CustomerController.java",
+                "classification": "DISCOVERED_ENDPOINT_NO_ATTRIBUTE_PATH",
+                "reason": "Endpoint exists, but no source-backed receiver call path to an attribute method was found",
+                "attribute_candidates": [
+                  "countryCode"
+                ],
+                "candidate_call_paths": [],
+                "candidate_method_links": [],
+                "requirement_roles": [
+                  "OUTPUT"
+                ],
+                "change_review_priority": "MEDIUM",
+                "role_classification": "INFERRED_OPERATION_ROLE_NOT_VERIFIED_CHANGE",
+                "role_reason": "Read endpoints may need to expose the derived attribute; no implementation is established.",
+                "role_evidence_note": "No attribute call path resolved; absence of evidence is not evidence of no impact.",
+                "source_path_found": false
+              }
+            ],
+            "conditional_or_other_operations": [
+              {
+                "http_method": "PATCH",
+                "endpoint": "/api/customers/{customerId}/account-type",
+                "controller_method": "updateAccountType",
+                "controller_file": "src\\main\\java\\com\\codeintelligence\\customeraccount\\controller\\CustomerController.java",
+                "classification": "INFERRED_SOURCE_BACKED_CALL_PATH",
+                "reason": "Controller-to-attribute method path found using declared receiver types; not a resolved AST/dataflow",
+                "attribute_candidates": [
+                  "countryCode"
+                ],
+                "candidate_call_paths": [
+                  {
+                    "path": [
+                      {
+                        "class": "CustomerController",
+                        "method": "updateAccountType",
+                        "file": "src/main/java/com/codeintelligence/customeraccount/controller/CustomerController.java",
+                        "line": 34
+                      },
+                      {
+                        "class": "CustomerService",
+                        "method": "updateAccountType",
+                        "file": "src/main/java/com/codeintelligence/customeraccount/service/CustomerService.java",
+                        "line": 97
+                      },
+                      {
+                        "class": "CustomerJpaMapper",
+                        "method": "toModel",
+                        "file": "src/main/java/com/codeintelligence/customeraccount/mapper/CustomerJpaMapper.java",
+                        "line": 21
+                      }
+                    ],
+                    "matched_attributes": [
+                      "countryCode"
+                    ],
+                    "classification": "SOURCE_BACKED_CALL_CANDIDATE",
+                    "jira_relationship": "INFERRED",
+                    "resolution": "FIELD_RECEIVER_TYPE_AND_METHOD_NAME_NOT_AST"
+                  },
+                  {
+                    "path": [
+                      {
+                        "class": "CustomerController",
+                        "method": "updateAccountType",
+                        "file": "src/main/java/com/codeintelligence/customeraccount/controller/CustomerController.java",
+                        "line": 34
+                      },
+                      {
+                        "class": "CustomerService",
+                        "method": "updateAccountType",
+                        "file": "src/main/java/com/codeintelligence/customeraccount/service/CustomerService.java",
+                        "line": 97
+                      },
+                      {
+                        "class": "CustomerJpaMapper",
+                        "method": "toEntity",
+                        "file": "src/main/java/com/codeintelligence/customeraccount/mapper/CustomerJpaMapper.java",
+                        "line": 9
+                      }
+                    ],
+                    "matched_attributes": [
+                      "countryCode"
+                    ],
+                    "classification": "SOURCE_BACKED_CALL_CANDIDATE",
+                    "jira_relationship": "INFERRED",
+                    "resolution": "FIELD_RECEIVER_TYPE_AND_METHOD_NAME_NOT_AST"
+                  }
+                ],
+                "candidate_method_links": [
+                  {
+                    "file": "src/main/java/com/codeintelligence/customeraccount/mapper/CustomerJpaMapper.java",
+                    "method": "toModel",
+                    "line": 21,
+                    "matched_attributes": [
+                      "countryCode"
+                    ],
+                    "evidence": "SOURCE_BACKED_RECEIVER_CALL_CANDIDATE_NOT_AST"
+                  },
+                  {
+                    "file": "src/main/java/com/codeintelligence/customeraccount/mapper/CustomerJpaMapper.java",
+                    "method": "toEntity",
+                    "line": 9,
+                    "matched_attributes": [
+                      "countryCode"
+                    ],
+                    "evidence": "SOURCE_BACKED_RECEIVER_CALL_CANDIDATE_NOT_AST"
+                  }
+                ],
+                "requirement_roles": [
+                  "INDIRECT_REGRESSION"
+                ],
+                "change_review_priority": "LOW",
+                "role_classification": "INFERRED_OPERATION_ROLE_NOT_VERIFIED_CHANGE",
+                "role_reason": "PATCH does not explicitly target the requested attribute; review shared behavior for possible indirect regression.",
+                "role_evidence_note": "Source-backed attribute-method candidate; requirement change remains inferred.",
+                "source_path_found": true
+              },
+              {
+                "http_method": "DELETE",
+                "endpoint": "/api/customers/{customerId}",
+                "controller_method": "delete",
+                "controller_file": "src\\main\\java\\com\\codeintelligence\\customeraccount\\controller\\CustomerController.java",
+                "classification": "DISCOVERED_ENDPOINT_NO_ATTRIBUTE_PATH",
+                "reason": "Endpoint exists, but no source-backed receiver call path to an attribute method was found",
+                "attribute_candidates": [
+                  "countryCode"
+                ],
+                "candidate_call_paths": [],
+                "candidate_method_links": [],
+                "requirement_roles": [
+                  "LIFECYCLE_REGRESSION"
+                ],
+                "change_review_priority": "LOW",
+                "role_classification": "INFERRED_OPERATION_ROLE_NOT_VERIFIED_CHANGE",
+                "role_reason": "Deletion is not a direct derived-field implementation path.",
+                "role_evidence_note": "No attribute call path resolved; absence of evidence is not evidence of no impact.",
+                "source_path_found": false
+              }
+            ],
+            "role_counts": {
+              "INPUT": 2,
+              "PERSISTENCE": 2,
+              "INDIRECT_REGRESSION": 1,
+              "OUTPUT": 2,
+              "LIFECYCLE_REGRESSION": 1
+            },
+            "classification": "REQUIREMENT_ROLE_INFERENCE",
+            "note": "Priority reflects review relevance, not proof of an implementation dependency."
+          },
+          "mapping_source_gaps": []
+        },
+        "git_commits": [],
+        "verified_code_changes": [],
+        "test_cases": [
+          {
+            "test_id": "CAS2-TC001",
+            "scenario": "Accept valid uppercase ISO alpha-2",
+            "input": "IN",
+            "expected": "Accepted",
+            "jira": "CAS-2",
+            "attribute": "countryCode",
+            "operation": "POST /api/customers",
+            "execution_status": "NOT_VERIFIED",
+            "sheet": "CAS-2 Test Cases",
+            "row": 2,
+            "source_filename": "CAS-2_Test_Suite_With_Results.xlsx",
+            "source_ref": "D:\\AIlearning\\customer-account-service\\test-suites\\CAS-2\\CAS-2_Test_Suite_With_Results.xlsx",
+            "source_kind": "FOLDER",
+            "source_jira": null,
+            "source_id": null,
+            "document_id": 23,
+            "execution_verified": false,
+            "classification": "IMPORTED_TEST_PLAN"
+          },
+          {
+            "test_id": "CAS2-TC002",
+            "scenario": "Normalize lowercase alpha-2",
+            "input": "in",
+            "expected": "Accepted and normalized",
+            "jira": "CAS-2",
+            "attribute": "countryCode",
+            "operation": "POST /api/customers",
+            "execution_status": "NOT_VERIFIED",
+            "sheet": "CAS-2 Test Cases",
+            "row": 3,
+            "source_filename": "CAS-2_Test_Suite_With_Results.xlsx",
+            "source_ref": "D:\\AIlearning\\customer-account-service\\test-suites\\CAS-2\\CAS-2_Test_Suite_With_Results.xlsx",
+            "source_kind": "FOLDER",
+            "source_jira": null,
+            "source_id": null,
+            "document_id": 23,
+            "execution_verified": false,
+            "classification": "IMPORTED_TEST_PLAN"
+          },
+          {
+            "test_id": "CAS2-TC003",
+            "scenario": "Reject three letters",
+            "input": "IND",
+            "expected": "Rejected",
+            "jira": "CAS-2",
+            "attribute": "countryCode",
+            "operation": "POST /api/customers",
+            "execution_status": "NOT_VERIFIED",
+            "sheet": "CAS-2 Test Cases",
+            "row": 4,
+            "source_filename": "CAS-2_Test_Suite_With_Results.xlsx",
+            "source_ref": "D:\\AIlearning\\customer-account-service\\test-suites\\CAS-2\\CAS-2_Test_Suite_With_Results.xlsx",
+            "source_kind": "FOLDER",
+            "source_jira": null,
+            "source_id": null,
+            "document_id": 23,
+            "execution_verified": false,
+            "classification": "IMPORTED_TEST_PLAN"
+          },
+          {
+            "test_id": "CAS2-TC004",
+            "scenario": "Reject one letter",
+            "input": "I",
+            "expected": "Rejected",
+            "jira": "CAS-2",
+            "attribute": "countryCode",
+            "operation": "POST /api/customers",
+            "execution_status": "NOT_VERIFIED",
+            "sheet": "CAS-2 Test Cases",
+            "row": 5,
+            "source_filename": "CAS-2_Test_Suite_With_Results.xlsx",
+            "source_ref": "D:\\AIlearning\\customer-account-service\\test-suites\\CAS-2\\CAS-2_Test_Suite_With_Results.xlsx",
+            "source_kind": "FOLDER",
+            "source_jira": null,
+            "source_id": null,
+            "document_id": 23,
+            "execution_verified": false,
+            "classification": "IMPORTED_TEST_PLAN"
+          },
+          {
+            "test_id": "CAS2-TC005",
+            "scenario": "Reject digits",
+            "input": "I1",
+            "expected": "Rejected",
+            "jira": "CAS-2",
+            "attribute": "countryCode",
+            "operation": "POST /api/customers",
+            "execution_status": "NOT_VERIFIED",
+            "sheet": "CAS-2 Test Cases",
+            "row": 6,
+            "source_filename": "CAS-2_Test_Suite_With_Results.xlsx",
+            "source_ref": "D:\\AIlearning\\customer-account-service\\test-suites\\CAS-2\\CAS-2_Test_Suite_With_Results.xlsx",
+            "source_kind": "FOLDER",
+            "source_jira": null,
+            "source_id": null,
+            "document_id": 23,
+            "execution_verified": false,
+            "classification": "IMPORTED_TEST_PLAN"
+          },
+          {
+            "test_id": "CAS2-TC006",
+            "scenario": "Reject blank value",
+            "input": "",
+            "expected": "Rejected if required by current contract",
+            "jira": "CAS-2",
+            "attribute": "countryCode",
+            "operation": "POST /api/customers",
+            "execution_status": "NOT_VERIFIED",
+            "sheet": "CAS-2 Test Cases",
+            "row": 7,
+            "source_filename": "CAS-2_Test_Suite_With_Results.xlsx",
+            "source_ref": "D:\\AIlearning\\customer-account-service\\test-suites\\CAS-2\\CAS-2_Test_Suite_With_Results.xlsx",
+            "source_kind": "FOLDER",
+            "source_jira": null,
+            "source_id": null,
+            "document_id": 23,
+            "execution_verified": false,
+            "classification": "IMPORTED_TEST_PLAN"
+          },
+          {
+            "test_id": "CAS2-TC007",
+            "scenario": "Accept valid replacement",
+            "input": "US",
+            "expected": "Accepted",
+            "jira": "CAS-2",
+            "attribute": "countryCode",
+            "operation": "PUT /api/customers/{customerId}",
+            "execution_status": "NOT_VERIFIED",
+            "sheet": "CAS-2 Test Cases",
+            "row": 8,
+            "source_filename": "CAS-2_Test_Suite_With_Results.xlsx",
+            "source_ref": "D:\\AIlearning\\customer-account-service\\test-suites\\CAS-2\\CAS-2_Test_Suite_With_Results.xlsx",
+            "source_kind": "FOLDER",
+            "source_jira": null,
+            "source_id": null,
+            "document_id": 23,
+            "execution_verified": false,
+            "classification": "IMPORTED_TEST_PLAN"
+          },
+          {
+            "test_id": "CAS2-TC008",
+            "scenario": "Normalize lowercase replacement",
+            "input": "us",
+            "expected": "Accepted and normalized",
+            "jira": "CAS-2",
+            "attribute": "countryCode",
+            "operation": "PUT /api/customers/{customerId}",
+            "execution_status": "NOT_VERIFIED",
+            "sheet": "CAS-2 Test Cases",
+            "row": 9,
+            "source_filename": "CAS-2_Test_Suite_With_Results.xlsx",
+            "source_ref": "D:\\AIlearning\\customer-account-service\\test-suites\\CAS-2\\CAS-2_Test_Suite_With_Results.xlsx",
+            "source_kind": "FOLDER",
+            "source_jira": null,
+            "source_id": null,
+            "document_id": 23,
+            "execution_verified": false,
+            "classification": "IMPORTED_TEST_PLAN"
+          },
+          {
+            "test_id": "CAS2-TC009",
+            "scenario": "Reject three-letter replacement",
+            "input": "USA",
+            "expected": "Rejected",
+            "jira": "CAS-2",
+            "attribute": "countryCode",
+            "operation": "PUT /api/customers/{customerId}",
+            "execution_status": "NOT_VERIFIED",
+            "sheet": "CAS-2 Test Cases",
+            "row": 10,
+            "source_filename": "CAS-2_Test_Suite_With_Results.xlsx",
+            "source_ref": "D:\\AIlearning\\customer-account-service\\test-suites\\CAS-2\\CAS-2_Test_Suite_With_Results.xlsx",
+            "source_kind": "FOLDER",
+            "source_jira": null,
+            "source_id": null,
+            "document_id": 23,
+            "execution_verified": false,
+            "classification": "IMPORTED_TEST_PLAN"
+          },
+          {
+            "test_id": "CAS2-TC010",
+            "scenario": "Reject special characters",
+            "input": "U$",
+            "expected": "Rejected",
+            "jira": "CAS-2",
+            "attribute": "countryCode",
+            "operation": "POST /api/customers",
+            "execution_status": "NOT_VERIFIED",
+            "sheet": "CAS-2 Test Cases",
+            "row": 11,
+            "source_filename": "CAS-2_Test_Suite_With_Results.xlsx",
+            "source_ref": "D:\\AIlearning\\customer-account-service\\test-suites\\CAS-2\\CAS-2_Test_Suite_With_Results.xlsx",
+            "source_kind": "FOLDER",
+            "source_jira": null,
+            "source_id": null,
+            "document_id": 23,
+            "execution_verified": false,
+            "classification": "IMPORTED_TEST_PLAN"
+          },
+          {
+            "test_id": "CAS2-TC001",
+            "scenario": "Accept valid uppercase ISO alpha-2",
+            "input": "IN",
+            "expected": "Accepted",
+            "jira": "CAS-2",
+            "attribute": "countryCode",
+            "operation": "POST /api/customers",
+            "execution_status": "NOT_VERIFIED",
+            "sheet": "CAS-2 Test Cases",
+            "row": 2,
+            "source_filename": "CAS-2_Test_Suite.xlsx",
+            "source_ref": "jira:CAS-2:attachment:10000",
+            "source_kind": "JIRA",
+            "source_jira": "CAS-2",
+            "source_id": null,
+            "document_id": 24,
+            "execution_verified": false,
+            "classification": "IMPORTED_TEST_PLAN"
+          },
+          {
+            "test_id": "CAS2-TC002",
+            "scenario": "Normalize lowercase alpha-2",
+            "input": "in",
+            "expected": "Accepted and normalized",
+            "jira": "CAS-2",
+            "attribute": "countryCode",
+            "operation": "POST /api/customers",
+            "execution_status": "NOT_VERIFIED",
+            "sheet": "CAS-2 Test Cases",
+            "row": 3,
+            "source_filename": "CAS-2_Test_Suite.xlsx",
+            "source_ref": "jira:CAS-2:attachment:10000",
+            "source_kind": "JIRA",
+            "source_jira": "CAS-2",
+            "source_id": null,
+            "document_id": 24,
+            "execution_verified": false,
+            "classification": "IMPORTED_TEST_PLAN"
+          },
+          {
+            "test_id": "CAS2-TC003",
+            "scenario": "Reject three letters",
+            "input": "IND",
+            "expected": "Rejected",
+            "jira": "CAS-2",
+            "attribute": "countryCode",
+            "operation": "POST /api/customers",
+            "execution_status": "NOT_VERIFIED",
+            "sheet": "CAS-2 Test Cases",
+            "row": 4,
+            "source_filename": "CAS-2_Test_Suite.xlsx",
+            "source_ref": "jira:CAS-2:attachment:10000",
+            "source_kind": "JIRA",
+            "source_jira": "CAS-2",
+            "source_id": null,
+            "document_id": 24,
+            "execution_verified": false,
+            "classification": "IMPORTED_TEST_PLAN"
+          },
+          {
+            "test_id": "CAS2-TC004",
+            "scenario": "Reject one letter",
+            "input": "I",
+            "expected": "Rejected",
+            "jira": "CAS-2",
+            "attribute": "countryCode",
+            "operation": "POST /api/customers",
+            "execution_status": "NOT_VERIFIED",
+            "sheet": "CAS-2 Test Cases",
+            "row": 5,
+            "source_filename": "CAS-2_Test_Suite.xlsx",
+            "source_ref": "jira:CAS-2:attachment:10000",
+            "source_kind": "JIRA",
+            "source_jira": "CAS-2",
+            "source_id": null,
+            "document_id": 24,
+            "execution_verified": false,
+            "classification": "IMPORTED_TEST_PLAN"
+          },
+          {
+            "test_id": "CAS2-TC005",
+            "scenario": "Reject digits",
+            "input": "I1",
+            "expected": "Rejected",
+            "jira": "CAS-2",
+            "attribute": "countryCode",
+            "operation": "POST /api/customers",
+            "execution_status": "NOT_VERIFIED",
+            "sheet": "CAS-2 Test Cases",
+            "row": 6,
+            "source_filename": "CAS-2_Test_Suite.xlsx",
+            "source_ref": "jira:CAS-2:attachment:10000",
+            "source_kind": "JIRA",
+            "source_jira": "CAS-2",
+            "source_id": null,
+            "document_id": 24,
+            "execution_verified": false,
+            "classification": "IMPORTED_TEST_PLAN"
+          },
+          {
+            "test_id": "CAS2-TC006",
+            "scenario": "Reject blank value",
+            "input": "",
+            "expected": "Rejected if required by current contract",
+            "jira": "CAS-2",
+            "attribute": "countryCode",
+            "operation": "POST /api/customers",
+            "execution_status": "NOT_VERIFIED",
+            "sheet": "CAS-2 Test Cases",
+            "row": 7,
+            "source_filename": "CAS-2_Test_Suite.xlsx",
+            "source_ref": "jira:CAS-2:attachment:10000",
+            "source_kind": "JIRA",
+            "source_jira": "CAS-2",
+            "source_id": null,
+            "document_id": 24,
+            "execution_verified": false,
+            "classification": "IMPORTED_TEST_PLAN"
+          },
+          {
+            "test_id": "CAS2-TC007",
+            "scenario": "Accept valid replacement",
+            "input": "US",
+            "expected": "Accepted",
+            "jira": "CAS-2",
+            "attribute": "countryCode",
+            "operation": "PUT /api/customers/{customerId}",
+            "execution_status": "NOT_VERIFIED",
+            "sheet": "CAS-2 Test Cases",
+            "row": 8,
+            "source_filename": "CAS-2_Test_Suite.xlsx",
+            "source_ref": "jira:CAS-2:attachment:10000",
+            "source_kind": "JIRA",
+            "source_jira": "CAS-2",
+            "source_id": null,
+            "document_id": 24,
+            "execution_verified": false,
+            "classification": "IMPORTED_TEST_PLAN"
+          },
+          {
+            "test_id": "CAS2-TC008",
+            "scenario": "Normalize lowercase replacement",
+            "input": "us",
+            "expected": "Accepted and normalized",
+            "jira": "CAS-2",
+            "attribute": "countryCode",
+            "operation": "PUT /api/customers/{customerId}",
+            "execution_status": "NOT_VERIFIED",
+            "sheet": "CAS-2 Test Cases",
+            "row": 9,
+            "source_filename": "CAS-2_Test_Suite.xlsx",
+            "source_ref": "jira:CAS-2:attachment:10000",
+            "source_kind": "JIRA",
+            "source_jira": "CAS-2",
+            "source_id": null,
+            "document_id": 24,
+            "execution_verified": false,
+            "classification": "IMPORTED_TEST_PLAN"
+          },
+          {
+            "test_id": "CAS2-TC009",
+            "scenario": "Reject three-letter replacement",
+            "input": "USA",
+            "expected": "Rejected",
+            "jira": "CAS-2",
+            "attribute": "countryCode",
+            "operation": "PUT /api/customers/{customerId}",
+            "execution_status": "NOT_VERIFIED",
+            "sheet": "CAS-2 Test Cases",
+            "row": 10,
+            "source_filename": "CAS-2_Test_Suite.xlsx",
+            "source_ref": "jira:CAS-2:attachment:10000",
+            "source_kind": "JIRA",
+            "source_jira": "CAS-2",
+            "source_id": null,
+            "document_id": 24,
+            "execution_verified": false,
+            "classification": "IMPORTED_TEST_PLAN"
+          },
+          {
+            "test_id": "CAS2-TC010",
+            "scenario": "Reject special characters",
+            "input": "U$",
+            "expected": "Rejected",
+            "jira": "CAS-2",
+            "attribute": "countryCode",
+            "operation": "POST /api/customers",
+            "execution_status": "NOT_VERIFIED",
+            "sheet": "CAS-2 Test Cases",
+            "row": 11,
+            "source_filename": "CAS-2_Test_Suite.xlsx",
+            "source_ref": "jira:CAS-2:attachment:10000",
+            "source_kind": "JIRA",
+            "source_jira": "CAS-2",
+            "source_id": null,
+            "document_id": 24,
+            "execution_verified": false,
+            "classification": "IMPORTED_TEST_PLAN"
+          }
+        ],
+        "evidence_warnings": [],
+        "mapping_conflicts": [
+          {
+            "type": "REQUIREMENT_MAPPING_RULE_MISMATCH",
+            "attribute": "countryCode",
+            "requirement": "Exactly two letters",
+            "document_rule": "Trim + uppercase; 2-3 letters",
+            "provenance": {
+              "document_id": 10,
+              "document": "Customer_Account_Service_Mapping_V1.xlsx",
+              "sheet": "Customer Mapping",
+              "row": 6,
+              "source_ref": "D:\\AIlearning\\customer-account-service\\docs\\Customer_Account_Service_Mapping_V1.xlsx"
+            },
+            "classification": "DOCUMENTARY_CONFLICT",
+            "note": "Review workbook rule; code behavior not established by this comparison."
+          },
+          {
+            "type": "REQUIREMENT_MAPPING_RULE_MISMATCH",
+            "attribute": "countryCode",
+            "requirement": "Exactly two letters",
+            "document_rule": "Trim + uppercase; 2-3 letters",
+            "provenance": {
+              "document_id": 14,
+              "document": "Customer_Account_Service_Mapping_V3.xlsx",
+              "sheet": "Customer Mapping",
+              "row": 6,
+              "source_ref": "D:\\AIlearning\\customer-account-service\\docs\\Customer_Account_Service_Mapping_V3.xlsx"
+            },
+            "classification": "DOCUMENTARY_CONFLICT",
+            "note": "Review workbook rule; code behavior not established by this comparison."
+          },
+          {
+            "type": "REQUIREMENT_MAPPING_RULE_MISMATCH",
+            "attribute": "countryCode",
+            "requirement": "Exactly two letters",
+            "document_rule": "Trim + uppercase; 2-3 letters",
+            "provenance": {
+              "document_id": 7,
+              "document": "Customer_Account_Service_Mapping.xlsx",
+              "sheet": "Customer Mapping",
+              "row": 6,
+              "source_ref": "D:\\AIlearning\\customer-account-service\\docs\\Customer_Account_Service_Mapping.xlsx"
+            },
+            "classification": "DOCUMENTARY_CONFLICT",
+            "note": "Review workbook rule; code behavior not established by this comparison."
+          },
+          {
+            "type": "REQUIREMENT_MAPPING_RULE_MISMATCH",
+            "attribute": "countryCode",
+            "requirement": "Exactly two letters",
+            "document_rule": "Trim + uppercase; 2-3 letters",
+            "provenance": {
+              "document_id": 8,
+              "document": "Customer_Account_Service_Mapping_V1.xlsx",
+              "sheet": "Customer Mapping",
+              "row": 6,
+              "source_ref": "D:\\AIlearning\\customer-account-service\\docs\\Customer_Account_Service_Mapping_V1.xlsx"
+            },
+            "classification": "DOCUMENTARY_CONFLICT",
+            "note": "Review workbook rule; code behavior not established by this comparison."
+          },
+          {
+            "type": "REQUIREMENT_MAPPING_RULE_MISMATCH",
+            "attribute": "countryCode",
+            "requirement": "Exactly two letters",
+            "document_rule": "Trim + uppercase; 2-3 letters",
+            "provenance": {
+              "document_id": 15,
+              "document": "Customer_Account_Service_Mapping_V2.xlsx",
+              "sheet": "Customer Mapping",
+              "row": 6,
+              "source_ref": "D:\\AIlearning\\customer-account-service\\docs\\Customer_Account_Service_Mapping_V2.xlsx"
+            },
+            "classification": "DOCUMENTARY_CONFLICT",
+            "note": "Review workbook rule; code behavior not established by this comparison."
+          },
+          {
+            "type": "REQUIREMENT_MAPPING_RULE_MISMATCH",
+            "attribute": "countryCode",
+            "requirement": "Exactly two letters",
+            "document_rule": "Trim + uppercase; 2-3 letters",
+            "provenance": {
+              "document_id": 16,
+              "document": "Customer_Account_Service_Mapping_V4.xlsx",
+              "sheet": "Customer Mapping",
+              "row": 6,
+              "source_ref": "D:\\AIlearning\\customer-account-service\\docs\\Customer_Account_Service_Mapping_V4.xlsx"
+            },
+            "classification": "DOCUMENTARY_CONFLICT",
+            "note": "Review workbook rule; code behavior not established by this comparison."
+          }
+        ],
+        "regression_recommendations": [
+          {
+            "scenario": "Accept two-letter uppercase country code",
+            "classification": "REQUIREMENT_DERIVED_NOT_EXECUTED"
+          },
+          {
+            "scenario": "Reject three-letter country code",
+            "classification": "REQUIREMENT_DERIVED_NOT_EXECUTED"
+          },
+          {
+            "scenario": "Reject single-letter country code",
+            "classification": "REQUIREMENT_DERIVED_NOT_EXECUTED"
+          },
+          {
+            "scenario": "Normalize lowercase country code",
+            "classification": "REQUIREMENT_DERIVED_NOT_EXECUTED"
+          },
+          {
+            "scenario": "Regression: customer creation and replacement",
+            "classification": "REQUIREMENT_DERIVED_NOT_EXECUTED"
+          }
+        ],
+        "evidence_boundary": "Historical JIRA matches are requirement mentions, not verified Git/PR links. Mapping rows are imported documentary evidence; scenario matches are text matches, not test execution.",
+        "unavailable": [
+          "Verified Neo4j dependency traversal",
+          "Test execution verification",
+          "Release baseline impact not composed"
+        ]
+      }
+    }
+  }
+}

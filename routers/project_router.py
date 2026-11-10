@@ -1,4 +1,8 @@
 from fastapi import APIRouter, HTTPException, Depends
+from pathlib import Path
+from urllib.parse import urlsplit
+import subprocess
+import re
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -80,6 +84,12 @@ def browse_project_folder():
 @router.post("/register")
 def register_project(request: ProjectPathRequest, db: Session = Depends(get_db)):
     try:
+        # Registering an already-known project must not trigger a second scan.
+        requested = Path(request.project_path).expanduser().resolve()
+        known = service.list_projects().get("projects", [])
+        if any(Path(item.get("path", "")).expanduser().resolve() == requested for item in known):
+            return {"status": "EXISTS", "project": {"name": requested.name, "path": str(requested)},
+                    "already_registered": True, "indexing_skipped": True}
         selected = service.select(request.project_path)
         scan = scanner_service.scan()
         rag = rag_service.index_project()
@@ -102,22 +112,57 @@ def register_project(request: ProjectPathRequest, db: Session = Depends(get_db))
         raise HTTPException(status_code=500, detail=str(exc))
 
 
+class GitImportRequest(BaseModel):
+    repository_url: str
+
+
+@router.post("/import-git")
+def import_git_project(request: GitImportRequest, db: Session = Depends(get_db)):
+    """Clone a public GitHub repository to the backend machine and index it.
+
+    This deliberately restricts the remote host and repository syntax. It does
+    not execute arbitrary git transports or overwrite existing directories.
+    """
+    parsed = urlsplit(request.repository_url.strip())
+    if (parsed.scheme != "https" or parsed.hostname != "github.com"
+            or parsed.username or parsed.password or parsed.port
+            or parsed.query or parsed.fragment):
+        raise HTTPException(400, "Provide a public https://github.com/owner/repository URL")
+    match = re.fullmatch(r"/([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+?)(?:\.git)?/?", parsed.path)
+    if not match or match.group(1) in (".", "..") or match.group(2) in (".", ".."):
+        raise HTTPException(400, "Invalid GitHub repository path")
+    owner, repo = match.groups()
+    base = Path(__file__).resolve().parents[1] / "imported_projects"
+    base.mkdir(parents=True, exist_ok=True)
+    destination = base / f"{owner}__{repo}"
+    if destination.exists():
+        if not (destination / ".git").is_dir():
+            raise HTTPException(409, "Import directory already exists and is not a Git checkout")
+        # Reuse the existing clone; do not silently pull or overwrite changes.
+    else:
+        try:
+            subprocess.run(["git", "clone", "--depth", "1", "--", f"https://github.com/{owner}/{repo}.git", str(destination)],
+                           check=True, timeout=300, capture_output=True, text=True)
+        except subprocess.TimeoutExpired:
+            raise HTTPException(504, "Git clone timed out after 5 minutes")
+        except FileNotFoundError:
+            raise HTTPException(500, "Git executable is not available on the backend machine")
+        except subprocess.CalledProcessError as exc:
+            raise HTTPException(502, "Git clone failed: " + (exc.stderr or "unknown error")[-350:])
+    return register_project(ProjectPathRequest(project_path=str(destination)), db)
+
+
 @router.post("/select")
-def select_project(request: ProjectPathRequest, db: Session = Depends(get_db)):
+def select_project(request: ProjectPathRequest):
+    """Select an existing project without repeating expensive indexing.
+
+    Use /register for initial indexing. An explicit indexing endpoint should
+    handle subsequent source updates.
+    """
     try:
         selected = service.select(request.project_path)
-        scan = scanner_service.scan()
-        rag = rag_service.index_project()
-        scenario_sync = scenario_service.sync_discovered_operations(db)
-        return {
-            "status": "READY",
-            "project_path": selected,
-            "project_name": __import__("pathlib").Path(selected).name,
-            "total_java_files": scan.total_java_files,
-            "total_classes": len(scan.classes),
-            "rag": rag,
-            "scenario_sync": scenario_sync,
-        }
+        return {"status": "SELECTED", "project_path": selected,
+                "project_name": Path(selected).name, "indexing_skipped": True}
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     except Exception as exc:

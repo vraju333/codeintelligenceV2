@@ -63,6 +63,21 @@ def assess(query: str, tool_results: list[dict[str, Any]], project_root: str | N
         for match in payload.get("exact_matches") or []:
             if match.get("evidence") == "CURRENT_JAVA_SOURCE" and match.get("file_path") and match.get("sha256"):
                 live_sources.append({"path": match["file_path"], "sha256": match["sha256"], "source_kind": "LIVE_WORKING_TREE"})
+    # A fingerprint proves a source snapshot, not a call edge. Preserve the
+    # distinction so downstream answer generation cannot promote lexical hits.
+    # Unrelated retrieval (JIRA, RAG, vector search) cannot verify Java call edges.
+    # Only an explicitly call-graph-capable tool may establish such edges.
+    call_graph_tools = {"graph_search", "static_code_analysis", "java_call_graph", "java_ast_call_graph"}
+    source_search_only = bool(payloads) and any(name == "java_source_search" for name, _ in payloads) and not any(
+        name in call_graph_tools for name, _ in payloads
+    )
+    source_matches = []
+    for name, payload in payloads:
+        if name == "java_source_search" and isinstance(payload, dict):
+            for match in payload.get("exact_matches") or []:
+                if isinstance(match, dict) and match.get("file_path") and match.get("line_number"):
+                    source_matches.append({"path": match["file_path"], "line": match["line_number"],
+                                           "source": match.get("source") or ""})
     # The unified traceability tool already verifies the Git snapshot, changed
     # constant, source caller sites, controller annotations and mapping provenance.
     # Do not run a second, attribute-guessing scanner against a possibly different
@@ -89,7 +104,9 @@ def assess(query: str, tool_results: list[dict[str, Any]], project_root: str | N
         "verified_current_change_traceability": unified if verified_unified else None,
         "historical_tools_executed": historical_tools,
         "jira_coverage": {jira: ("CONFIRMED_EXPLICIT_LINK" if found else "NOT_CONFIRMED_FROM_RETURNED_EVIDENCE") for jira, found in confirmed.items()},
-        "live_source_files": live_sources,
+        "live_source_files": list({item["path"]: item for item in live_sources}.values()),
+        "source_search_only": source_search_only,
+        "source_matches": source_matches,
         "rules": {
             "scenario": "Scenario existence or shared call flow is not confirmed Jira test coverage.",
             "source": "Only an exact file read with fingerprint proves a live working-tree source snapshot.",
@@ -135,6 +152,27 @@ def guard_answer(query: str, answer: str, evidence: dict[str, Any]) -> str:
             answer = re.sub(r"(?im)^([^\n]*(?:no|none|not found|no matches)[^\n]*(?:Git history|Git versions?)[^\n]*)$", "", answer)
     # Remove lines that became empty after suppressing unsupported claims.
     answer = re.sub(r"\n{3,}", "\n\n", answer).strip()
+    # For execution-flow questions, lexical source matches cannot verify any
+    # caller/callee edges. Replace ungrounded LLM narratives with an explicit
+    # evidence boundary, while retaining the actual retrieved source locations.
+    flow_query = bool(re.search(r"(?i)\b(?:execution flow|call flow|call paths?|caller relationships?|call graph)\b", query))
+    if flow_query and evidence.get("source_search_only"):
+        matches = evidence.get("source_matches") or []
+        unique = list({(m["path"], m["line"]): m for m in matches}.values())
+        lines = ["### Source retrieval — execution flow not verified", "",
+                 "The returned tools performed lexical Java source searches only. "
+                 "A matching import, test, or source line does not establish a method declaration "
+                 "or a caller-to-callee edge. No verified execution path can be reported from this evidence."]
+        if unique:
+            lines += ["", "**Retrieved source locations (lexical matches, not call edges):**"]
+            for m in unique[:12]:
+                lines.append(f"- `{m['path']}` (line {m['line']})")
+            if len(unique) > 12:
+                lines.append(f"- … and {len(unique) - 12} more source locations")
+        lines += ["", "**Next verification required:** Resolve actual class/method declarations "
+                  "and caller/callee relationships using Java AST or a source-backed graph traversal. "
+                  "Rebuilding an empty vector index may improve discovery, but does not verify call edges."]
+        return "\n".join(lines)
     notes = []
     unified = evidence.get("verified_current_change_traceability")
     impact = evidence.get("verified_java_impact")

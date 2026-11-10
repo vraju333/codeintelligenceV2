@@ -672,6 +672,12 @@ def _ask_knowledge_agent_impl(payload: KnowledgeAgentRequest, db: Session = Depe
         from config import settings
         from services.knowledge.test_suite_service import TestSuiteService
         query = payload.query
+        # Strict source-scope request: do not invoke comprehensive JIRA impact.
+        from services.agent.ask_jira_requirement_service import (
+            jira_requirement_only_request, jira_requirement_only_answer,
+        )
+        if jira_requirement_only_request(query):
+            return jira_requirement_only_answer(db, query, payload.project_path)
         # High-priority explicit intelligence questions must not be consumed by
         # mapping-only, historical-only or single-attribute fallback routes.
         requested_attributes = _requested_attributes(query)
@@ -698,7 +704,15 @@ def _ask_knowledge_agent_impl(payload: KnowledgeAgentRequest, db: Session = Depe
             r"\b(?:impact\s+of\s+(?:changing|modifying|updating)|"
             r"what\s+is\s+the\s+impact\s+of\s+(?:changing|modifying|updating))\s+"
             r"([A-Za-z_][A-Za-z0-9_]*)\b", query, re.I)
-        if unknown_field and not requested_attributes:
+        # A behavior/flow change is not necessarily an attribute modification.
+        # Preserve the strict unknown-attribute guard for genuine field questions,
+        # but allow behavior questions through to existing multi-tool intelligence.
+        behavioral_change = bool(re.search(
+            r"\\b(?:behavio[u]?r|retry|retries|retriable|fault.toleran\\w*|"
+            r"execution flow|step execution|job execution|transaction flow|"
+            r"exception handling|error handling|backoff|skip policy|"
+            r"timeout handling)\\b", query, re.I))
+        if unknown_field and not requested_attributes and not behavioral_change:
             field = unknown_field.group(1)
             return {'status': 'NOT_FOUND', 'source': 'ATTRIBUTE_NOT_INDEXED',
                     'query': query, 'attribute': field, 'project_path': payload.project_path,
@@ -838,7 +852,7 @@ def _ask_knowledge_agent_impl(payload: KnowledgeAgentRequest, db: Session = Depe
         # not merely a requirement mentioning the attribute.
         from services.agent.ask_evidence_service import detect_attribute, is_change_question, attribute_change_history
         attribute = detect_attribute(query)
-        if attribute and not re.search(r"\b[A-Z][A-Z0-9_]+-\d+\b", query, re.I) and is_change_question(query):
+        if attribute and not behavioral_change and not re.search(r"\b[A-Z][A-Z0-9_]+-\d+\b", query, re.I) and is_change_question(query):
             return attribute_change_history(db, query, attribute, include_qa=bool(re.search(r'\b(?:test|qa|coverage|regression)\b', query, re.I)))
         # Cross-domain requests must reach LangGraph; QA is supplementary evidence,
         # not a terminal routing decision. Keep the standalone QA fast path below.
@@ -858,7 +872,7 @@ def _ask_knowledge_agent_impl(payload: KnowledgeAgentRequest, db: Session = Depe
             git_trace = git_service.analyse(jira_match.group(0))
             from services.agent.commit_call_path_service import analyse_commit_paths, format_commit_paths
             commit_paths = analyse_commit_paths(git_service, git_trace)
-            analysis = service.run(db, query)
+            analysis = service.run(db, query, project_path=payload.project_path)
             if not isinstance(analysis, dict):
                 analysis = {'status': 'FOUND', 'answer': str(analysis)}
             project = str(getattr(settings, 'JAVA_PROJECT_PATH', None) or getattr(settings, 'PYTHON_PROJECT_PATH', None) or '')
@@ -904,18 +918,128 @@ def _ask_knowledge_agent_impl(payload: KnowledgeAgentRequest, db: Session = Depe
                 return {'status': 'NOT_FOUND', 'query': query, 'source': 'IMPORTED_QA_TEST_SUITES',
                         'answer': 'No matching imported QA test cases found for the configured project. Verify project scope, parsed case count, and source workbook headers. Mapping documents are not QA test cases.',
                         'test_suites': records, 'execution_verified': False}
-        return service.run(db, payload.query)
+        return service.run(db, payload.query, project_path=payload.project_path)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
 
 
+
+
+def _scenario_baseline_history_answer(db: Session, query: str, project_path: str | None) -> dict | None:
+    """Project-scoped, evidence-only response for scenario baseline/history questions.
+
+    Do not replace a missing captured baseline with a list of all project JIRAs.
+    """
+    if not re.search(r"\b(?:baseline|release)\b", query, re.I):
+        return None
+    if not re.search(r"\b(?:history|versions?|months?|changes?|linked|scenario|capture|captured)\b", query, re.I):
+        return None
+    from config import settings
+    from db_models import Scenario, JiraKnowledge
+    from baseline_models import ScenarioBaseline, ScenarioTestBaseline
+    from services.lineage.mapping_intelligence_service import MappingIntelligenceService
+
+    project = str(project_path or getattr(settings, "JAVA_PROJECT_PATH", "") or
+                  getattr(settings, "PYTHON_PROJECT_PATH", "") or "").strip()
+    if not project:
+        return {"status": "PROJECT_NOT_SELECTED", "source": "SCENARIO_BASELINE_HISTORY",
+                "answer": "Select an indexed project to view scenario baseline history.",
+                "baseline_versions": [], "linked_jiras": []}
+    canonical = MappingIntelligenceService._canonical_project_key
+    project_key = canonical(project)
+    scenarios = [row for row in db.query(Scenario).all()
+                 if canonical(row.project_path or "") == project_key]
+    jiras = {row.jira_id.upper(): row for row in db.query(JiraKnowledge).all()
+             if canonical(row.project_path or "") == project_key and row.jira_id}
+
+    # Recognize an attribute named in a scenario or its indexed requirement;
+    # a generic mention of 'scenario' must not select every scenario.
+    known_terms = ("gpa", "accountType", "countryCode", "primaryEmail")
+    attribute = next((term for term in known_terms if re.search(r"(?<![A-Za-z0-9_])" + re.escape(term) + r"(?![A-Za-z0-9_])", query, re.I)), None)
+    jira_match = re.search(r"\b[A-Z][A-Z0-9_]+-\d+\b", query, re.I)
+    jira_filter = jira_match.group(0).upper() if jira_match else None
+    def matches(scenario):
+        jira_key = str(scenario.jira_id or "").upper()
+        if jira_filter and jira_key != jira_filter:
+            return False
+        if attribute:
+            related = jiras.get(jira_key)
+            searchable = " ".join(str(x or "") for x in (
+                scenario.scenario_code, scenario.scenario_name, scenario.description,
+                getattr(related, "title", ""), getattr(related, "requirement", "")))
+            return re.search(r"(?<![A-Za-z0-9_])" + re.escape(attribute) + r"(?![A-Za-z0-9_])", searchable, re.I) is not None
+        return bool(jira_filter)
+    selected = [row for row in scenarios if matches(row)]
+    if not selected:
+        return {"status": "NO_MATCH", "source": "SCENARIO_BASELINE_HISTORY",
+                "project_path": project, "attribute": attribute, "scenarios": [],
+                "baseline_versions": [], "linked_jiras": [],
+                "answer": f"No matching indexed scenario or captured baseline history found for {attribute or jira_filter or 'the requested scope'} in this project. No project-wide JIRAs were substituted."}
+
+    ids = [row.id for row in selected]
+    captured = db.query(ScenarioBaseline).filter(ScenarioBaseline.scenario_id.in_(ids)).all()
+    test_rows = db.query(ScenarioTestBaseline).filter(ScenarioTestBaseline.scenario_id.in_(ids)).all()
+    by_id = {row.id: row for row in selected}
+    baselines = [{"scenario_id": row.scenario_id,
+                  "scenario_code": by_id[row.scenario_id].scenario_code,
+                  "baseline_version": row.baseline_version,
+                  "release_version": row.release_version,
+                  "release_month": row.baseline_name,
+                  "active": row.is_active,
+                  "captured_at": row.created_at.isoformat() if row.created_at else None}
+                 for row in sorted(captured, key=lambda x: (x.scenario_id, x.baseline_version))]
+    test_baselines = [{"scenario_id": row.scenario_id,
+                       "jira_ids": row.jira_ids or [],
+                       "baseline_id": row.baseline_id,
+                       "code_baseline_version": row.code_baseline_version}
+                      for row in test_rows]
+    linked = sorted({str(key).upper() for row in test_rows for key in (row.jira_ids or [])
+                     if str(key).upper() in jiras})
+    scenario_jiras = sorted({str(row.jira_id).upper() for row in selected
+                             if row.jira_id and str(row.jira_id).upper() in jiras})
+    lines = [f"Scenario baseline history for {attribute or jira_filter} in {project}:"]
+    for row in selected:
+        lines.append(f"- {row.scenario_code} ({row.http_method} {row.endpoint})")
+    if baselines:
+        for item in baselines:
+            lines.append(f"- Captured baseline V{item['baseline_version']}; release/month: {item['release_month'] or 'not recorded'}; release version: {item['release_version'] or 'not recorded'}; active: {item['active']}")
+    else:
+        lines.append("No captured baseline versions or release months were found for these scenarios.")
+    if linked:
+        lines.append("Explicit test-baseline JIRA links: " + ", ".join(linked))
+    else:
+        lines.append("No explicit test-baseline JIRA links found.")
+    if scenario_jiras:
+        lines.append("Scenario JIRA references (not verified baseline links): " + ", ".join(scenario_jiras))
+    lines.append("Baseline-to-baseline changes: not verified by this lookup; do not infer a code diff from captured version numbers.")
+    return {"status": "FOUND" if baselines else "NO_BASELINE_HISTORY",
+            "source": "SCENARIO_BASELINE_HISTORY", "project_path": project,
+            "attribute": attribute, "scenarios": [
+                {"id": row.id, "scenario_code": row.scenario_code, "jira_id": row.jira_id,
+                 "http_method": row.http_method, "endpoint": row.endpoint} for row in selected],
+            "baseline_versions": baselines, "test_baselines": test_baselines,
+            "linked_jiras": linked, "scenario_jira_references": scenario_jiras,
+            "changes_verified": False, "answer": "\n".join(lines)}
+
 @router.post("/ask")
 def ask_knowledge_agent(payload: KnowledgeAgentRequest, db: Session = Depends(get_db)):
     """Keep established evidence retrieval, add a validated presentation contract."""
     from services.agent.ask_presentation_planner import plan_presentation
-    result = _project_inventory_answer(db, payload.query, payload.project_path)
+    from services.agent.ask_workspace_gate import (
+        is_connector_inventory, connector_inventory, foreign_jira_guard,
+    )
+    # Authoritative read-only inventories and workspace ownership checks run
+    # before any LLM/RAG tool selection. This prevents cross-workspace leakage.
+    if is_connector_inventory(payload.query):
+        result = connector_inventory(db, payload.query, payload.project_path)
+    else:
+        result = foreign_jira_guard(db, payload.query, payload.project_path)
+    if result is None:
+        result = _scenario_baseline_history_answer(db, payload.query, payload.project_path)
+    if result is None:
+        result = _project_inventory_answer(db, payload.query, payload.project_path)
     if result is None:
         result = _ask_knowledge_agent_impl(payload, db)
     if not isinstance(result, dict):

@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 
 from config import settings
 from db_models import MappingDefinition, MappingDocument
+from services.lineage.mapping_dependencies import dependencies
 
 
 class MappingIntelligenceService:
@@ -89,6 +90,77 @@ class MappingIntelligenceService:
             return owner.strip() or None, attribute.strip() or None
         return None, value
 
+    @staticmethod
+    def normalize_project_path(value: str | None) -> str:
+        # Windows project paths are data, even when FastAPI runs on Linux.
+        path = str(value or "").strip().replace("/", "\\")
+        while "\\\\" in path:
+            path = path.replace("\\\\", "\\")
+        return path.rstrip("\\").casefold()
+
+    @staticmethod
+    def mapping_identity(filename: str) -> tuple[str, str | None]:
+        """Derive stable family/version from a workbook name, without touching history."""
+        import re
+        stem = Path(str(filename or "").replace("\\", "/")).stem
+        match = re.search(r"(?:^|[_ .-])(V\d+(?:\.\d+)*)$", stem, flags=re.I)
+        if match:
+            return stem[:match.start()].rstrip(" _.-") or stem, match.group(1).upper()
+        return stem, None
+
+    def reconcile_project_records(self, db: Session, project_path: str) -> dict:
+        """Normalize project identity and archive identical imports; retain all evidence."""
+        scope = self.normalize_project_path(project_path)
+        if not scope:
+            raise ValueError("project_path is required")
+        docs = db.query(MappingDocument).all()
+        relevant = [d for d in docs if self.normalize_project_path(d.project_path) == scope]
+        # Preserve the user's preferred Windows spelling rather than lowercasing DB paths.
+        canonical = str(project_path).strip().replace("/", "\\")
+        while "\\\\" in canonical:
+            canonical = canonical.replace("\\\\", "\\")
+        canonical = canonical.rstrip("\\")
+        fixed = 0
+        metadata_fixed = 0
+        for doc in relevant:
+            family, version = self.mapping_identity(doc.filename)
+            # Filename-derived versions are authoritative only when explicitly present.
+            # Unversioned workbooks retain any version assigned intentionally at upload.
+            if version and (doc.mapping_family != family or doc.document_version != version):
+                doc.mapping_family = family
+                doc.document_version = version
+                metadata_fixed += 1
+            elif not version and not str(doc.mapping_family or "").strip():
+                doc.mapping_family = family
+                metadata_fixed += 1
+            if doc.project_path != canonical:
+                doc.project_path = canonical
+                for definition in db.query(MappingDefinition).filter(MappingDefinition.document_id == doc.id).all():
+                    definition.project_path = canonical
+                fixed += 1
+        # Same file and same checksum => identical content; retain newest active.
+        groups = {}
+        for doc in relevant:
+            if doc.status != "ACTIVE":
+                continue
+            source = str(doc.source_ref or doc.filename).replace("/", "\\").casefold()
+            groups.setdefault((source, doc.checksum_sha256), []).append(doc)
+        archived = 0
+        for records in groups.values():
+            records.sort(key=lambda d: (int(d.row_count or 0) > 0, d.id), reverse=True)
+            for duplicate in records[1:]:
+                duplicate.status = "DUPLICATE"
+                archived += 1
+        db.flush()
+        return {"normalized_paths": fixed, "metadata_normalized": metadata_fixed,
+                "duplicate_records_archived": archived}
+
+    def list_project_documents(self, db: Session, project_path: str, include_history: bool = False) -> dict:
+        scope = self.normalize_project_path(project_path)
+        rows = [d for d in db.query(MappingDocument).order_by(MappingDocument.id.desc()).all()
+                if self.normalize_project_path(d.project_path) == scope and (include_history or d.status == "ACTIVE")]
+        return {"documents": [self._document_dict(row) for row in rows], "project_path": project_path}
+
     def import_excel(self, db: Session, *, filename: str, content: bytes, title: str | None = None,
                      document_version: str | None = None, mapping_family: str | None = None, source_ref: str | None = None, project_path: str | None = None) -> dict:
         if not filename.lower().endswith((".xlsx", ".xlsm")):
@@ -113,12 +185,13 @@ class MappingIntelligenceService:
             db.flush()
 
         workbook = load_workbook(BytesIO(content), data_only=True, read_only=True)
+        inferred_family, inferred_version = self.mapping_identity(filename)
         document = MappingDocument(
             project_path=project_path,
             filename=filename,
             title=(title or Path(filename).stem),
-            mapping_family=(mapping_family or title or Path(filename).stem).strip(),
-            document_version=(document_version or None),
+            mapping_family=(mapping_family or inferred_family).strip(),
+            document_version=(document_version or inferred_version or None),
             source_ref=(source_ref or filename),
             checksum_sha256=checksum,
             status="ACTIVE",
@@ -663,6 +736,7 @@ class MappingIntelligenceService:
             raise ValueError("requested mapping family/version was not found")
         before_rows = db.query(MappingDefinition).filter(MappingDefinition.document_id == from_doc.id, MappingDefinition.status == "ACTIVE").all()
         after_rows = db.query(MappingDefinition).filter(MappingDefinition.document_id == to_doc.id, MappingDefinition.status == "ACTIVE").all()
+        dependency_rows = after_rows
         needle = str(attribute or "").strip().lower()
         if needle:
             before_rows = [r for r in before_rows if needle in str(r.target_attribute or "").lower() or needle in str(r.target_expression or "").lower()]
@@ -685,6 +759,13 @@ class MappingIntelligenceService:
             "mapping_family": mapping_family, "from_version": from_version, "to_version": to_version,
             "attribute": attribute, "from_document": self._document_dict(from_doc), "to_document": self._document_dict(to_doc),
             "items": items, "summary": summary,
+            "dependent_attributes": [
+                {**edge, "provenance": self._mapping_dict(
+                    next(r for r in dependency_rows if r.id == edge["mapping_row_id"]), to_doc
+                )["provenance"]}
+                for edge in dependencies(dependency_rows, attribute)
+            ] if attribute else [],
+            "dependency_note": "Mapping-rule references are documentary candidates, not verified Java data flow.",
         }
 
     def change_impact(self, db: Session, mapping_family: str, from_version: str, to_version: str,

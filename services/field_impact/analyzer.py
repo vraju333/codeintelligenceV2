@@ -4,6 +4,7 @@ Conservative static evidence, NOT complete interprocedural points-to analysis.
 """
 from __future__ import annotations
 import ast
+import os
 from pathlib import Path
 from collections import defaultdict
 
@@ -90,15 +91,23 @@ def analyze_python(path: Path, field: str):
     Visitor().visit(tree)
     return out,False
 
-def analyze_project(project_path: str, field: str, max_files: int=1500):
+def analyze_project(project_path: str, field: str, max_files: int | None = None):
+    # A configurable safety ceiling, rather than the previous hard-coded 1,500.
+    # None uses the default; zero disables the ceiling for deliberate large scans.
+    if max_files is None:
+        max_files = int(os.getenv('FIELD_IMPACT_MAX_FILES', '10000'))
+    if max_files < 0:
+        raise ValueError('max_files must be nonnegative')
     root=Path(project_path).expanduser().resolve()
     if not root.is_dir():raise ValueError('Project directory not found')
     if not field.isidentifier() or len(field)>128:raise ValueError('field must be a valid identifier')
     evidence=[];errors=[];scanned=0
     for path in sorted(root.rglob('*')):
         if path.suffix not in ('.java','.py') or any(part in SKIP for part in path.relative_to(root).parts):continue
-        if scanned>=max_files:errors.append('FILE_LIMIT_REACHED');break
-        if path.stat().st_size>1_000_000:continue
+        if max_files and scanned>=max_files:errors.append('FILE_LIMIT_REACHED');break
+        if path.stat().st_size>1_000_000:
+            errors.append(f'FILE_TOO_LARGE:{path.relative_to(root)}')
+            continue
         scanned+=1
         try:
             items,parse_error=(analyze_java(path.relative_to(root) if False else path,field) if path.suffix=='.java' else analyze_python(path,field))

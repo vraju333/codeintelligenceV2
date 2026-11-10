@@ -120,3 +120,42 @@ def verify_source(source_id: int, db: Session = Depends(get_db)):
         return verify(db, source_id)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.get("/sources/{source_id}/mapping-inventory")
+def mapping_inventory(source_id: int, project_path: str, db: Session = Depends(get_db)):
+    """Read-only reconciliation of Excel files and mapping imports for a workspace."""
+    from pathlib import Path
+    from db_models import KnowledgeSyncSource, MappingDocument
+
+    def norm(value):
+        return str(value or "").strip().replace("\\", "/").rstrip("/").casefold()
+
+    source = db.query(KnowledgeSyncSource).filter(KnowledgeSyncSource.id == source_id).first()
+    if source is None or source.source_type != "MAPPING_FOLDER":
+        raise HTTPException(status_code=404, detail="Mapping source not found")
+    if not project_path or norm(project_path) != norm(source.project_path):
+        raise HTTPException(status_code=400, detail="Project does not match registered mapping source")
+    folder = Path(str(source.location or "")).expanduser()
+    if not folder.is_dir():
+        raise HTTPException(status_code=404, detail="Mapping source folder is unavailable")
+    files = sorted((p for p in folder.rglob("*") if p.is_file() and not p.name.startswith("~$")
+                    and p.suffix.lower() in {".xlsx", ".xlsm"}), key=lambda p: str(p).casefold())
+    documents = [doc for doc in db.query(MappingDocument).filter(MappingDocument.status == "ACTIVE").all()
+                 if norm(doc.project_path) == norm(source.project_path)]
+    by_source = {}
+    for doc in documents:
+        by_source.setdefault(norm(doc.source_ref), []).append(doc)
+    entries = []
+    for file in files:
+        full_path = str(file.resolve())
+        matches = by_source.get(norm(full_path), [])
+        entries.append({"filename": file.name, "path": full_path,
+                        "imported_record_count": len(matches),
+                        "document_ids": [doc.id for doc in matches],
+                        "mapping_row_counts": [doc.row_count for doc in matches],
+                        "status": "IMPORTED" if matches else "NO_MATCHING_IMPORT"})
+    return {"source_id": source.id, "project_path": source.project_path,
+            "discovered": len(entries), "files": entries,
+            "imported_records_for_project": len(documents),
+            "files_without_matching_import": sum(x["status"] != "IMPORTED" for x in entries)}

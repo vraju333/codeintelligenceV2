@@ -30,13 +30,36 @@ from services.engineering_assistant.engineering_assistant_service import Enginee
 class KnowledgeToolRegistry:
     """Build the tools exposed to the knowledge agent for one DB request."""
 
-    def __init__(self, db: Session):
+    def __init__(self, db: Session, project_path: str | None = None):
         self.db = db
+        self.project_path = self._validated_project(project_path)
         self.knowledge = KnowledgeIngestionService()
         self.unified = UnifiedKnowledgeSearchService()
         self.extractor = CommonKnowledgeEntityExtractor()
 
+    @staticmethod
+    def _validated_project(requested: str | None) -> str:
+        from config import settings
+        raw = str(requested or getattr(settings, "JAVA_PROJECT_PATH", "") or "").strip()
+        if not raw:
+            raise ValueError("A project must be selected for analysis")
+        # The selected root must be registered and present; never trust an arbitrary LLM path.
+        root = Path(raw).expanduser().resolve()
+        if not root.is_dir():
+            raise ValueError("Selected project directory is not accessible")
+        return str(root)
+
     def tools(self) -> list[StructuredTool]:
+        from config import settings
+        active = str(Path(str(getattr(settings, "JAVA_PROJECT_PATH", "") or "")).expanduser().resolve())
+        if self.project_path.casefold() != active.casefold():
+            # Legacy tools still use mutable global settings. Never expose them to a
+            # request for another project until each has explicit scoped dependencies.
+            safe = {"java_source_search", "enterprise_hybrid_search", "rag_search"}
+            return [tool for tool in self._all_tools() if tool.name in safe]
+        return self._all_tools()
+
+    def _all_tools(self) -> list[StructuredTool]:
         return [
             StructuredTool.from_function(
                 func=self.current_change_traceability,
@@ -604,7 +627,7 @@ class KnowledgeToolRegistry:
         import hashlib
         from config import settings
 
-        root = Path(str(getattr(settings, "JAVA_PROJECT_PATH", "") or "")).expanduser()
+        root = Path(self.project_path).expanduser()
         if not root.is_dir():
             return json.dumps({"status": "PROJECT_NOT_ACCESSIBLE", "project_path": str(root)})
         # An exact symbol request must not depend on vector ranking or index freshness.
@@ -642,6 +665,28 @@ class KnowledgeToolRegistry:
                 else:
                     matches.append({"class_name": class_name, "file_path": str(file),
                                     "source": source[:6000], "sha256": hashlib.sha256(file.read_bytes()).hexdigest(), "evidence": "CURRENT_JAVA_SOURCE", "excerpt_truncated": len(source) > 6000})
+        if not class_name:
+            # General behavioral queries are not exact class names. Search live Java
+            # files for the requested identifier, retaining file/line fingerprints.
+            terms = [x for x in re.findall(r"[A-Za-z][A-Za-z0-9_]*", query)
+                     if x.casefold() in {"retry", "retrytemplate", "retrypolicy", "backoff", "skip", "faulttolerant"}]
+            term = (terms[0] if terms else query.strip())
+            if term and len(term) <= 80:
+                pattern = re.compile(re.escape(term), re.I)
+                for file in root.rglob("*.java"):
+                    if len(matches) >= max(1, min(int(top_k), 20)):
+                        break
+                    if not file.is_file():
+                        continue
+                    source = file.read_text(encoding="utf-8", errors="replace")
+                    hit = pattern.search(source)
+                    if hit:
+                        line = source.count("\n", 0, hit.start()) + 1
+                        lines = source.splitlines()
+                        excerpt = "\n".join(lines[max(0,line-4):line+3])
+                        matches.append({"file_path": str(file), "line_number": line,
+                                        "source": excerpt, "sha256": hashlib.sha256(file.read_bytes()).hexdigest(),
+                                        "evidence": "CURRENT_JAVA_SOURCE", "match_type": "LEXICAL_SOURCE_MATCH"})
         discovery = None
         try:
             discovery = EnterpriseHybridRagService().search(
@@ -650,23 +695,12 @@ class KnowledgeToolRegistry:
         except Exception as exc:
             discovery = {"status": "UNAVAILABLE", "error": str(exc)}
         return json.dumps({"query": query, "project_path": str(root),
-                           "status": "EXACT_SOURCE_FOUND" if matches else "NO_EXACT_SOURCE_MATCH",
+                           "status": "SOURCE_MATCH_FOUND" if matches else "NO_SOURCE_MATCH",
                            "exact_matches": matches, "phase8_pgvector_discovery": discovery,
                            "rule": "Exact source is authoritative; vector matches are discovery only."}, default=str)
 
-    @staticmethod
-    def _active_project_scope() -> str:
-        from config import settings
-        return str(Path(str(getattr(settings, "JAVA_PROJECT_PATH", "") or
-                            getattr(settings, "PYTHON_PROJECT_PATH", "") or
-                            "ACTIVE_PROJECT")).expanduser().resolve())
-
-    @staticmethod
-    def _active_project_scope() -> str:
-        from config import settings
-        return str(Path(str(getattr(settings, "JAVA_PROJECT_PATH", "") or
-                            getattr(settings, "PYTHON_PROJECT_PATH", "") or
-                            "ACTIVE_PROJECT")).expanduser().resolve())
+    def _active_project_scope(self) -> str:
+        return self.project_path
 
     def enterprise_hybrid_search(self, query: str, top_k: int = 10, source_types: list[str] | None = None, project_path: str | None = None) -> str:
         """Phase 8 pgvector + BM25 + metadata retrieval."""
@@ -1187,7 +1221,7 @@ class KnowledgeToolRegistry:
         'customer-account-service' into a nonexistent relative filesystem path.
         """
         from config import settings
-        raw = str(getattr(settings, "JAVA_PROJECT_PATH", "") or "").strip()
+        raw = self.project_path
         if not raw:
             raise ValueError("No active Java project configured")
         # Do not resolve paths against the Python backend working directory.

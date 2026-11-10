@@ -4,6 +4,7 @@ Not a GitHub webhook: local polling requires the backend to run and have repo ac
 """
 from __future__ import annotations
 import logging
+import os
 import re
 import subprocess
 import threading
@@ -43,6 +44,9 @@ def _fields(root:Path,paths:list[str]):
 def sync_once():
     if not _lock.acquire(blocking=False):return {'state':'RUNNING'}
     try:
+        # A bounded scan must never be silently accepted as complete.
+        # The default now covers repositories larger than Spring Batch.
+        max_files=int(os.getenv('FIELD_IMPACT_MAX_FILES', '10000'))
         root=Path(settings.JAVA_PROJECT_PATH or '').expanduser().resolve()
         if not root.is_dir() or not (root/'.git').exists():raise RuntimeError('JAVA_PROJECT_PATH must point to an accessible Git repository')
         revision=_git(root,'rev-parse','HEAD')
@@ -53,8 +57,13 @@ def sync_once():
         _status.update(state='RUNNING',error=None,rag=None,knowledge=None)
         # Each field is independently persisted. Do not mark a revision complete if any fails.
         for field in fields:
-            result=enrich_field_impact(analyze_project(str(root),field))
-            if result.get('warnings'):raise RuntimeError(f'Parser warnings for {field}: {result["warnings"][:3]}')
+            result=enrich_field_impact(analyze_project(str(root),field,max_files=max_files))
+            if result.get('warnings'):
+                raise RuntimeError(
+                    f'Incomplete field analysis for {field} after '
+                    f'{result["files_scanned"]} files: {result["warnings"][:3]}. '
+                    'Increase FIELD_IMPACT_MAX_FILES if the repository is larger.'
+                )
             persist_field_evidence(result,root.name,revision)
         # Reuse existing source RAG indexer; it is project-scoped and fingerprint-aware.
         if settings.FIELD_SYNC_RAG_ENABLED and any(p.endswith(('.java','.py')) for p in paths):

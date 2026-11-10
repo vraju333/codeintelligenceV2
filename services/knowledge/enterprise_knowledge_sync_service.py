@@ -124,11 +124,13 @@ class EnterpriseKnowledgeSyncService:
                 "interval_seconds": settings.KNOWLEDGE_SYNC_INTERVAL_SECONDS,
                 "sources": [self._source_dict(x) for x in rows]}
 
-    def sync_all(self, db: Session, trigger: str = "MANUAL") -> dict[str, Any]:
+    def sync_all(self, db: Session, trigger: str = "MANUAL", project_path: str | None = None) -> dict[str, Any]:
         sources = db.query(KnowledgeSyncSource).order_by(KnowledgeSyncSource.id).all()
         results = []
         changed = False
         for source in sources:
+            if project_path and str(source.project_path or "").replace("\\", "/").rstrip("/").casefold() != str(project_path).replace("\\", "/").rstrip("/").casefold():
+                continue
             if not self._enabled(source):
                 continue
             result = self.sync_source(db, source.id, trigger=trigger, rebuild_indexes=False)
@@ -350,7 +352,7 @@ class EnterpriseKnowledgeSyncService:
 
     def _sync_test_suite_folder(self, db: Session, source: KnowledgeSyncSource) -> dict[str, Any]:
         """Reconcile folder membership without deleting historical QA evidence."""
-        from services.knowledge.test_suite_service import TestSuiteService, SUPPORTED
+        from services.knowledge.test_suite_service import TestSuiteService, SUPPORTED, normalize_project_path
 
         folder = Path(str(source.location or "")).expanduser()
         if not folder.is_dir():
@@ -369,11 +371,11 @@ class EnterpriseKnowledgeSyncService:
                 ref = str(file.resolve())
                 cp = self._checkpoint(db, source.id, ref)
                 digest = hashlib.sha256(data).hexdigest()
-                active = db.query(KnowledgeDocument).filter(
-                    KnowledgeDocument.project_path == source.project_path,
+                active = next((doc for doc in db.query(KnowledgeDocument).filter(
                     KnowledgeDocument.source_ref == ref,
                     KnowledgeDocument.source_type == "TEST",
-                    KnowledgeDocument.status == "ACTIVE").first()
+                    KnowledgeDocument.status == "ACTIVE").all()
+                    if normalize_project_path(doc.project_path) == normalize_project_path(source.project_path)), None)
                 if cp and cp.content_hash == digest and active:
                     cp.status = "ACTIVE"
                     cp.last_seen_at = datetime.utcnow()
@@ -383,7 +385,15 @@ class EnterpriseKnowledgeSyncService:
                     db, filename=file.name, data=data, project_path=source.project_path,
                     source_ref=ref, source_kind="FOLDER", source_id=source.id)
                 if result["status"] == "NO_TEST_CASES":
+                    # A file with no recognized test cases is not an imported test document.
+                    # Record its checksum so it can be reported as skipped, not silently lost.
+                    self._save_checkpoint(db, source.id, ref, str(file.stat().st_mtime_ns), digest, None)
                     counts["skipped"] += 1
+                    continue
+                if result["status"] == "UNCHANGED":
+                    counts["skipped"] += 1
+                    self._save_checkpoint(db, source.id, ref, str(file.stat().st_mtime_ns), digest,
+                                          str(active.id) if active else None)
                     continue
                 counts["rows_imported"] += result.get("cases", 0)
                 counts["updated" if cp else "created"] += 1
@@ -408,11 +418,11 @@ class EnterpriseKnowledgeSyncService:
             missing = [cp for cp in checkpoints if cp.external_id not in seen]
             for cp in missing:
                 # Checkpoints are scoped to the source, not the entire project.
-                docs = db.query(KnowledgeDocument).filter(
-                    KnowledgeDocument.project_path == source.project_path,
+                docs = [doc for doc in db.query(KnowledgeDocument).filter(
                     KnowledgeDocument.source_ref == cp.external_id,
                     KnowledgeDocument.source_type == "TEST",
                     KnowledgeDocument.status == "ACTIVE").all()
+                    if normalize_project_path(doc.project_path) == normalize_project_path(source.project_path)]
                 for doc in docs:
                     meta = json.loads(doc.metadata_json or "{}")
                     # Never deactivate independently imported JIRA evidence.
@@ -441,42 +451,61 @@ class EnterpriseKnowledgeSyncService:
         return family,version
 
     def _sync_mapping_folder(self, db: Session, source: KnowledgeSyncSource) -> dict[str, Any]:
-        folder=Path(str(source.location or "")).expanduser()
-        if not folder.exists() or not folder.is_dir(): raise ValueError(f"Mapping folder does not exist: {folder}")
-        files=[p for p in folder.rglob("*") if p.is_file() and not p.name.startswith("~$") and p.suffix.lower() in {".xlsx",".xlsm"}]
-        created=updated=skipped=failed=0
-        rows_imported = 0
+        """Folder-authoritative incremental reconciliation; never delete mapping evidence."""
+        from db_models import MappingDocument
+        folder = Path(str(source.location or "")).expanduser()
+        if not folder.is_dir():
+            raise ValueError(f"Mapping folder does not exist: {folder}")
+        files = sorted((p for p in folder.rglob("*") if p.is_file() and
+                        not p.name.startswith("~$") and p.suffix.lower() in {".xlsx", ".xlsm"}),
+                       key=lambda p: str(p).casefold())
+        created = updated = skipped = failed = rows_imported = 0
         errors = []
+        scope = self.mapping.normalize_project_path(source.project_path)
+        if not scope:
+            raise ValueError("Mapping source has no project_path")
         for file in files:
             try:
                 if not zipfile.is_zipfile(file):
-                    raise ValueError("Invalid XLSX/XLSM workbook (not a ZIP-based Excel file). Re-export it from Excel or remove it from the mapping folder.")
-                data=file.read_bytes(); digest=hashlib.sha256(data).hexdigest(); external=str(file.resolve()); cp=self._checkpoint(db,source.id,external)
-                if cp and cp.content_hash == digest:
-                    from db_models import MappingDocument
-                    existing = next((doc for doc in db.query(MappingDocument).filter(
-                        MappingDocument.checksum_sha256 == digest,
-                        MappingDocument.status == "ACTIVE",
-                        MappingDocument.row_count > 0,
-                    ).all() if self._normalize_mapping_project(doc.project_path) ==
-                        self._normalize_mapping_project(source.project_path)), None)
-                    if existing:
-                        cp.last_seen_at=datetime.utcnow(); skipped += 1; continue
-                family,version=self._mapping_identity(file)
-                result=self.mapping.import_excel(db,filename=file.name,content=data,title=file.stem,document_version=version,
-                    mapping_family=family,source_ref=external,project_path=source.project_path)
-                self._save_checkpoint(db,source.id,external,str(file.stat().st_mtime_ns),digest,str((result.get("document") or {}).get("id")))
+                    raise ValueError("Not a valid Excel workbook")
+                content = file.read_bytes()
+                digest = hashlib.sha256(content).hexdigest()
+                external = str(file.resolve())
+                cp = self._checkpoint(db, source.id, external)
+                candidates = [d for d in db.query(MappingDocument).filter(
+                    MappingDocument.checksum_sha256 == digest, MappingDocument.status == "ACTIVE").all()
+                    if self.mapping.normalize_project_path(d.project_path) == scope
+                    and str(d.source_ref or "").replace("/", "\\").casefold() == external.replace("/", "\\").casefold()
+                    and d.row_count > 0]
+                if candidates:
+                    selected = max(candidates, key=lambda d: d.id)
+                    self._save_checkpoint(db, source.id, external, str(file.stat().st_mtime_ns), digest, str(selected.id))
+                    skipped += 1
+                    continue
+                family, version = self._mapping_identity(file)
+                result = self.mapping.import_excel(db, filename=file.name, content=content,
+                    title=file.stem, document_version=version, mapping_family=family,
+                    source_ref=external, project_path=source.project_path)
+                imported = result.get("document") or {}
                 rows_imported += int(result.get("rows_imported") or 0)
-                if result.get("status") == "ALREADY_IMPORTED": skipped += 1
-                elif cp: updated += 1
-                else: created += 1
+                self._save_checkpoint(db, source.id, external, str(file.stat().st_mtime_ns),
+                                      digest, str(imported.get("id") or ""))
+                if result.get("status") == "ALREADY_IMPORTED":
+                    skipped += 1
+                elif cp:
+                    updated += 1
+                else:
+                    created += 1
             except Exception as exc:
                 db.rollback()
                 failed += 1
-                errors.append({"file": file.name, "error": str(exc)})
+                errors.append({"file": str(file), "error": str(exc)})
+        # Archive identical imports and normalize paths without deleting history.
+        reconciliation = self.mapping.reconcile_project_records(db, source.project_path)
         db.commit()
-        return {"status":"SUCCESS" if not failed else "PARTIAL","discovered":len(files),"created":created,"updated":updated,"skipped":skipped,"failed":failed,
-                "rows_imported":rows_imported,"errors":errors}
+        return {"status": "SUCCESS" if not failed else "PARTIAL", "discovered": len(files),
+                "created": created, "updated": updated, "skipped": skipped, "failed": failed,
+                "rows_imported": rows_imported, "errors": errors, **reconciliation}
 
     @staticmethod
     def _refresh_indexes(db: Session) -> dict[str, Any]:

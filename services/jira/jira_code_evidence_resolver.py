@@ -11,7 +11,7 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
-from db_models import JiraKnowledge
+from db_models import JiraKnowledge, MappingDefinition
 
 _STOP = {"the", "and", "for", "with", "from", "into", "must", "should", "have", "that", "this", "only", "update", "change", "customer", "service", "java", "code", "field", "value", "values", "attribute", "validation", "validate", "allow", "accept", "new", "use", "using", "data"}
 _JIRA = re.compile(r"^[A-Z][A-Z0-9]+-\d+$")
@@ -135,21 +135,30 @@ def resolve_jira_code_candidates(db, project_path: str, base_ref: str | None = N
             item["evidence_type"] = "GIT_DIFF_ADDED_LINE"
     else:
         evidence = _source_lines(root)
+    # Attribute identifiers are the matching contract. Generic English words
+    # from requirement prose (e.g. "invalid", "exactly", "letters") are not
+    # evidence of a Java implementation relationship.
+    project_attributes = set()
+    for mapping in db.query(MappingDefinition).all():
+        if not getattr(mapping, 'project_path', None):
+            continue
+        if Path(mapping.project_path).expanduser().resolve() == root and mapping.target_attribute:
+            project_attributes.add(mapping.target_attribute)
     candidates = []; verified = []
     for row in scoped:
         verified.extend(_explicit_links(row, root, explicit_links))
         requirement = _terms(_row_text(row))
+        explicit_attributes = {a for a in project_attributes
+                               if _terms(a) and _terms(a).issubset(requirement)}
+        # Support non-mapped camelCase fields explicitly named in the issue.
+        explicit_attributes.update(re.findall(r'\b[a-z][a-zA-Z0-9]*[A-Z][a-zA-Z0-9]*\b', _row_text(row)))
+        accepted = {re.sub(r'[^a-z0-9]', '', a.lower()) for a in explicit_attributes}
         matched = []
         for item in evidence:
-            # Require at least one multi-token identifier (countryCode) matching requirement,
-            # or an exact non-generic field token. Prevent generic 'update' matches.
+            # Match an explicit business attribute, not generic requirement words.
             identifiers = re.findall(r"[A-Za-z_][A-Za-z_0-9]*", item["statement"])
-            matches = []
-            for ident in identifiers:
-                tokens = _terms(ident.replace("_", " "))
-                if len(tokens) >= 2 and tokens.issubset(requirement): matches.append(ident)
-                elif len(tokens) == 1 and tokens.issubset(requirement) and len(next(iter(tokens))) >= 6:
-                    matches.append(ident)
+            matches = [ident for ident in identifiers
+                       if re.sub(r'[^a-z0-9]', '', ident.lower()) in accepted]
             if not matches: continue
             # Deterministic relevance, not statistical probability. Strong identifier match
             # + validation/mapping context; intentionally conservative.

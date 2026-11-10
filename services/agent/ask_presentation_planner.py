@@ -50,13 +50,22 @@ def _model_plan(query: str) -> dict[str, Any] | None:
 def plan_presentation(query: str, evidence: dict[str, Any]) -> dict[str, Any]:
     # A non-authoritative display plan; the frontend must never infer coverage
     # from a section's presence or absence.
+    # complete_impact is a requested DISPLAY SCOPE, never an evidence verdict.
     # Requirement impact is not a release query. Never let the display LLM
     # suppress structured requirement evidence for this deterministic intent.
     if evidence.get("intent") == "JIRA_IMPACT_ANALYSIS" or evidence.get("source") == "JIRA_REQUIREMENT_IMPACT":
         return {"schema_version": SCHEMA_VERSION, "planner": "DETERMINISTIC_REQUIREMENT_IMPACT",
                 "primary_sections": ["JIRA", "CODE", "MAPPINGS", "TESTS", "GIT"],
                 "secondary_sections": ["RELEASES"], "complete_impact": True,
-                "evidence_preserved": True}
+                "evidence_preserved": True, "impact_verified": bool(evidence.get("execution_verified", False))}
+    if evidence.get('intent') == 'KNOWLEDGE_HUB_CONNECTION_INVENTORY':
+        return {'schema_version': SCHEMA_VERSION, 'planner': 'DETERMINISTIC_CONNECTOR_INVENTORY',
+                'primary_sections': [], 'secondary_sections': [], 'complete_impact': False,
+                'evidence_preserved': True, 'impact_verified': False}
+    if evidence.get('source') == 'WORKSPACE_JIRA_OWNERSHIP_GATE':
+        return {'schema_version': SCHEMA_VERSION, 'planner': 'DETERMINISTIC_WORKSPACE_GATE',
+                'primary_sections': [], 'secondary_sections': [], 'complete_impact': False,
+                'evidence_preserved': True, 'impact_verified': False}
     parsed = _model_plan(query)
     if parsed is None:
         return {
@@ -66,6 +75,7 @@ def plan_presentation(query: str, evidence: dict[str, Any]) -> dict[str, Any]:
             "secondary_sections": [],
             "complete_impact": True,
             "evidence_preserved": True,
+            "impact_verified": bool(evidence.get("execution_verified", False)),
         }
     primary = list(ALLOWED) if parsed["complete_impact"] else list(dict.fromkeys(parsed["primary_sections"]))
     if not primary:
@@ -77,4 +87,5 @@ def plan_presentation(query: str, evidence: dict[str, Any]) -> dict[str, Any]:
         "secondary_sections": [section for section in ALLOWED if section not in primary],
         "complete_impact": bool(parsed["complete_impact"]),
         "evidence_preserved": True,
+        "impact_verified": bool(evidence.get("execution_verified", False)),
     }
