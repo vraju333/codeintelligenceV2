@@ -10,7 +10,7 @@ import subprocess
 import tempfile
 
 
-def inspect_java_ast(root: Path, attribute: str, timeout: int = 40) -> dict:
+def inspect_java_ast(root: Path, attribute: str, timeout: int = 40, source_file: Path | None = None) -> dict:
     result = {'status': 'UNAVAILABLE', 'calls': [], 'conditions': [], 'local_transfers': [], 'warnings': []}
     source_root = root / 'src' / 'main' / 'java'
     if not source_root.is_dir():
@@ -26,7 +26,7 @@ def inspect_java_ast(root: Path, attribute: str, timeout: int = 40) -> dict:
             if compile_result.returncode:
                 result['warnings'].append('JDK AST helper compilation failed: ' + compile_result.stderr[-400:])
                 return result
-            execution = subprocess.run(['java', '-cp', tmp, 'JavaAstEvidence', str(source_root), tmp], capture_output=True, text=True, timeout=timeout)
+            execution = subprocess.run(['java', '-cp', tmp, 'JavaAstEvidence', str(source_root), tmp] + ([str(source_file)] if source_file else []), capture_output=True, text=True, timeout=timeout)
             if execution.returncode:
                 result['warnings'].append('JDK AST inspection failed: ' + execution.stderr[-400:])
                 return result

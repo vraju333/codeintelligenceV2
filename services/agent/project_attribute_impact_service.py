@@ -21,15 +21,9 @@ def project_attribute_impact(db, query: str, attribute: str, project_path: str |
         result['answer'] = 'The selected Java project source directory is unavailable. No cross-project fallback was used.'
         return result
 
-    mapping = mapping_documents_answer(db, f'mapping documents for {attribute}')
-    # Mapping search uses the configured active project. If an explicitly selected
-    # different workspace is passed, do not mix its code with global mapping rows.
-    configured = Path(getattr(settings, 'JAVA_PROJECT_PATH', '') or '').resolve()
-    if configured == root:
-        result['mapping_rows'] = mapping.get('mapping_rows') or []
-        result['mapping_documents'] = mapping.get('mapping_documents') or []
-    else:
-        result['evidence_warnings'].append('Mapping evidence omitted: selected project differs from configured mapping project.')
+    mapping = mapping_documents_answer(db, f'mapping documents for {attribute}', project_path=str(root))
+    result['mapping_rows'] = mapping.get('mapping_rows') or []
+    result['mapping_documents'] = mapping.get('mapping_documents') or []
 
     token = re.compile(r'(?<![\w])' + re.escape(attribute) + r'(?![\w])', re.I)
     # Extract lexical Java method declarations only, and only report a method

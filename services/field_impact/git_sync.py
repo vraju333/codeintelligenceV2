@@ -43,6 +43,7 @@ def _fields(root:Path,paths:list[str]):
 
 def sync_once():
     if not _lock.acquire(blocking=False):return {'state':'RUNNING'}
+    revision=None
     try:
         # A bounded scan must never be silently accepted as complete.
         # The default now covers repositories larger than Spring Batch.
@@ -52,6 +53,10 @@ def sync_once():
         revision=_git(root,'rev-parse','HEAD')
         previous=_status.get('revision')
         if previous==revision and _status.get('state')=='SYNCED':return dict(_status)
+        # Do not retry an unchanged revision indefinitely after a deterministic failure.
+        # Restarting the service or a new HEAD revision allows another attempt.
+        if revision==_status.get('failed_revision') and _status.get('state')=='ERROR':
+            return dict(_status)
         paths=_changes(root,previous,revision)
         fields=_fields(root,paths)
         _status.update(state='RUNNING',error=None,rag=None,knowledge=None)
@@ -78,10 +83,10 @@ def sync_once():
                 response=EnterpriseKnowledgeSyncService().sync_all(db,trigger='GIT_REVISION')
                 _status['knowledge']={'status':response.get('status')}
             finally:db.close()
-        _status.update(state='SYNCED',revision=revision,fields=len(fields),changed_files=len(paths),error=None)
+        _status.update(state='SYNCED',revision=revision,failed_revision=None,fields=len(fields),changed_files=len(paths),error=None)
     except Exception as exc:
         log.exception('Field impact Git sync failed')
-        _status.update(state='ERROR',error=str(exc))
+        _status.update(state='ERROR',error=str(exc),failed_revision=revision)
     finally:_lock.release()
     return dict(_status)
 

@@ -341,8 +341,8 @@ class MappingIntelligenceService:
         return {"status": "CHECKED" if files else "NO_WORKBOOKS_FOUND",
                 "project_path": str(root), "files_found": len(files), "imports": results}
 
-    def _active_project_rows(self, db: Session):
-        key = self._canonical_project_key(self._project_path())
+    def _active_project_rows(self, db: Session, project_path: str | None = None):
+        key = self._canonical_project_key(project_path or self._project_path())
         documents = db.query(MappingDocument).filter(MappingDocument.status == "ACTIVE").all()
         docs = {doc.id: doc for doc in documents if self._canonical_project_key(doc.project_path) == key}
         if not docs:
@@ -405,21 +405,26 @@ class MappingIntelligenceService:
         ).order_by(MappingDefinition.sheet_name, MappingDefinition.row_number).all()
         return {"document": self._document_dict(document), "mappings": [self._mapping_dict(row, document) for row in rows]}
 
-    def search(self, db: Session, query: str, limit: int = 50) -> dict:
+    def search(self, db: Session, query: str, limit: int = 50, project_path: str | None = None) -> dict:
         value = str(query or "").strip()
         if not value:
             raise ValueError("query is required")
-        ingestion = self.ensure_active_project_workbooks(db)
+        selected = str(project_path or self._project_path()).strip()
+        # Never scan a different project merely because JAVA_PROJECT_PATH points there.
+        ingestion = (self.ensure_active_project_workbooks(db)
+                     if self._canonical_project_key(selected) == self._canonical_project_key(self._project_path())
+                     else {"status": "SKIPPED_OTHER_PROJECT", "project_path": selected,
+                           "note": "Using previously imported mapping documents for the selected project."})
         needle = value.casefold()
         matches = []
-        for row, doc in self._active_project_rows(db):
+        for row, doc in self._active_project_rows(db, selected):
             searchable = (row.source_path, row.target_attribute, row.target_expression,
                           row.mapping_rule, row.null_rule, row.comments)
             if any(needle in str(field or "").casefold() for field in searchable):
                 matches.append(self._mapping_dict(row, doc))
         matches = matches[:max(1, min(limit, 250))]
         return {"query": value, "matches": matches, "count": len(matches),
-                "project_path": self._project_path(), "workbook_discovery": ingestion}
+                "project_path": selected, "workbook_discovery": ingestion}
 
     def lineage(self, db: Session, attribute: str) -> dict:
         result = self.search(db, attribute, 250)

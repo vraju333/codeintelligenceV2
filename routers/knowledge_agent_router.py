@@ -100,7 +100,7 @@ def historical_jira_answer(db: Session, query: str, jira_keys: tuple[str, ...], 
     }
 
 
-def combined_attribute_impact(db: Session, query: str, attribute: str, jira: str = "") -> dict:
+def combined_attribute_impact(db: Session, query: str, attribute: str, jira: str = "", project_path: str | None = None) -> dict:
     """Aggregate independent evidence for multi-domain ASK; never manufacture links."""
     from config import settings
     from services.agent.ask_mapping_documents_service import mapping_documents_answer
@@ -118,7 +118,7 @@ def combined_attribute_impact(db: Session, query: str, attribute: str, jira: str
             result["evidence_warnings"].append(f"{label} unavailable: {type(exc).__name__}")
             return None
 
-    mapping = collect("Mapping", lambda: mapping_documents_answer(db, f"mapping documents for {attribute}"))
+    mapping = collect("Mapping", lambda: mapping_documents_answer(db, f"mapping documents for {attribute}", project_path=project_path))
     if isinstance(mapping, dict):
         result["mapping_rows"] = mapping.get("mapping_rows") or []
         result["mapping_documents"] = mapping.get("mapping_documents") or []
@@ -824,18 +824,19 @@ def _ask_knowledge_agent_impl(payload: KnowledgeAgentRequest, db: Session = Depe
         if impact_attribute and requested_domains >= 3 and re.search(r"\b(?:impact|complete|full|including|all|traceability)\b", query, re.I):
             jira_key_match = re.search(r"\b[A-Z][A-Z0-9_]+-\d+\b", query, re.I)
             return combined_attribute_impact(db, query, impact_attribute,
-                                             jira=jira_key_match.group(0).upper() if jira_key_match else "")
+                                             jira=jira_key_match.group(0).upper() if jira_key_match else "",
+                                             project_path=payload.project_path)
         # Mapping change impact is cross-source, not a mapping-only lookup.
         from services.agent.ask_mapping_documents_service import extract_attribute, mapping_change_impact_intent
         if mapping_change_impact_intent(query):
             mapping_attribute = extract_attribute(query)
             if mapping_attribute:
-                return combined_attribute_impact(db, query, mapping_attribute)
+                return combined_attribute_impact(db, query, mapping_attribute, project_path=payload.project_path)
         # Mapping-document intent takes precedence over attribute historical-change routing.
         # Never substitute a Git commit when the user requests mapping workbooks.
         from services.agent.ask_mapping_documents_service import mapping_document_intent, mapping_documents_answer
         if mapping_document_intent(query):
-            return mapping_documents_answer(db, query)
+            return mapping_documents_answer(db, query, project_path=payload.project_path)
         # Recency of Jira requirements must be decided by Jira creation timestamps,
         # not by whichever Jira has a verified Git commit.
         from services.agent.latest_attribute_jira_service import is_latest_jira_question, latest_attribute_jira
@@ -1036,6 +1037,42 @@ def ask_knowledge_agent(payload: KnowledgeAgentRequest, db: Session = Depends(ge
         result = connector_inventory(db, payload.query, payload.project_path)
     else:
         result = foreign_jira_guard(db, payload.query, payload.project_path)
+    # Narrow semantic-answer routes precede broad mapping inventories and call graph expansion.
+    if result is None:
+        from services.agent.semantic_response_fix import answer as semantic_response_answer
+        result = semantic_response_answer(db, payload.query, payload.project_path)
+    # Focused Java source traces take precedence over broad LLM/RAG fallback.
+    if result is None:
+        from services.agent.java_source_trace_answer import answer as source_trace_answer
+        from config import settings
+        active_project = payload.project_path or getattr(settings, "JAVA_PROJECT_PATH", None)
+        result = source_trace_answer(payload.query, active_project)
+    # Evidence-sensitive queries require deterministic answers, not generated verification claims.
+    if result is None:
+        from services.agent.ask_accuracy_guard import answer as accuracy_answer
+        result = accuracy_answer(db, payload.query, payload.project_path)
+    # Deterministic Java attribute/conditional analysis runs BEFORE generic search, RAG or LLM.
+    # Attribute-flow questions must win over generic call
+    # exploration and imported mapping-document retrieval.
+    if result is None:
+        from services.agent.java_attribute_flow_service import answer as live_attribute_flow
+        from config import settings
+        active_project = payload.project_path or getattr(settings, "JAVA_PROJECT_PATH", None)
+        result = live_attribute_flow(payload.query, active_project)
+    # Call graph intent must be classified before lexical discovery,
+    # project inventories, mapping retrieval, or the LLM agent.
+    if result is None:
+        from services.agent.phase2_flow_service import answer as live_phase2_flow
+        from config import settings
+        active_project = payload.project_path or getattr(settings, "JAVA_PROJECT_PATH", None)
+        result = live_phase2_flow(payload.query, active_project)
+    # Explicit source-analysis intent wins over mapping-document inventories and
+    # mapping-only agent routes. Preserve workspace/JIRA guards above.
+    if result is None:
+        from services.agent.code_understanding_service import answer as live_code_understanding
+        from config import settings
+        active_project = payload.project_path or getattr(settings, "JAVA_PROJECT_PATH", None)
+        result = live_code_understanding(payload.query, active_project)
     if result is None:
         result = _scenario_baseline_history_answer(db, payload.query, payload.project_path)
     if result is None:

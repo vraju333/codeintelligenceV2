@@ -16,6 +16,14 @@ public class JavaAstEvidence {
     if (!Files.isDirectory(root)) { System.err.println("Missing source directory"); System.exit(2); }
     List<Path> sources;
     try (Stream<Path> s = Files.walk(root)) { sources = s.filter(p -> p.toString().endsWith(".java")).sorted().limit(4000).collect(Collectors.toList()); }
+    // Optional explicit file narrows call-flow analysis to the requested class.
+    if (args.length > 2 && !args[2].isBlank()) {
+      Path selected = Paths.get(args[2]).toAbsolutePath().normalize();
+      if (!selected.startsWith(root) || !Files.isRegularFile(selected) || !selected.toString().endsWith(".java")) {
+        System.err.println("Requested Java source is outside the project source root"); System.exit(2);
+      }
+      sources = List.of(selected);
+    }
     JavaCompiler compiler = ToolProvider.getSystemJavaCompiler();
     if (compiler == null) { System.err.println("JDK compiler unavailable"); System.exit(2); }
     DiagnosticCollector<JavaFileObject> diagnostics = new DiagnosticCollector<>();

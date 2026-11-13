@@ -5,6 +5,7 @@ Conservative static evidence, NOT complete interprocedural points-to analysis.
 from __future__ import annotations
 import ast
 import os
+import re
 from pathlib import Path
 from collections import defaultdict
 
@@ -102,6 +103,14 @@ def analyze_project(project_path: str, field: str, max_files: int | None = None)
     if not root.is_dir():raise ValueError('Project directory not found')
     if not field.isidentifier() or len(field)>128:raise ValueError('field must be a valid identifier')
     evidence=[];errors=[];scanned=0
+    # The Java analyzer only emits evidence for exact identifiers or JavaBean accessors.
+    # Avoid parsing unrelated files: syntax errors there cannot affect this field's evidence.
+    bean = field[0].upper() + field[1:]
+    java_candidates = re.compile(
+        rb'(?<![A-Za-z0-9_$])(?:'
+        + b'|'.join(re.escape(token.encode('utf-8')) for token in (field, 'set'+bean, 'get'+bean, 'is'+bean))
+        + rb')(?![A-Za-z0-9_$])'
+    )
     for path in sorted(root.rglob('*')):
         if path.suffix not in ('.java','.py') or any(part in SKIP for part in path.relative_to(root).parts):continue
         if max_files and scanned>=max_files:errors.append('FILE_LIMIT_REACHED');break
@@ -110,6 +119,8 @@ def analyze_project(project_path: str, field: str, max_files: int | None = None)
             continue
         scanned+=1
         try:
+            if path.suffix == '.java' and not java_candidates.search(path.read_bytes()):
+                continue
             items,parse_error=(analyze_java(path.relative_to(root) if False else path,field) if path.suffix=='.java' else analyze_python(path,field))
             for item in items:item['file']=str(path.relative_to(root)).replace('\\','/')
             evidence.extend(items)

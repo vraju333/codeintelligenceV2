@@ -123,7 +123,7 @@ def mapping_document_inventory(db, query: str, project_path: str | None = None) 
             'workbook_discovery': discovery}
 
 
-def mapping_documents_answer(db, query: str) -> dict:
+def mapping_documents_answer(db, query: str, project_path: str | None = None) -> dict:
     from services.lineage.mapping_intelligence_service import MappingIntelligenceService
     service = MappingIntelligenceService()
     attribute = extract_attribute(query)
@@ -141,7 +141,8 @@ def mapping_documents_answer(db, query: str) -> dict:
     if attribute == 'primaryEmail': variants += ['primary_email', 'primary email']
     rows, seen, discovery = [], set(), {}
     for variant in variants:
-        result = service.search(db, variant, 250)
+        result = (service.search(db, variant, 250, project_path=project_path)
+                  if project_path else service.search(db, variant, 250))
         discovery = result.get('workbook_discovery') or discovery
         for row in result.get('matches') or []:
             provenance = row.get('provenance') or {}
@@ -178,7 +179,7 @@ def mapping_documents_answer(db, query: str) -> dict:
     if discovery.get('status') in ('IMPORT_FAILED','PROJECT_NOT_ACCESSIBLE','NO_WORKBOOKS_FOUND'):
         lines.append('Mapping workbook discovery: ' + str(discovery['status']))
     return {'status':'FOUND' if rows else 'NOT_FOUND', 'source':'MAPPING_DOCUMENT_EVIDENCE',
-            'query':query, 'attribute':attribute, 'answer':'\n'.join(lines),
+            'query':query, 'attribute':attribute, 'project_path': project_path or service._project_path(), 'answer':'\n'.join(lines),
             'mapping_documents':list(documents.values()), 'mapping_rows':rows,
             'mapping_count':len(rows), 'workbook_discovery':discovery,
             'note':'Results are imported mapping evidence, not inferred Git/code relationships.'}

@@ -328,56 +328,19 @@ app.include_router(
 )
 @app.on_event("startup")
 def startup():
+    """Keep API startup independent of repository indexing and Git analysis.
 
-    start_knowledge_sync_scheduler()
-    from services.field_impact.git_sync import start as start_field_git_sync
-    start_field_git_sync()
-
-    #seed_scenarios()
-
-    initialization = {
-        "enabled": settings.AUTO_PROJECT_INITIALIZATION,
-        "status": "SKIPPED",
+    Project scans, RAG indexing and field impact analysis are requested at
+    runtime via their existing API routes, not performed for every boot.
+    """
+    app.state.project_initialization = {
+        "enabled": False,
+        "status": "ON_DEMAND",
         "scan": None,
         "rag": None,
-        "error": None
+        "error": None,
     }
-
-    if settings.AUTO_PROJECT_INITIALIZATION:
-        try:
-            scan_result = scanner_service.scan()
-            initialization["scan"] = {
-                "project_path": scan_result.project_path,
-                "total_java_files": scan_result.total_java_files,
-                "total_classes": len(scan_result.classes)
-            }
-
-            rag_result = rag_service.index_project()
-            initialization["rag"] = rag_result
-
-            # Keep operation-level Scenario Registry in sync on automatic startup.
-            startup_db = SessionLocal()
-            try:
-                initialization["scenario_sync"] = (
-                    ScenarioService().sync_discovered_operations(startup_db)
-                )
-            finally:
-                startup_db.close()
-
-            initialization["status"] = "READY"
-
-            logger.info(
-                "Project initialization completed: %s Java files, %s RAG chunks",
-                scan_result.total_java_files,
-                rag_result.get("chunks")
-            )
-
-        except Exception as exc:
-            initialization["status"] = "ERROR"
-            initialization["error"] = str(exc)
-            logger.exception("Automatic project initialization failed")
-
-    app.state.project_initialization = initialization
+    logger.info("CodeIntelligence API ready; project analysis is on demand.")
 
 
 @app.get("/health")
